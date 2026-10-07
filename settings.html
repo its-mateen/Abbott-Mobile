@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Settings · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="settings" data-title="Settings" data-perm="settings.view">
+  <main x-data="settingsPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Settings</h2>
+        <p class="page-subtitle">Business profile, invoice defaults, repair rules, inventory validation, appearance and data backup. Company settings apply to every branch.</p>
+      </div>
+      <div class="page-actions">
+        <span class="badge badge-amber badge-dot" x-show="anyDirty" x-cloak>Unsaved changes</span>
+        <a href="audit-log.html?prefix=settings" class="btn btn-secondary"><span x-html="ABM.icon('clipboard')"></span>Change history</a>
+      </div>
+    </div>
+
+    <div class="alert alert-info mb-4" x-show="!canEdit" x-cloak><span x-html="ABM.icon('eye')"></span><span><b>View only.</b> Your role can see the settings but not change them.</span></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[15rem_1fr] gap-4 items-start">
+      <!-- Section nav -->
+      <nav class="flex flex-wrap gap-1 lg:flex-col lg:sticky lg:top-24" aria-label="Settings sections">
+        <template x-for="t in tabs" :key="t.key">
+          <button type="button" class="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-left transition-colors lg:w-full" :class="tab === t.key ? 'bg-navy-800 text-white shadow' : 'text-slate-600 hover:bg-white hover:text-slate-900'" @click="setTab(t.key)" :aria-current="tab === t.key ? 'page' : null">
+            <span class="flex-none" x-html="ABM.icon(t.icon, 'w-4 h-4')"></span>
+            <span x-text="t.label"></span>
+            <span x-show="dirty(t.key)" class="ml-1 lg:ml-auto w-2 h-2 rounded-full bg-amber-400 flex-none" title="Unsaved changes"></span>
+          </button>
+        </template>
+      </nav>
+
+      <div class="min-w-0 space-y-4">
+        <!-- ============================ BUSINESS PROFILE ============================ -->
+        <form x-show="tab === 'business'" class="card" @submit.prevent="save('business')" novalidate>
+          <div class="card-header">
+            <div><div class="card-title">Business profile</div><div class="card-subtitle">Company identity, logo, what you sell, currency and POS cash defaults.</div></div>
+          </div>
+          <div class="card-body space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div class="lg:col-span-2 space-y-6 min-w-0">
+                <!-- Identity -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="sm:col-span-2">
+                    <label class="label" for="g-name">Company name <span class="req">*</span></label>
+                    <input id="g-name" type="text" class="input" :class="errors.company_name && 'is-invalid'" x-model.trim="form.business.company_name" maxlength="80">
+                    <p class="field-error" x-show="errors.company_name" x-text="errors.company_name"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="g-tagline">Tagline</label>
+                    <input id="g-tagline" type="text" class="input" x-model.trim="form.business.company_tagline" maxlength="120" placeholder="Shown under the company name on receipts and job cards">
+                  </div>
+                </div>
+
+                <!-- Logo -->
+                <div>
+                  <div class="label">Logo</div>
+                  <div class="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="w-24 h-24 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                      <img x-show="form.business.logo" :src="form.business.logo || ''" alt="Company logo preview" class="max-w-full max-h-full object-contain">
+                      <span x-show="!form.business.logo" class="text-slate-300" x-html="ABM.icon('image','w-8 h-8')"></span>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm text-slate-700" x-text="form.business.logo ? 'Logo set' + (logoName ? ' · ' + logoName : '') + ' · ' + logoSize : 'No logo uploaded. The initial of the company name is used instead.'"></div>
+                      <div class="text-xs text-slate-500 mt-1">PNG, JPG, WEBP or SVG up to 400 KB. Printed on invoices, receipts and repair job cards; the storefront has its own logo under Website &amp; CMS.</div>
+                      <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp,image/svg+xml" x-ref="logoFile" @change="onLogoFile($event)">
+                      <div class="mt-3 flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-secondary btn-sm" @click="$refs.logoFile.click()"><span x-html="ABM.icon('upload')"></span><span x-text="form.business.logo ? 'Replace logo' : 'Upload logo'"></span></button>
+                        <button type="button" class="btn btn-ghost btn-sm text-rose-600" x-show="form.business.logo" @click="removeLogo()"><span x-html="ABM.icon('trash')"></span>Remove</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Business types -->
+                <div>
+                  <div class="label">Business types <span class="req">*</span></div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <template x-for="t in businessTypes" :key="t.key">
+                      <label class="flex items-start gap-3 rounded-xl border p-3 cursor-pointer transition-colors" :class="form.business.business_types.includes(t.key) ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 hover:border-slate-300'">
+                        <input type="checkbox" class="checkbox mt-1" :checked="form.business.business_types.includes(t.key)" @change="toggleType(t.key)" :aria-label="t.label">
+                        <span class="flex-none w-9 h-9 rounded-lg flex items-center justify-center" :class="form.business.business_types.includes(t.key) ? 'bg-navy-100 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(t.icon,'w-4 h-4')"></span>
+                        <span class="min-w-0">
+                          <span class="block text-sm font-semibold text-slate-800" x-text="t.label"></span>
+                          <span class="block text-xs text-slate-500" x-text="t.text"></span>
+                        </span>
+                      </label>
+                    </template>
+                  </div>
+                  <p class="field-error" x-show="errors.business_types" x-text="errors.business_types"></p>
+                  <p class="help" x-show="!errors.business_types">Tailors wording and defaults across the software — e.g. “IMEI” vs “Serial No.” labels, repair job cards and storefront sections. Navigation itself follows each user's role permissions, not this list.</p>
+                </div>
+
+                <!-- Currency & POS defaults -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="g-currency">Currency</label>
+                    <select id="g-currency" class="select" x-model="form.business.currency" @change="onCurrencyChange()">
+                      <template x-for="c in currencies" :key="c.code"><option :value="c.code" x-text="c.code + ' · ' + c.name"></option></template>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label" for="g-symbol">Currency symbol <span class="req">*</span></label>
+                    <input id="g-symbol" type="text" class="input" :class="errors.currency_symbol && 'is-invalid'" x-model.trim="form.business.currency_symbol" maxlength="5" placeholder="Rs.">
+                    <p class="field-error" x-show="errors.currency_symbol" x-text="errors.currency_symbol"></p>
+                    <p class="help" x-show="!errors.currency_symbol">Prefix used for every amount, e.g. <b x-text="preview(1250)"></b></p>
+                  </div>
+                  <div>
+                    <label class="label" for="g-float">Cash float</label>
+                    <div class="input-group">
+                      <input id="g-float" type="number" min="0" step="500" class="input" :class="errors.cash_float && 'is-invalid'" x-model.number="form.business.cash_float">
+                      <span class="addon" x-text="form.business.currency || 'PKR'"></span>
+                    </div>
+                    <p class="field-error" x-show="errors.cash_float" x-text="errors.cash_float"></p>
+                    <p class="help" x-show="!errors.cash_float">Cash retained in the drawer after day-end closing.</p>
+                  </div>
+                  <div>
+                    <label class="label" for="g-customer">Default POS customer</label>
+                    <select id="g-customer" class="select" x-model="form.business.default_customer_id">
+                      <template x-for="c in customers" :key="c.id"><option :value="String(c.id)" x-text="c.name + (c.is_walkin ? ' (walk-in)' : '')"></option></template>
+                    </select>
+                    <p class="help">Pre-selected on every new sale.</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Receipt header preview -->
+              <div class="min-w-0">
+                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Receipt preview</div>
+                <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 text-center font-mono text-xs text-slate-700">
+                  <div class="flex justify-center mb-2" x-show="form.business.logo"><img :src="form.business.logo || ''" alt="" class="h-10 max-w-[8rem] object-contain"></div>
+                  <div class="font-bold text-sm text-slate-900 break-words" x-text="form.business.company_name || 'Company name'"></div>
+                  <div class="text-slate-500 break-words" x-text="form.business.company_tagline"></div>
+                  <div class="flex flex-wrap justify-center gap-1 mt-2">
+                    <template x-for="t in businessTypes.filter(t => form.business.business_types.includes(t.key))" :key="t.key"><span class="badge badge-slate !text-[10px]" x-text="t.short"></span></template>
+                  </div>
+                  <div class="my-2 border-t border-dashed border-slate-300"></div>
+                  <div class="flex justify-between gap-2"><span>1 × Type-C Cable</span><span x-text="preview(500)"></span></div>
+                  <div class="flex justify-between gap-2 font-bold mt-1"><span>TOTAL</span><span x-text="preview(500)"></span></div>
+                  <div class="my-2 border-t border-dashed border-slate-300"></div>
+                  <div class="text-slate-500 break-words" x-text="form.tax.receipt_footer"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="discard('business')" :disabled="!dirty('business')">Discard</button>
+            <button x-show="canEdit" type="submit" class="btn btn-primary" :disabled="busy || !dirty('business')"><span x-html="ABM.icon('check')"></span>Save business profile</button>
+          </div>
+        </form>
+
+        <!-- ============================ TAX & INVOICE ============================ -->
+        <form x-show="tab === 'tax'" x-cloak class="card" @submit.prevent="save('tax')" novalidate>
+          <div class="card-header">
+            <div><div class="card-title">Tax &amp; Invoice</div><div class="card-subtitle">Default tax, numbering, printed terms and receipt layout.</div></div>
+          </div>
+          <div class="card-body space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label class="label" for="t-rate">Default tax rate (%)</label>
+                <div class="input-group">
+                  <input id="t-rate" type="number" min="0" max="100" step="0.5" class="input" :class="errors.default_tax_rate && 'is-invalid'" x-model.number="form.tax.default_tax_rate">
+                  <span class="addon">%</span>
+                </div>
+                <p class="field-error" x-show="errors.default_tax_rate" x-text="errors.default_tax_rate"></p>
+                <p class="help" x-show="!errors.default_tax_rate">Applied to new sales unless a product overrides it.</p>
+              </div>
+              <div>
+                <label class="label" for="t-label">Tax label</label>
+                <input id="t-label" type="text" class="input" :class="errors.tax_label && 'is-invalid'" x-model.trim="form.tax.tax_label" maxlength="30" placeholder="Sales Tax">
+                <p class="field-error" x-show="errors.tax_label" x-text="errors.tax_label"></p>
+                <p class="help" x-show="!errors.tax_label">Printed on invoices, e.g. “Sales Tax 18%”.</p>
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 self-end">
+                <div>
+                  <div class="text-sm font-semibold text-slate-800">Prices include tax</div>
+                  <div class="text-xs text-slate-500">Tax is extracted from the price instead of added.</div>
+                </div>
+                <button type="button" class="switch" :class="form.tax.tax_inclusive && 'on'" role="switch" :aria-checked="form.tax.tax_inclusive ? 'true' : 'false'" @click="form.tax.tax_inclusive = !form.tax.tax_inclusive"></button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label class="label" for="t-prefix">Invoice prefix</label>
+                <input id="t-prefix" type="text" class="input mono uppercase" :class="errors.invoice_prefix && 'is-invalid'" x-model.trim="form.tax.invoice_prefix" maxlength="5" @input="form.tax.invoice_prefix = String(form.tax.invoice_prefix || '').toUpperCase()">
+                <p class="field-error" x-show="errors.invoice_prefix" x-text="errors.invoice_prefix"></p>
+                <p class="help" x-show="!errors.invoice_prefix">Next number looks like <b class="mono" x-text="(form.tax.invoice_prefix || 'INV') + '-' + branchCode + '-000123'"></b></p>
+              </div>
+              <div>
+                <label class="label">Default print layout</label>
+                <div class="inline-flex w-full rounded-xl border border-slate-300 bg-white p-0.5 text-sm font-semibold">
+                  <button type="button" class="flex-1 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5" :class="form.tax.default_print_layout === 'thermal' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.tax.default_print_layout = 'thermal'"><span x-html="ABM.icon('receipt','w-4 h-4')"></span>Thermal</button>
+                  <button type="button" class="flex-1 px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5" :class="form.tax.default_print_layout === 'a4' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.tax.default_print_layout = 'a4'"><span x-html="ABM.icon('document','w-4 h-4')"></span>A4</button>
+                </div>
+                <p class="help">Used by the POS “Print” button; either layout can still be chosen per invoice.</p>
+              </div>
+              <div>
+                <label class="label" for="t-width">Thermal paper width</label>
+                <select id="t-width" class="select" x-model="form.tax.thermal_width">
+                  <option value="58mm">58 mm (32 chars)</option>
+                  <option value="80mm">80 mm (48 chars)</option>
+                </select>
+                <p class="help">Match your receipt printer roll.</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+              <div>
+                <label class="label" for="t-footer">Receipt footer</label>
+                <input id="t-footer" type="text" class="input" x-model.trim="form.tax.receipt_footer" maxlength="160" placeholder="Thank you for shopping with us!">
+                <p class="help">One line printed at the bottom of thermal receipts.</p>
+              </div>
+              <div>
+                <label class="label" for="t-terms">Invoice terms &amp; conditions</label>
+                <textarea id="t-terms" class="textarea" rows="4" x-model.trim="form.tax.invoice_terms" maxlength="1000"></textarea>
+                <p class="help flex justify-between gap-2"><span>Printed on A4 tax invoices under the totals.</span><span x-text="(form.tax.invoice_terms || '').length + ' / 1000'"></span></p>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="discard('tax')" :disabled="!dirty('tax')">Discard</button>
+            <button x-show="canEdit" type="submit" class="btn btn-primary" :disabled="busy || !dirty('tax')"><span x-html="ABM.icon('check')"></span>Save tax &amp; invoice</button>
+          </div>
+        </form>
+
+        <!-- ============================ REPAIRS ============================ -->
+        <form x-show="tab === 'repairs'" x-cloak class="card" @submit.prevent="save('repairs')" novalidate>
+          <div class="card-header">
+            <div><div class="card-title">Repairs</div><div class="card-subtitle">Job card numbering, default warranty, diagnostic fee, printed terms and the customer SMS template.</div></div>
+          </div>
+          <div class="card-body space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label class="label" for="r-prefix">Job number prefix</label>
+                <input id="r-prefix" type="text" class="input mono uppercase" :class="errors.repair_prefix && 'is-invalid'" x-model.trim="form.repairs.repair_prefix" maxlength="5" @input="form.repairs.repair_prefix = String(form.repairs.repair_prefix || '').toUpperCase()">
+                <p class="field-error" x-show="errors.repair_prefix" x-text="errors.repair_prefix"></p>
+                <p class="help" x-show="!errors.repair_prefix">Job cards are numbered like <b class="mono" x-text="sampleJobNo"></b></p>
+              </div>
+              <div>
+                <label class="label" for="r-warranty">Default repair warranty</label>
+                <div class="input-group">
+                  <input id="r-warranty" type="number" min="0" max="365" step="1" class="input" :class="errors.repair_default_warranty_days && 'is-invalid'" x-model.number="form.repairs.repair_default_warranty_days">
+                  <span class="addon">days</span>
+                </div>
+                <p class="field-error" x-show="errors.repair_default_warranty_days" x-text="errors.repair_default_warranty_days"></p>
+                <p class="help" x-show="!errors.repair_default_warranty_days">Pre-filled on every new job card; can be changed per job at delivery.</p>
+              </div>
+              <div>
+                <label class="label" for="r-fee">Diagnostic fee</label>
+                <div class="input-group">
+                  <input id="r-fee" type="number" min="0" step="50" class="input" :class="errors.repair_diagnostic_fee && 'is-invalid'" x-model.number="form.repairs.repair_diagnostic_fee">
+                  <span class="addon" x-text="form.business.currency_symbol || 'Rs.'"></span>
+                </div>
+                <p class="field-error" x-show="errors.repair_diagnostic_fee" x-text="errors.repair_diagnostic_fee"></p>
+                <p class="help" x-show="!errors.repair_diagnostic_fee">Charged when a customer declines the quote after diagnosis. 0 = free diagnosis.</p>
+              </div>
+            </div>
+
+            <div>
+              <label class="label" for="r-terms">Repair terms &amp; conditions</label>
+              <textarea id="r-terms" class="textarea" rows="4" x-model.trim="form.repairs.repair_terms" maxlength="1000" placeholder="Printed on the job receipt the customer signs at intake"></textarea>
+              <p class="help flex justify-between gap-2"><span>Printed on job receipts (customer copy) and repair invoices.</span><span x-text="(form.repairs.repair_terms || '').length + ' / 1000'"></span></p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div class="min-w-0">
+                <label class="label" for="r-sms">Customer SMS template</label>
+                <textarea id="r-sms" x-ref="sms" class="textarea" rows="4" x-model="form.repairs.repair_sms_template" :class="errors.repair_sms_template && 'is-invalid'" maxlength="320" placeholder="Dear {customer}, your {device} (Job {job_no}) is {status}. Total Rs {total}."></textarea>
+                <p class="field-error" x-show="errors.repair_sms_template" x-text="errors.repair_sms_template"></p>
+                <div class="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span class="text-xs text-slate-500 mr-1">Insert:</span>
+                  <template x-for="p in smsPlaceholders" :key="p.key">
+                    <button type="button" class="badge badge-navy mono cursor-pointer hover:brightness-110" :title="p.text" @click="insertPlaceholder(p.key)" x-text="'{' + p.key + '}'"></button>
+                  </template>
+                </div>
+                <p class="help mt-2">Sent (or copied to WhatsApp) from the job card when the status changes. Placeholders are replaced with the job's details.</p>
+                <p class="help text-amber-700 font-medium" x-show="smsUnknown.length" x-text="'Unknown placeholder' + (smsUnknown.length > 1 ? 's' : '') + ': ' + smsUnknown.join(', ') + ' — these will be sent as-is.'"></p>
+              </div>
+              <div class="min-w-0">
+                <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Live preview</div>
+                <div class="rounded-2xl bg-slate-900 p-4 max-w-sm">
+                  <div class="text-[11px] text-white/50 mb-2 flex items-center justify-between gap-2"><span class="truncate" x-text="form.business.company_name || 'Abbott Mobile'"></span><span>now</span></div>
+                  <div class="rounded-2xl rounded-tl-md bg-white text-slate-800 px-3.5 py-2.5 text-sm leading-relaxed break-words min-h-[3rem]" x-text="smsPreview || 'Type a template to see the message.'"></div>
+                  <div class="mt-2 text-[11px] text-white/50 text-right" x-text="smsMeta"></div>
+                </div>
+                <p class="help mt-2">Sample: Muhammad Ali · Apple iPhone 13 · status “Ready for collection” · total <span x-text="preview(6000)"></span>.</p>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="discard('repairs')" :disabled="!dirty('repairs')">Discard</button>
+            <button x-show="canEdit" type="submit" class="btn btn-primary" :disabled="busy || !dirty('repairs')"><span x-html="ABM.icon('check')"></span>Save repair settings</button>
+          </div>
+        </form>
+
+        <!-- ============================ INVENTORY ============================ -->
+        <form x-show="tab === 'inventory'" x-cloak class="card" @submit.prevent="save('inventory')" novalidate>
+          <div class="card-header">
+            <div><div class="card-title">Inventory</div><div class="card-subtitle">Stock alerts and validation rules used by POS, purchases, repairs and the unit registry.</div></div>
+          </div>
+          <div class="card-body space-y-3">
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="flex-none w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center" x-html="ABM.icon('bell','w-4 h-4')"></span>
+                <div>
+                  <div class="text-sm font-semibold text-slate-800">Low-stock alerts</div>
+                  <div class="text-xs text-slate-500">Show products at or below their minimum stock on the dashboard and in the notification bell.</div>
+                </div>
+              </div>
+              <button type="button" class="switch" :class="form.inventory.low_stock_alerts && 'on'" role="switch" :aria-checked="form.inventory.low_stock_alerts ? 'true' : 'false'" @click="form.inventory.low_stock_alerts = !form.inventory.low_stock_alerts"></button>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="flex-none w-9 h-9 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center" x-html="ABM.icon('qr','w-4 h-4')"></span>
+                <div>
+                  <div class="text-sm font-semibold text-slate-800">IMEI check digit (Luhn)</div>
+                  <div class="text-xs text-slate-500">Reject IMEIs whose 15th digit fails the Luhn checksum when registering phones, tablets and watches. Turn off if a supplier ships non-standard IMEIs.</div>
+                </div>
+              </div>
+              <button type="button" class="switch" :class="form.inventory.imei_luhn_check && 'on'" role="switch" :aria-checked="form.inventory.imei_luhn_check ? 'true' : 'false'" @click="form.inventory.imei_luhn_check = !form.inventory.imei_luhn_check"></button>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-4 py-3">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="flex-none w-9 h-9 rounded-lg bg-navy-100 text-navy-700 flex items-center justify-center" x-html="ABM.icon('laptop','w-4 h-4')"></span>
+                <div>
+                  <div class="text-sm font-semibold text-slate-800">Upper-case serial numbers</div>
+                  <div class="text-xs text-slate-500">Store laptop / desktop serial numbers in capitals (<span class="mono">5cg1234abc → 5CG1234ABC</span>) so scans and typed lookups always match. Lookups are case-insensitive either way.</div>
+                </div>
+              </div>
+              <button type="button" class="switch" :class="form.inventory.serial_uppercase && 'on'" role="switch" :aria-checked="form.inventory.serial_uppercase ? 'true' : 'false'" @click="form.inventory.serial_uppercase = !form.inventory.serial_uppercase"></button>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-xl border px-4 py-3" :class="form.inventory.allow_negative_stock ? 'border-rose-200 bg-rose-50' : 'border-slate-200'">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="flex-none w-9 h-9 rounded-lg flex items-center justify-center" :class="form.inventory.allow_negative_stock ? 'bg-rose-100 text-rose-600' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon('warning','w-4 h-4')"></span>
+                <div>
+                  <div class="text-sm font-semibold text-slate-800">Allow negative stock</div>
+                  <div class="text-xs text-slate-500">Let cashiers sell non-serialized items that show zero quantity. Stock goes negative until the purchase is entered. <b class="text-rose-600">Not recommended</b> — it distorts stock valuation and profit reports.</div>
+                </div>
+              </div>
+              <button type="button" class="switch" :class="form.inventory.allow_negative_stock && 'on'" role="switch" :aria-checked="form.inventory.allow_negative_stock ? 'true' : 'false'" @click="form.inventory.allow_negative_stock = !form.inventory.allow_negative_stock"></button>
+            </div>
+
+            <!-- IMEI vs serial explainer -->
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div class="text-sm font-semibold text-slate-800 mb-3">IMEI vs. serial number — how units are tracked</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs text-slate-600">
+                <div class="rounded-lg bg-white border border-slate-200 p-3">
+                  <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-navy">IMEI</span><span class="font-semibold text-slate-800">Phones, tablets, smartwatches</span></div>
+                  <p>Exactly <b>15 digits</b>, optionally validated with the Luhn check digit above. Dual-SIM phones can store a second IMEI. Example: <span class="mono">356789012345678</span></p>
+                </div>
+                <div class="rounded-lg bg-white border border-slate-200 p-3">
+                  <div class="flex items-center gap-2 mb-1.5"><span class="badge badge-blue">Serial No.</span><span class="font-semibold text-slate-800">Laptops, desktops, all-in-ones</span></div>
+                  <p>Manufacturer serial of <b>4–40 letters, digits or - _ . /</b>. Example: <span class="mono">5CG1234ABC</span>, <span class="mono">FVFM1-2345</span></p>
+                </div>
+              </div>
+              <p class="text-xs text-slate-500 mt-3 flex items-start gap-2"><span class="flex-none text-slate-400 mt-0.5" x-html="ABM.icon('info','w-4 h-4')"></span><span>The product's <a href="categories.html" class="font-semibold text-navy-700 hover:underline">category</a> decides which applies. Both live in the same unit registry (<a href="imeis.html" class="font-semibold text-navy-700 hover:underline">IMEI Registry</a>), must be unique, and are matched case-insensitively at POS, in transfers and at repair intake. Per-product minimum stock is set on each <a href="products.html" class="font-semibold text-navy-700 hover:underline">product</a>; serialized products never go negative — every unit must be registered before it can be sold.</span></p>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-end gap-2">
+            <button type="button" class="btn btn-secondary" @click="discard('inventory')" :disabled="!dirty('inventory')">Discard</button>
+            <button x-show="canEdit" type="submit" class="btn btn-primary" :disabled="busy || !dirty('inventory')"><span x-html="ABM.icon('check')"></span>Save inventory rules</button>
+          </div>
+        </form>
+
+        <!-- ============================ APPEARANCE ============================ -->
+        <div x-show="tab === 'appearance'" x-cloak class="space-y-4">
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Appearance</div><div class="card-subtitle">Theme mode and accent colour of the software. Changes apply instantly and are saved on this device (each user / browser keeps its own).</div></div>
+              <span class="badge badge-slate badge-dot" x-text="'Now: ' + themeLabel"></span>
+            </div>
+            <div class="card-body space-y-6">
+              <!-- Mode -->
+              <div>
+                <div class="label">Theme mode</div>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <template x-for="m in modes" :key="m.key">
+                    <button type="button" class="rounded-xl border p-3 text-left flex items-center gap-3 transition-colors" :class="theme.mode === m.key ? 'border-navy-500 ring-2 ring-navy-500/25 bg-navy-50' : 'border-slate-200 hover:border-slate-300'" @click="setMode(m.key)" :aria-pressed="theme.mode === m.key ? 'true' : 'false'">
+                      <span class="chip" :class="theme.mode === m.key ? 'chip-navy' : 'chip-slate'" x-html="ABM.icon(m.icon)"></span>
+                      <span class="min-w-0"><span class="block text-sm font-semibold text-slate-800" x-text="m.label"></span><span class="block text-xs text-slate-500" x-text="m.text"></span></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Accent presets -->
+              <div>
+                <div class="label">Accent colour</div>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="a in accents" :key="a.key">
+                    <button type="button" class="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors" :class="theme.accent === a.key ? 'border-navy-500 ring-2 ring-navy-500/25' : 'border-slate-200 hover:border-slate-300'" @click="setAccent(a.key)" :aria-pressed="theme.accent === a.key ? 'true' : 'false'">
+                      <span class="theme-swatch" :style="'background:' + a.swatch"></span><span x-text="a.label"></span>
+                    </button>
+                  </template>
+                  <span class="flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-semibold text-slate-700" :class="theme.accent === 'custom' ? 'border-navy-500 ring-2 ring-navy-500/25' : 'border-slate-200 border-dashed'">
+                    <span class="theme-swatch" :style="'background:' + (theme.accent === 'custom' ? theme.custom : 'conic-gradient(#f43f5e,#f59e0b,#10b981,#0ea5e9,#8b5cf6,#f43f5e)')"></span>Custom<span class="mono text-xs text-slate-500" x-show="theme.accent === 'custom'" x-text="theme.custom"></span>
+                  </span>
+                </div>
+              </div>
+
+              <!-- Custom colour -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="text-sm font-semibold text-slate-800">Custom colour</div>
+                <p class="text-xs text-slate-500 mt-0.5 mb-3">Pick any brand colour — a full 50–950 shade scale is generated and applied to buttons, links, the sidebar and charts across the whole software.</p>
+                <div class="flex flex-wrap items-end gap-3">
+                  <div>
+                    <label class="label" for="ap-color">Pick</label>
+                    <input id="ap-color" type="color" class="color-input" :value="colorValue" @input="custom.hex = $event.target.value; applyCustom()" aria-label="Custom accent colour picker">
+                  </div>
+                  <div class="flex-1 min-w-[10rem] max-w-xs">
+                    <label class="label" for="ap-hex">Hex code</label>
+                    <input id="ap-hex" type="text" class="input mono" :class="custom.error && 'is-invalid'" x-model.trim="custom.hex" @input.debounce.200ms="applyCustom()" @keydown.enter.prevent="applyCustom()" maxlength="7" placeholder="#1a336a" spellcheck="false" autocomplete="off">
+                  </div>
+                  <button type="button" class="btn btn-primary" @click="applyCustom(true)"><span x-html="ABM.icon('brush')"></span>Apply</button>
+                  <button type="button" class="btn btn-secondary" @click="resetAccent()" :disabled="theme.accent === 'navy'"><span x-html="ABM.icon('refresh')"></span>Reset to Navy</button>
+                </div>
+                <p class="field-error" x-show="custom.error" x-text="custom.error"></p>
+                <div class="mt-3">
+                  <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Generated scale</div>
+                  <div class="flex rounded-xl overflow-hidden border border-slate-200 h-8">
+                    <template x-for="s in scale" :key="s.shade"><div class="flex-1 min-w-0" :style="'background: rgb(' + s.rgb + ')'" :title="s.shade + ' · rgb(' + s.rgb + ')'"></div></template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Live sample -->
+              <div>
+                <div class="label">How it looks</div>
+                <div class="rounded-xl border border-slate-200 p-4 flex flex-wrap items-center gap-3">
+                  <button type="button" class="btn btn-primary">Primary action</button>
+                  <button type="button" class="btn btn-soft">Soft button</button>
+                  <button type="button" class="btn btn-money">Money action</button>
+                  <span class="badge badge-navy badge-dot">Accent badge</span>
+                  <span class="badge badge-green badge-dot">Success</span>
+                  <a href="#" class="text-sm font-semibold text-navy-700 hover:underline" @click.prevent>Text link</a>
+                  <div class="progress w-full sm:w-40 sm:ml-auto"><div style="width:65%"></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-body flex flex-wrap items-center justify-between gap-3">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="chip chip-info" x-html="ABM.icon('globe')"></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold text-slate-800">Storefront theme is separate</div>
+                  <div class="text-xs text-slate-500">Colours, fonts and layout of the public website are set under Website &amp; CMS → Theme &amp; Colours, where you can also copy the storefront colour to the software.</div>
+                </div>
+              </div>
+              <a href="website.html#theme" class="btn btn-secondary"><span x-html="ABM.icon('palette')"></span>Open website theme</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================ DATA & BACKUP ============================ -->
+        <div x-show="tab === 'data'" x-cloak class="space-y-4">
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Database overview</div><div class="card-subtitle">Prototype data lives in this browser’s local storage (key <span class="mono">abm.db.v1</span>). The PHP/MySQL backend replaces it later.</div></div>
+              <button type="button" class="btn btn-ghost btn-sm" @click="loadStats()"><span x-html="ABM.icon('refresh')"></span>Refresh</button>
+            </div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div class="rounded-xl bg-slate-50 border border-slate-200 p-3"><div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Schema version</div><div class="text-lg font-bold text-slate-900 mono" x-text="stats.version"></div></div>
+                <div class="rounded-xl bg-slate-50 border border-slate-200 p-3"><div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Seeded</div><div class="text-lg font-bold text-slate-900" x-text="stats.seededAt ? ABM.utils.datetime(stats.seededAt) : '—'"></div></div>
+                <div class="rounded-xl bg-slate-50 border border-slate-200 p-3"><div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Storage used</div><div class="text-lg font-bold text-slate-900" x-text="stats.sizeKb + ' KB'"></div><div class="text-xs text-slate-500" x-text="ABM.utils.num(stats.rows) + ' rows in ' + stats.collections.length + ' collections'"></div></div>
+              </div>
+              <div class="flex flex-wrap gap-1.5">
+                <template x-for="c in stats.collections" :key="c.name">
+                  <span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs"><span class="mono text-slate-600" x-text="c.name"></span><b class="text-slate-900 tabular" x-text="ABM.utils.num(c.count)"></b></span>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <!-- Export -->
+            <div class="card">
+              <div class="card-header"><div><div class="card-title">Export backup</div><div class="card-subtitle">Download the complete database as a JSON file.</div></div></div>
+              <div class="card-body text-sm text-slate-600">
+                <p>Includes every collection, settings, website content and document sequences. Keep backups before importing data or resetting the demo. The file is not encrypted — it contains customer and financial data.</p>
+              </div>
+              <div class="card-footer flex justify-end">
+                <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-primary" @click="exportJson()"><span x-html="ABM.icon('download')"></span>Export JSON</button>
+              </div>
+            </div>
+
+            <!-- Import -->
+            <div class="card">
+              <div class="card-header"><div><div class="card-title">Import backup</div><div class="card-subtitle">Restore a JSON file exported from this app.</div></div></div>
+              <div class="card-body text-sm text-slate-600 space-y-3">
+                <p>The current database will be <b>replaced entirely</b>. Take an export first if you may need the current data.</p>
+                <input type="file" class="hidden" accept=".json,application/json" x-ref="importFile" @change="onImportFile($event)">
+                <button type="button" class="btn btn-secondary" @click="$refs.importFile.click()"><span x-html="ABM.icon('upload')"></span>Choose backup file…</button>
+
+                <template x-if="imp.file">
+                  <div class="rounded-xl border p-3 space-y-2" :class="imp.errors.length ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'">
+                    <div class="flex items-start gap-2">
+                      <span class="flex-none mt-0.5" :class="imp.errors.length ? 'text-rose-600' : 'text-emerald-600'" x-html="ABM.icon(imp.errors.length ? 'x-circle' : 'check-circle','w-5 h-5')"></span>
+                      <div class="min-w-0">
+                        <div class="font-semibold text-slate-800 truncate" x-text="imp.file.name"></div>
+                        <div class="text-xs text-slate-500" x-text="Math.round(imp.file.size / 1024) + ' KB · ' + (imp.stats ? ABM.utils.num(imp.stats.rows) + ' rows in ' + imp.stats.collections.length + ' collections' : 'not readable')"></div>
+                      </div>
+                    </div>
+                    <ul class="text-xs text-rose-700 list-disc pl-5" x-show="imp.errors.length"><template x-for="(e, i) in imp.errors" :key="i"><li x-text="e"></li></template></ul>
+                    <ul class="text-xs text-amber-700 list-disc pl-5" x-show="imp.warnings.length"><template x-for="(w, i) in imp.warnings" :key="i"><li x-text="w"></li></template></ul>
+                    <div class="flex flex-wrap gap-1.5" x-show="imp.stats && !imp.errors.length">
+                      <template x-for="c in (imp.stats ? imp.stats.collections.slice(0, 8) : [])" :key="c.name"><span class="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-1.5 py-0.5 text-[11px]"><span class="mono text-slate-600" x-text="c.name"></span><b x-text="c.count"></b></span></template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+              <div class="card-footer flex flex-wrap justify-end gap-2">
+                <button type="button" class="btn btn-secondary" x-show="imp.file" @click="clearImport()">Cancel</button>
+                <button type="button" class="btn btn-danger" x-show="canEdit" :disabled="!imp.data || imp.errors.length || busy" @click="importJson()"><span x-html="ABM.icon('upload')"></span>Import &amp; reload</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Reset -->
+          <div class="card border-rose-200">
+            <div class="card-header"><div><div class="card-title text-rose-700">Reset demo data</div><div class="card-subtitle">Discard everything in this browser and reload the sample dataset.</div></div></div>
+            <div class="card-body text-sm text-slate-600 flex flex-wrap items-center justify-between gap-3">
+              <p class="max-w-xl">All sales, purchases, repairs, customers, users, website content and settings you changed will be lost. You stay signed in as the same demo user if it exists in the sample data.</p>
+              <button type="button" class="btn btn-danger-soft" x-show="canEdit" @click="resetDemo()"><span x-html="ABM.icon('refresh')"></span>Reset demo data</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function settingsPage() {
+      const { db, utils, ui, session } = ABM;
+      const BUSINESS_TYPES = [
+        { key: 'mobile', label: 'Mobile phones', short: 'Mobiles', icon: 'phone', text: 'Smartphones, tablets & smartwatches — tracked by IMEI.' },
+        { key: 'laptop', label: 'Laptops & computers', short: 'Laptops', icon: 'laptop', text: 'Laptops, desktops & components — tracked by serial number.' },
+        { key: 'accessories', label: 'Accessories', short: 'Accessories', icon: 'cube', text: 'Chargers, cables, audio, cases — quantity stock.' },
+        { key: 'repair', label: 'Repair services', short: 'Repairs', icon: 'wrench', text: 'Job cards, technicians, spare parts & labor.' },
+      ];
+      const CURRENCIES = [
+        { code: 'PKR', name: 'Pakistani Rupee', symbol: 'Rs.' }, { code: 'USD', name: 'US Dollar', symbol: '$' }, { code: 'AED', name: 'UAE Dirham', symbol: 'AED' },
+        { code: 'SAR', name: 'Saudi Riyal', symbol: 'SR' }, { code: 'GBP', name: 'Pound Sterling', symbol: '£' }, { code: 'EUR', name: 'Euro', symbol: '€' },
+      ];
+      const SMS_PLACEHOLDERS = [
+        { key: 'customer', text: 'Customer name' }, { key: 'device', text: 'Brand + model of the device' }, { key: 'job_no', text: 'Job card number' },
+        { key: 'status', text: 'Current job status' }, { key: 'total', text: 'Job total amount' },
+      ];
+      const SMS_SAMPLE = { customer: 'Muhammad Ali', device: 'Apple iPhone 13', status: 'Ready for collection', total: utils.num(6000) };
+      const KEYS = {
+        business: ['company_name', 'company_tagline', 'logo', 'business_types', 'currency', 'currency_symbol', 'cash_float', 'default_customer_id'],
+        tax: ['default_tax_rate', 'tax_label', 'tax_inclusive', 'invoice_prefix', 'invoice_terms', 'receipt_footer', 'default_print_layout', 'thermal_width'],
+        repairs: ['repair_prefix', 'repair_default_warranty_days', 'repair_diagnostic_fee', 'repair_terms', 'repair_sms_template'],
+        inventory: ['low_stock_alerts', 'imei_luhn_check', 'serial_uppercase', 'allow_negative_stock'],
+      };
+      const DEFAULTS = {
+        company_name: 'Abbott Mobile', company_tagline: '', logo: '', business_types: ['mobile', 'laptop', 'accessories', 'repair'], currency: 'PKR', currency_symbol: 'Rs.', cash_float: 0, default_customer_id: 1,
+        default_tax_rate: 0, tax_label: 'Sales Tax', tax_inclusive: 0, invoice_prefix: 'INV', invoice_terms: '', receipt_footer: '', default_print_layout: 'thermal', thermal_width: '80mm',
+        repair_prefix: 'JOB', repair_default_warranty_days: 7, repair_diagnostic_fee: 0, repair_terms: '', repair_sms_template: 'Dear {customer}, your {device} (Job {job_no}) is {status}. Total Rs {total}.',
+        low_stock_alerts: 1, imei_luhn_check: 0, serial_uppercase: 1, allow_negative_stock: 0,
+      };
+      const BOOL = ['tax_inclusive', 'low_stock_alerts', 'imei_luhn_check', 'serial_uppercase', 'allow_negative_stock'];
+      const NUM = ['cash_float', 'default_customer_id', 'default_tax_rate', 'repair_default_warranty_days', 'repair_diagnostic_fee'];
+      const REQUIRED_COLLECTIONS = ['branches', 'users', 'products', 'branch_stock', 'sales', 'customers'];
+      const TABS = [
+        { key: 'business', label: 'Business profile', icon: 'building' },
+        { key: 'tax', label: 'Tax & Invoice', icon: 'receipt' },
+        { key: 'repairs', label: 'Repairs', icon: 'wrench' },
+        { key: 'inventory', label: 'Inventory', icon: 'cube' },
+        { key: 'appearance', label: 'Appearance', icon: 'palette' },
+        { key: 'data', label: 'Data & Backup', icon: 'archive' },
+      ];
+      const HASH_ALIAS = { general: 'business', theme: 'appearance', repair: 'repairs' };
+      const orderTypes = (arr) => BUSINESS_TYPES.filter((t) => (arr || []).includes(t.key)).map((t) => t.key);
+      const readTab = (tab) => {
+        const s = db.settings(); const o = {};
+        KEYS[tab].forEach((k) => {
+          let v = k in s && s[k] !== null && s[k] !== undefined ? s[k] : DEFAULTS[k];
+          if (BOOL.includes(k)) v = !!Number(v);
+          else if (k === 'default_customer_id') v = String(v ?? '');
+          else if (NUM.includes(k)) v = Number(v) || 0;
+          else if (k === 'business_types') v = orderTypes(Array.isArray(v) ? v : DEFAULTS.business_types);
+          else v = v ?? '';
+          o[k] = v;
+        });
+        return o;
+      };
+      const readAll = () => ({ business: readTab('business'), tax: readTab('tax'), repairs: readTab('repairs'), inventory: readTab('inventory') });
+      const same = (a, b) => JSON.stringify(a ?? '') === JSON.stringify(b ?? '');
+      const HEX_RE = /^#[0-9a-f]{6}$/i;
+      return {
+        canEdit: ABM.session.can('settings.edit'),
+        tabs: TABS, tab: 'business', busy: false, leaving: false,
+        branchCode: session.branchCode(),
+        businessTypes: BUSINESS_TYPES, currencies: CURRENCIES, smsPlaceholders: SMS_PLACEHOLDERS,
+        customers: [], errors: {}, logoName: '',
+        form: readAll(),
+        snap: {},
+        stats: { version: '', seededAt: null, sizeKb: 0, rows: 0, collections: [] },
+        imp: { file: null, data: null, stats: null, errors: [], warnings: [] },
+        // appearance (per-device, lives in ABM_THEME not in settings)
+        theme: ABM.theme.get(),
+        accents: ABM.theme.ACCENTS,
+        modes: [
+          { key: 'light', label: 'Light', icon: 'sun', text: 'Bright surfaces, best in daylight.' },
+          { key: 'dark', label: 'Dark', icon: 'moon', text: 'Low-glare, easier on the eyes at night.' },
+          { key: 'system', label: 'System', icon: 'desktop', text: 'Follows the operating system setting.' },
+        ],
+        custom: { hex: ABM.theme.get().custom || '#1a336a', error: '' },
+
+        init() {
+          const h = (location.hash || '').replace('#', '');
+          const key = HASH_ALIAS[h] || h;
+          if (TABS.some((t) => t.key === key)) this.tab = key;
+          this.customers = db.all('customers').filter((c) => c.is_active).slice().sort((a, b) => (b.is_walkin - a.is_walkin) || a.name.localeCompare(b.name));
+          this.snapshot();
+          this.loadStats();
+          // Selects whose <option>s come from x-for get their value before the options exist; re-assigning
+          // the tab objects on the next tick re-runs x-model once the options are in the DOM.
+          this.$nextTick(() => { this.form = readAll(); });
+          window.addEventListener('beforeunload', (e) => { if (this.canEdit && this.anyDirty && !this.leaving) { e.preventDefault(); e.returnValue = ''; } });
+          ABM.theme.onChange(() => { this.theme = ABM.theme.get(); if (this.theme.accent === 'custom' && this.theme.custom) this.custom.hex = this.theme.custom; });
+        },
+        setTab(key) { this.tab = key; this.errors = {}; history.replaceState(null, '', '#' + key); },
+        snapshot() { Object.keys(KEYS).forEach((t) => { this.snap[t] = JSON.stringify(readTab(t)); }); },
+        dirty(tab) { return !!KEYS[tab] && JSON.stringify(this.form[tab]) !== this.snap[tab]; },
+        get anyDirty() { return Object.keys(KEYS).some((t) => this.dirty(t)); },
+        discard(tab) { this.form[tab] = readTab(tab); this.errors = {}; if (tab === 'business') this.logoName = ''; },
+        preview(n) { const sym = (this.form.business.currency_symbol || '').trim(); return (sym ? sym + ' ' : '') + utils.num(n, 2); },
+
+        /* ---- business profile ---- */
+        get logoSize() { const s = this.form.business.logo || ''; return s ? Math.max(1, Math.round(s.length * 0.75 / 1024)) + ' KB' : ''; },
+        onLogoFile(ev) {
+          const file = ev.target.files && ev.target.files[0];
+          ev.target.value = '';
+          if (!file) return;
+          if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(file.type)) { ui.error('Use a PNG, JPG, WEBP or SVG image.'); return; }
+          if (file.size > 400 * 1024) { ui.error('Logo must be under 400 KB (this file is ' + Math.round(file.size / 1024) + ' KB).'); return; }
+          const reader = new FileReader();
+          reader.onerror = () => ui.error('The image could not be read.');
+          reader.onload = () => { this.form.business.logo = String(reader.result || ''); this.logoName = file.name; ui.toast('Logo loaded — save the business profile to keep it.', 'info'); };
+          reader.readAsDataURL(file);
+        },
+        removeLogo() { this.form.business.logo = ''; this.logoName = ''; },
+        toggleType(key) {
+          const cur = this.form.business.business_types;
+          this.form.business.business_types = cur.includes(key) ? cur.filter((k) => k !== key) : orderTypes([...cur, key]);
+        },
+        onCurrencyChange() {
+          const c = CURRENCIES.find((x) => x.code === this.form.business.currency);
+          const known = CURRENCIES.map((x) => x.symbol);
+          if (c && (!this.form.business.currency_symbol || known.includes(this.form.business.currency_symbol))) this.form.business.currency_symbol = c.symbol;
+        },
+
+        /* ---- repairs ---- */
+        get sampleJobNo() { return (this.form.repairs.repair_prefix || 'JOB') + '-' + this.branchCode + '-000042'; },
+        get smsPreview() {
+          const t = String(this.form.repairs.repair_sms_template || '');
+          const sample = { ...SMS_SAMPLE, job_no: this.sampleJobNo };
+          return t.replace(/\{(customer|device|job_no|status|total)\}/g, (m, k) => sample[k]);
+        },
+        get smsUnknown() {
+          const known = SMS_PLACEHOLDERS.map((p) => p.key);
+          return [...new Set((String(this.form.repairs.repair_sms_template || '').match(/\{[a-z_]+\}/gi) || []).filter((m) => !known.includes(m.slice(1, -1))))];
+        },
+        get smsMeta() { const len = this.smsPreview.length; const segs = len === 0 ? 0 : len <= 160 ? 1 : Math.ceil(len / 153); return len + ' chars · ' + segs + ' SMS'; },
+        insertPlaceholder(key) {
+          const tag = '{' + key + '}'; const el = this.$refs.sms; const v = String(this.form.repairs.repair_sms_template || '');
+          if (!el) { this.form.repairs.repair_sms_template = v + tag; return; }
+          const s = el.selectionStart ?? v.length, e = el.selectionEnd ?? s;
+          this.form.repairs.repair_sms_template = v.slice(0, s) + tag + v.slice(e);
+          this.$nextTick(() => { el.focus(); el.setSelectionRange(s + tag.length, s + tag.length); });
+        },
+
+        /* ---- validation & save ---- */
+        validate(tab) {
+          const e = {}; const f = this.form[tab];
+          if (tab === 'business') {
+            if (!f.company_name) e.company_name = 'Company name is required.';
+            if (!f.currency_symbol) e.currency_symbol = 'Currency symbol is required.';
+            if (!(Number(f.cash_float) >= 0)) e.cash_float = 'Cash float must be zero or more.';
+            if (!f.business_types.length) e.business_types = 'Select at least one business type.';
+          }
+          if (tab === 'tax') {
+            const r = Number(f.default_tax_rate);
+            if (!(r >= 0 && r <= 100)) e.default_tax_rate = 'Tax rate must be between 0 and 100.';
+            if (!f.tax_label) e.tax_label = 'Tax label is required.';
+            if (!/^[A-Z]{2,5}$/.test(f.invoice_prefix || '')) e.invoice_prefix = '2–5 uppercase letters, e.g. INV.';
+          }
+          if (tab === 'repairs') {
+            if (!/^[A-Z]{2,5}$/.test(f.repair_prefix || '')) e.repair_prefix = '2–5 uppercase letters, e.g. JOB.';
+            const w = Number(f.repair_default_warranty_days);
+            if (!(Number.isInteger(w) && w >= 0 && w <= 365)) e.repair_default_warranty_days = 'Whole number of days between 0 and 365.';
+            if (!(Number(f.repair_diagnostic_fee) >= 0)) e.repair_diagnostic_fee = 'Diagnostic fee must be zero or more.';
+            if (!String(f.repair_sms_template || '').trim()) e.repair_sms_template = 'Enter an SMS template (use the placeholders below).';
+          }
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        save(tab) {
+          if (!this.canEdit) { ui.error('Your role can see the settings but not change them.'); return; }
+          if (!this.validate(tab)) { ui.error('Please fix the highlighted fields.'); return; }
+          this.busy = true;
+          try {
+            const f = this.form[tab]; const before = db.settings(); const changed = [];
+            KEYS[tab].forEach((k) => {
+              let v = f[k];
+              if (BOOL.includes(k)) v = v ? 1 : 0;
+              else if (NUM.includes(k)) v = Number(v) || 0;
+              else if (k === 'business_types') v = orderTypes(v);
+              else if (k === 'logo') v = v ? String(v) : null;
+              else v = typeof v === 'string' ? v.trim() : v;
+              if (!same(before[k], v)) changed.push(k);
+              db.setSetting(k, v);
+            });
+            const label = TABS.find((t) => t.key === tab).label;
+            db.audit('settings.update', 'settings', null, `${label} settings updated` + (changed.length ? ': ' + changed.join(', ') : ' (no changes)'));
+            this.snapshot();
+            this.form[tab] = readTab(tab);
+            ui.success(label + ' settings saved.');
+          } catch (err) { ui.error(err.message); }
+          finally { this.busy = false; }
+        },
+
+        /* ---- appearance (ABM_THEME, per browser) ---- */
+        get themeLabel() {
+          const a = this.theme.accent === 'custom' ? 'Custom ' + (this.theme.custom || '') : ((this.accents.find((x) => x.key === this.theme.accent) || {}).label || 'Navy');
+          return utils.titleCase(this.theme.mode || 'light') + ' · ' + a;
+        },
+        get colorValue() { return HEX_RE.test(this.custom.hex || '') ? this.custom.hex.toLowerCase() : (this.theme.custom || '#1a336a'); },
+        get scale() {
+          const hex = HEX_RE.test(this.custom.hex || '') ? this.custom.hex : (this.theme.custom || '#1a336a');
+          const s = (window.ABM_THEME && ABM_THEME.shadeScale(hex)) || {};
+          return Object.keys(s).map((shade) => ({ shade: Number(shade), rgb: s[shade] })).sort((a, b) => a.shade - b.shade);
+        },
+        syncShell() {
+          // keep the topbar / user-menu controls (rendered by app.js) in step with what we applied
+          this.theme = ABM.theme.get();
+          const t = document.querySelector('[data-theme-toggle]'); if (t) t.innerHTML = ABM.icon(ABM.theme.isDark() ? 'sun' : 'moon');
+          document.querySelectorAll('[data-theme-mode]').forEach((b) => { const on = b.dataset.themeMode === this.theme.mode; b.classList.toggle('btn-primary', on); b.classList.toggle('btn-secondary', !on); });
+          document.querySelectorAll('[data-accent]').forEach((b) => b.classList.toggle('active', b.dataset.accent === this.theme.accent));
+          const inp = document.querySelector('[data-accent-custom]'); const lbl = inp ? inp.closest('.theme-swatch') : null;
+          if (lbl) { lbl.classList.toggle('active', this.theme.accent === 'custom'); if (this.theme.accent === 'custom') { lbl.style.background = this.theme.custom; inp.value = this.theme.custom; } }
+        },
+        setMode(mode) { ABM.theme.set({ mode }); this.syncShell(); },
+        setAccent(accent) { ABM.theme.set({ accent }); this.syncShell(); },
+        applyCustom(announce = false) {
+          let hex = String(this.custom.hex || '').trim();
+          if (hex && hex[0] !== '#') hex = '#' + hex;
+          if (/^#[0-9a-f]{3}$/i.test(hex)) hex = '#' + hex.slice(1).split('').map((c) => c + c).join('');
+          if (!HEX_RE.test(hex)) { this.custom.error = 'Enter a 6-digit hex colour, e.g. #ff6a00.'; return; }
+          this.custom.error = ''; this.custom.hex = hex.toLowerCase();
+          if (this.theme.accent === 'custom' && String(this.theme.custom).toLowerCase() === this.custom.hex && !announce) return;
+          // ABM.theme.setCustom is documented in the guide; fall back to the ABM_THEME bootstrap / theme.set until app.js exposes it.
+          if (typeof ABM.theme.setCustom === 'function') ABM.theme.setCustom(this.custom.hex);
+          else if (window.ABM_THEME && typeof ABM_THEME.setCustom === 'function') ABM_THEME.setCustom(this.custom.hex);
+          else ABM.theme.set({ accent: 'custom', custom: this.custom.hex });
+          this.syncShell();
+          if (announce) ui.success('Custom colour ' + this.custom.hex + ' applied to the software.');
+        },
+        resetAccent() { ABM.theme.set({ accent: 'navy' }); this.custom = { hex: '#1a336a', error: '' }; this.syncShell(); ui.success('Accent reset to Navy.'); },
+
+        /* ---- data & backup ---- */
+        describe(data) {
+          const collections = Object.keys(data).filter((k) => !k.startsWith('__') && Array.isArray(data[k])).map((name) => ({ name, count: data[name].length }));
+          return { collections, rows: collections.reduce((a, c) => a + c.count, 0) };
+        },
+        loadStats() {
+          const raw = db.raw(); const d = this.describe(raw);
+          let sizeKb = 0; try { sizeKb = Math.round((localStorage.getItem('abm.db.v1') || '').length / 1024); } catch (e) { /* storage blocked */ }
+          this.stats = { version: raw.__version || ABM.VERSION, seededAt: raw.__seeded_at || null, sizeKb, rows: d.rows, collections: d.collections };
+        },
+        exportJson() {
+          const raw = db.raw();
+          if (!utils.download('abm-backup-' + utils.today() + '.json', JSON.stringify(raw, null, 2), 'application/json')) return;
+          db.audit('data.export', 'settings', null, `Database exported (${utils.num(this.describe(raw).rows)} rows)`);
+          ui.success('Backup downloaded.');
+        },
+        clearImport() { this.imp = { file: null, data: null, stats: null, errors: [], warnings: [] }; if (this.$refs.importFile) this.$refs.importFile.value = ''; },
+        onImportFile(ev) {
+          const file = ev.target.files && ev.target.files[0];
+          if (!file) return;
+          this.imp = { file, data: null, stats: null, errors: [], warnings: [] };
+          const reader = new FileReader();
+          reader.onerror = () => { this.imp.errors = ['The file could not be read.']; };
+          reader.onload = () => {
+            let data;
+            try { data = JSON.parse(reader.result); } catch (e) { this.imp.errors = ['Not valid JSON: ' + e.message]; return; }
+            const errors = [], warnings = [];
+            if (!data || typeof data !== 'object' || Array.isArray(data)) errors.push('The file must contain a single JSON object.');
+            else {
+              REQUIRED_COLLECTIONS.forEach((k) => { if (!Array.isArray(data[k])) errors.push(`Missing collection "${k}".`); });
+              if (!data.settings || typeof data.settings !== 'object') errors.push('Missing "settings" object.');
+              if (Array.isArray(data.users) && !data.users.some((u) => u.role === 'super_admin' && u.is_active)) errors.push('The backup has no active Super Admin — importing it would lock everyone out.');
+              if (Array.isArray(data.branches) && !data.branches.some((b) => b.is_active)) errors.push('The backup has no active branch.');
+              if (data.__version && data.__version !== ABM.VERSION) warnings.push(`Backup schema version ${data.__version} differs from the current ${ABM.VERSION}; it will be upgraded on import.`);
+              const meId = (session.user() || {}).id;
+              if (Array.isArray(data.users) && !data.users.some((u) => u.id === meId)) warnings.push('Your current user does not exist in this backup — you will be signed out after the import.');
+              if (!data.cms) warnings.push('No website content (cms) in this backup — the storefront will start with defaults.');
+              Object.keys(db.raw()).filter((k) => !k.startsWith('__') && k !== 'settings' && k !== 'cms' && !(k in data)).forEach((k) => warnings.push(`Collection "${k}" is absent and will start empty.`));
+            }
+            this.imp.errors = errors; this.imp.warnings = warnings;
+            if (!errors.length) { this.imp.data = data; this.imp.stats = this.describe(data); }
+          };
+          reader.readAsText(file);
+        },
+        async importJson() {
+          if (!this.canEdit) { ui.error('Your role can see the settings but not change them.'); return; }
+          if (!this.imp.data || this.imp.errors.length) return;
+          const ok = await ui.confirm({ title: 'Replace the database?', message: `Everything currently stored in this browser will be replaced by "${this.imp.file.name}" (${utils.num(this.imp.stats.rows)} rows). This cannot be undone unless you exported a backup.`, confirmText: 'Import & reload', danger: true });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const data = { ...this.imp.data, __version: ABM.VERSION, __imported_at: utils.now() };
+            if (!data.__seeded_at) data.__seeded_at = utils.now();
+            db.audit('data.import', 'settings', null, `Database import started from ${this.imp.file.name}`);
+            localStorage.setItem('abm.db.v1', JSON.stringify(data));
+            this.leaving = true;
+            location.reload();
+          } catch (err) { this.busy = false; ui.error('Import failed: ' + err.message); }
+        },
+        async resetDemo() {
+          if (!this.canEdit) { ui.error('Your role can see the settings but not change them.'); return; }
+          const ok = await ui.confirm({ title: 'Reset demo data?', message: 'All changes you made in this browser will be discarded and the sample data reloaded.', confirmText: 'Reset', danger: true });
+          if (!ok) return;
+          const uid = (session.user() || {}).id;
+          db.reset();
+          const u = db.find('users', uid) || db.all('users')[0];
+          session.logout(); session.login(u);
+          this.leaving = true;
+          location.reload();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

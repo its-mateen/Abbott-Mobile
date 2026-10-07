@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Stock Take · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="stock-counts" data-title="Stock Take" data-perm="stocktake.view">
+  <main x-data="stockCountsPage()" @keydown.escape.window="start.open = false">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Stock take</h2>
+        <p class="page-subtitle">Count the shelf, compare it with the system, post the difference · <span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="stock.html" class="btn btn-secondary"><span x-html="ABM.icon('archive')"></span>Branch stock</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canCount">
+          <button type="button" class="btn btn-primary" @click="openStart()"><span x-html="ABM.icon('plus')"></span>New Stock Take</button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'stock-counts.html?' + range.query + branchQuery" class="stat stat-accent" title="Every count in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Counts · <span x-text="periodShort"></span></div><div class="stat-value" x-text="ABM.utils.num(k.count)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('calculator')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.items)"></span> line<span x-text="k.items === 1 ? '' : 's'"></span> counted<span x-show="k.cancelled"> · <span x-text="k.cancelled"></span> cancelled</span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'stock-counts.html?range=all&status=in_progress' + branchQuery" class="stat" :class="k.open ? 'stat-warning' : 'stat-money'" title="Counts still being done (all time)">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">In progress</div><div class="stat-value" :class="k.open ? 'text-amber-700' : 'text-emerald-700'" x-text="ABM.utils.num(k.open)"></div></div>
+          <span class="chip" :class="k.open ? 'chip-warning' : 'chip-money'" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.open ? ABM.utils.num(k.openPending) + ' line(s) still to count' : 'Nothing half-counted'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'stock-counts.html?' + range.query + '&status=completed' + branchQuery" class="stat" :class="k.variance < 0 ? 'stat-danger' : 'stat-money'" title="Posted variance in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Net variance · <span x-text="periodShort"></span></div><div class="stat-value" :class="k.variance < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(k.variance, {decimals:0})"></div></div>
+          <span class="chip" :class="k.variance < 0 ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('scale')"></span>
+        </div>
+        <div class="stat-meta">gain <span class="text-emerald-700 font-semibold" x-text="$money(k.gain, {decimals:0})"></span> · loss <span class="text-rose-600 font-semibold" x-text="$money(Math.abs(k.loss), {decimals:0})"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-inventory.html?type=count_out' + branchQuery" class="stat stat-danger" title="Open the inventory movement report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Shrinkage · all time</div><div class="stat-value text-rose-600" x-text="$money(Math.abs(k.shrinkAll), {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('trend-down')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.missingUnits)"></span> serialized unit<span x-text="k.missingUnits === 1 ? '' : 's'"></span> never found</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          <div class="relative sm:col-span-2">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search count number, scope or notes…" x-model.debounce.200ms="q" aria-label="Search stock takes">
+          </div>
+          <select class="select" x-model="f.status" aria-label="Status">
+            <option value="">Any status</option>
+            <option value="in_progress">In progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <template x-if="isSuperAdmin">
+            <select class="select" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> counts in period</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Counts</div><div class="card-subtitle">Newest first · click a count number to open the sheet</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Count</th>
+              <th class="hidden sm:table-cell">Date</th>
+              <th>Scope</th>
+              <th class="hidden lg:table-cell" x-show="showBranch">Branch</th>
+              <th>Progress</th>
+              <th class="num hidden md:table-cell">Variance</th>
+              <th class="num">Value</th>
+              <th class="hidden sm:table-cell">Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="r.status === 'cancelled' && 'opacity-60'">
+                <td>
+                  <a :href="'stock-count-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.count_no"></a>
+                  <div class="text-[11px] text-slate-400 sm:hidden whitespace-nowrap" x-text="$date(r.count_date)"></div>
+                  <div class="text-[11px] text-slate-400 truncate max-w-[9rem]" x-show="showBranch" x-text="r.branchCode"></div>
+                </td>
+                <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(r.count_date)"></td>
+                <td>
+                  <div class="font-medium text-slate-800 truncate max-w-[8rem] sm:max-w-[12rem]" x-text="r.scope_label"></div>
+                  <div class="text-[11px] text-slate-400" x-text="ABM.db.userName(r.counted_by)"></div>
+                </td>
+                <td class="hidden lg:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                <td>
+                  <div class="min-w-[5rem] max-w-[7rem]">
+                    <div class="flex items-center justify-between gap-2 text-[11px] text-slate-500 mb-1">
+                      <span class="tabular"><b class="text-slate-700" x-text="r.counted"></b> / <span x-text="r.total"></span></span>
+                      <span class="tabular" x-text="r.pct + '%'"></span>
+                    </div>
+                    <div class="progress" :class="r.pct >= 100 && 'progress-money'"><div :style="'width:' + r.pct + '%'"></div></div>
+                  </div>
+                </td>
+                <td class="num hidden md:table-cell whitespace-nowrap" :class="r.variance_qty < 0 ? 'text-rose-600 font-semibold' : r.variance_qty > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-400'" x-text="r.variance_qty === 0 ? '—' : (r.variance_qty > 0 ? '+' : '') + ABM.utils.num(r.variance_qty)"></td>
+                <td class="num whitespace-nowrap" :class="r.variance_value < 0 ? 'text-rose-600 font-semibold' : r.variance_value > 0 ? 'text-emerald-700 font-semibold' : 'text-slate-400'" x-text="r.variance_value === 0 ? '—' : $money(r.variance_value, {decimals:0})"></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.status)"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'stock-count-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" :title="r.status === 'in_progress' ? 'Continue counting' : 'Open count'" x-html="ABM.icon(r.status === 'in_progress' ? 'edit' : 'eye','w-4 h-4')"></a>
+                    <a :href="'stock-count-view.html?id=' + r.id + '&print=1'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print count sheet" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('calculator')"></span>
+                  <div class="empty-title">No stock takes found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No count was done in this period.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <template x-if="canCount"><button type="button" class="btn btn-primary btn-sm" @click="openStart()">Start a stock take</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Start a count -->
+    <div x-show="start.open" x-cloak class="modal-backdrop" @click.self="start.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+        <form @submit.prevent="createCount()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="startTitle">Start a stock take</div>
+              <div class="text-xs text-slate-500">The system quantity is frozen now; counting it later never moves stock until you post.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="start.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="sc-branch">Branch <span class="req">*</span></label>
+                <template x-if="isSuperAdmin">
+                  <select id="sc-branch" class="select" x-model="start.branch_id">
+                    <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                </template>
+                <template x-if="!isSuperAdmin">
+                  <div class="input bg-slate-50 flex items-center gap-2"><span class="badge badge-slate" x-text="ABM.db.branchCode(start.branch_id)"></span><span class="truncate" x-text="ABM.db.branchName(start.branch_id)"></span></div>
+                </template>
+              </div>
+              <div>
+                <label class="label" for="sc-date">Count date <span class="req">*</span></label>
+                <input id="sc-date" type="date" class="input" x-model="start.count_date" :max="today" :class="start.errors.date && 'is-invalid'">
+                <p class="field-error" x-show="start.errors.date" x-text="start.errors.date"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="sc-scope">What are you counting? <span class="req">*</span></label>
+                <select id="sc-scope" class="select" x-model="start.scope">
+                  <option value="all">Everything in the branch</option>
+                  <option value="category">One category</option>
+                  <option value="brand">One brand</option>
+                  <option value="low">Only low / out-of-stock products</option>
+                </select>
+              </div>
+              <div x-show="start.scope === 'category'" class="sm:col-span-2">
+                <label class="label" for="sc-cat">Category <span class="req">*</span></label>
+                <select id="sc-cat" class="select" x-model="start.category_id" :class="start.errors.scope && 'is-invalid'">
+                  <option value="">Select a category…</option>
+                  <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+                </select>
+                <p class="field-error" x-show="start.errors.scope" x-text="start.errors.scope"></p>
+              </div>
+              <div x-show="start.scope === 'brand'" class="sm:col-span-2">
+                <label class="label" for="sc-brand">Brand <span class="req">*</span></label>
+                <select id="sc-brand" class="select" x-model="start.brand_id" :class="start.errors.scope && 'is-invalid'">
+                  <option value="">Select a brand…</option>
+                  <template x-for="b in brands" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+                </select>
+                <p class="field-error" x-show="start.errors.scope" x-text="start.errors.scope"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="sc-notes">Notes</label>
+                <input id="sc-notes" type="text" class="input" x-model="start.notes" placeholder="Optional — who is counting, which aisle…" maxlength="200">
+              </div>
+            </div>
+            <label class="flex items-start gap-2 cursor-pointer select-none text-sm">
+              <input type="checkbox" class="checkbox mt-0.5" x-model="start.includeZero">
+              <span><span class="font-medium text-slate-800">Include products the system shows as zero</span><span class="block text-xs text-slate-500">Catches stock sitting on the shelf that was never booked in. Adds <b x-text="ABM.utils.num(previewZero)"></b> more line(s).</span></span>
+            </label>
+            <div class="alert" :class="previewCount ? 'alert-info' : 'alert-warning'">
+              <span x-html="ABM.icon(previewCount ? 'info' : 'warning')"></span>
+              <span x-show="previewCount"><b x-text="ABM.utils.num(previewCount)"></b> product line(s) will be on this sheet, worth <b x-text="$money(previewValue)"></b> at cost. Serialized products are counted unit by unit.</span>
+              <span x-show="!previewCount">Nothing matches this scope at <b x-text="ABM.db.branchName(start.branch_id)"></b>. Pick another scope or tick "include zero" above.</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="start.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="start.busy || !previewCount"><span x-html="ABM.icon('check')"></span>Start counting</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function stockCountsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canCount: session.can('stocktake.add'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories').filter((c) => c.is_active && c.product_type !== 'service'), 'name'),
+        brands: utils.sortBy(db.all('brands').filter((b) => b.is_active), 'name'),
+        today: utils.today(),
+        range: null, rows: [], page: 1, q: '',
+        f: { status: '', branch: String(session.branchId() || '') },
+        k: { count: 0, cancelled: 0, items: 0, open: 0, openPending: 0, variance: 0, gain: 0, loss: 0, shrinkAll: 0, missingUnits: 0 },
+        start: { open: false, branch_id: String(session.branchId() || ''), count_date: utils.today(), scope: 'all', category_id: '', brand_id: '', includeZero: false, notes: '', errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.isSuperAdmin && this.f.branch === 'all'; },
+        get branchQuery() { return this.isSuperAdmin ? '&branch=' + this.f.branch : ''; },
+
+        init() {
+          if (!this.isSuperAdmin) { this.f.branch = String(session.branchId()); this.start.branch_id = String(session.branchId()); }
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const st = utils.qs('status', ''); if (['in_progress', 'completed', 'cancelled'].includes(st)) this.f.status = st;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'stock-counts');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('f.status', () => { this.page = 1; });
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+          if (utils.qs('new') === '1' && this.canCount) this.openStart();
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(c) { return this.f.branch === 'all' ? true : String(c.branch_id) === String(this.f.branch); },
+        buildRows(list) {
+          const byCount = {};
+          db.all('stock_count_items').forEach((i) => { (byCount[i.count_id] = byCount[i.count_id] || []).push(i); });
+          return list.map((c) => {
+            const its = byCount[c.id] || [];
+            const counted = its.filter((i) => i.counted_qty !== null && i.counted_qty !== undefined).length;
+            return {
+              ...c, branchCode: db.branchCode(c.branch_id), total: its.length, counted,
+              pending: its.length - counted,
+              pct: its.length ? Math.round(counted / its.length * 100) : 0,
+            };
+          });
+        },
+        compute() {
+          const scoped = db.all('stock_counts').filter((c) => this.inScope(c));
+          this.rows = utils.sortBy(this.buildRows(scoped.filter((c) => this.range.contains(c.count_date))),
+            (r) => String(r.count_date || '').slice(0, 10) + '|' + String(r.id).padStart(8, '0'), 'desc');
+          const allRows = this.buildRows(scoped);
+          const open = allRows.filter((r) => r.status === 'in_progress');
+          const donePeriod = this.rows.filter((r) => r.status === 'completed');
+          const doneAll = allRows.filter((r) => r.status === 'completed');
+          this.k = {
+            count: this.rows.length, cancelled: this.rows.filter((r) => r.status === 'cancelled').length,
+            items: this.rows.reduce((a, r) => a + r.counted, 0),
+            open: open.length, openPending: open.reduce((a, r) => a + r.pending, 0),
+            variance: utils.sum(donePeriod, 'variance_value'), gain: utils.sum(donePeriod, 'gain_value'), loss: utils.sum(donePeriod, 'loss_value'),
+            shrinkAll: utils.sum(doneAll, 'loss_value'),
+            missingUnits: db.all('product_imeis').filter((i) => i.status === 'missing' && (this.f.branch === 'all' || String(i.branch_id) === String(this.f.branch))).length,
+          };
+        },
+        get hasFilters() { return !!(this.q || this.f.status); },
+        clearFilters() { this.q = ''; this.f.status = ''; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((r) => {
+            if (this.f.status && r.status !== this.f.status) return false;
+            if (q && ![r.count_no, r.scope_label, r.notes].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'Count No', key: 'count_no' }, { label: 'Date', key: 'count_date' }, { label: 'Branch', key: 'branchCode' },
+            { label: 'Scope', key: 'scope_label' }, { label: 'Lines', key: 'total' }, { label: 'Counted', key: 'counted' },
+            { label: 'Variance Units', key: 'variance_qty' }, { label: 'Variance Value', key: 'variance_value' },
+            { label: 'Gain', key: 'gain_value' }, { label: 'Loss', key: 'loss_value' },
+            { label: 'Status', value: (r) => ui.statusLabel(r.status) }, { label: 'Counted By', value: (r) => db.userName(r.counted_by) }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('stock-takes-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' count' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* ------------------------------------------------------ new count */
+        openStart() {
+          if (!this.canCount) { ui.warn('You do not have permission to run a stock take.'); return; }
+          this.start = { ...this.start, open: true, count_date: utils.today(), errors: {}, busy: false };
+          if (!this.isSuperAdmin) this.start.branch_id = String(session.branchId());
+        },
+        /** Products on the sheet for the chosen scope, with the quantity the system believes in right now. */
+        scopeProducts() {
+          const s = this.start;
+          const branchId = Number(s.branch_id);
+          return db.all('products')
+            .filter((p) => p.is_active && db.isStockTracked(p))
+            .filter((p) => {
+              if (s.scope === 'category') return String(p.category_id) === String(s.category_id);
+              if (s.scope === 'brand') return String(p.brand_id) === String(s.brand_id);
+              return true;
+            })
+            .map((p) => ({ product: p, expected: ABM.stock.qty(branchId, p.id) }))
+            .filter((r) => {
+              // "low" means at or under the reorder level; a product with no level set only qualifies
+              // when it is actually out of stock and zero-stock lines were asked for.
+              if (s.scope === 'low') {
+                const min = Number(r.product.min_stock) || 0;
+                return min > 0 ? r.expected <= min : (s.includeZero && r.expected === 0);
+              }
+              return s.includeZero ? true : r.expected > 0;
+            });
+        },
+        get previewRows() { return (this.start.scope === 'category' && !this.start.category_id) || (this.start.scope === 'brand' && !this.start.brand_id) ? [] : this.scopeProducts(); },
+        get previewCount() { return this.previewRows.length; },
+        get previewValue() { return utils.round2(this.previewRows.reduce((a, r) => a + r.expected * (Number(r.product.cost_price) || 0), 0)); },
+        get previewZero() { return this.previewRows.filter((r) => r.expected === 0).length; },
+        createCount() {
+          const s = this.start;
+          const e = {};
+          if (!s.count_date) e.date = 'Pick the count date.';
+          else if (s.count_date > this.today) e.date = 'A count cannot be dated in the future.';
+          if (s.scope === 'category' && !s.category_id) e.scope = 'Choose the category to count.';
+          if (s.scope === 'brand' && !s.brand_id) e.scope = 'Choose the brand to count.';
+          s.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          const rows = this.previewRows;
+          if (!rows.length) { ui.error('Nothing to count in this scope.'); return; }
+          s.busy = true;
+          try {
+            const branchId = Number(s.branch_id);
+            const scopeLabel = s.scope === 'category' ? db.categoryName(s.category_id)
+              : s.scope === 'brand' ? db.brandName(s.brand_id)
+                : s.scope === 'low' ? 'Low / out-of-stock products' : 'Whole branch';
+            const count = db.insert('stock_counts', {
+              count_no: db.nextNumber('CNT', db.branchCode(branchId)), branch_id: branchId,
+              count_date: s.count_date, scope: s.scope,
+              scope_id: s.scope === 'category' ? Number(s.category_id) : s.scope === 'brand' ? Number(s.brand_id) : null,
+              scope_label: scopeLabel, status: 'in_progress', notes: String(s.notes || '').trim(),
+              created_by: (session.user() || {}).id || null, counted_by: (session.user() || {}).id || null,
+              items_total: rows.length, counted_items: 0, variance_qty: 0, variance_value: 0, gain_value: 0, loss_value: 0,
+              started_at: utils.now(), completed_at: null, cancelled_at: null,
+            });
+            rows.forEach((r) => {
+              db.insert('stock_count_items', {
+                count_id: count.id, product_id: r.product.id, serialized: db.isSerialized(r.product) ? 1 : 0,
+                expected_qty: r.expected, counted_qty: null, unit_cost: Number(r.product.cost_price) || 0,
+                variance_qty: 0, variance_value: 0, scanned: [], missing_ids: [], extra_serials: [],
+                notes: '', counted_at: null, counted_by: null,
+              });
+            });
+            db.audit('stock_count.create', 'stock_count', count.id, `Stock take ${count.count_no} started at ${db.branchName(branchId)} — ${scopeLabel}, ${rows.length} line(s)`);
+            ui.success('Stock take ' + count.count_no + ' started — ' + rows.length + ' line(s) to count.');
+            s.open = false;
+            setTimeout(() => { location.href = 'stock-count-view.html?id=' + count.id; }, 350);
+          } catch (err) {
+            ui.error(err.message || 'Could not start the stock take.');
+            s.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

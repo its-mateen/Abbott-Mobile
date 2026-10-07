@@ -1,0 +1,15 @@
+{
+  "name": "Abbott Mobiles — POS & Inventory",
+  "short_name": "Abbott POS",
+  "description": "Point of sale, inventory, repairs and accounting for Abbott Mobiles branches.",
+  "start_url": "index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f1d3d",
+  "theme_color": "#1a336a",
+  "icons": [
+    { "src": "assets/img/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "assets/img/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Request Transfer · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="transfer-create" data-title="Request Transfer" data-perm="transfers.add">
+  <main x-data="transferCreatePage()" @keydown.escape.window="closePicker()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="transfers.html" class="hover:text-navy-700">Stock transfers</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>New request</span></div>
+        <h2 class="page-title">Request stock transfer</h2>
+        <p class="page-subtitle">Ask another branch to send stock to <b x-text="toBranchName"></b>. Nothing moves until the request is approved and shipped.</p>
+      </div>
+      <div class="page-actions">
+        <a href="transfers.html" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-primary" :disabled="busy || !lines.length" @click="save()"><span x-html="ABM.icon('check')"></span>Send request</button>
+      </div>
+    </div>
+
+    <!-- No second branch -->
+    <template x-if="!sourceOptions.length">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mb-4" x-html="ABM.icon('building','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">No other branch available</h2>
+          <p class="text-sm text-slate-600 mt-2">A transfer needs a second active branch to send the stock from. Activate another branch first.</p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap"><a href="transfers.html" class="btn btn-secondary">Back to transfers</a><a href="branches.html" class="btn btn-primary" x-show="ABM.session.can('branches.view')">Manage branches</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="sourceOptions.length">
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <!-- LEFT: route + lines -->
+        <div class="xl:col-span-2 space-y-4 min-w-0">
+          <!-- Route -->
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Route</div><div class="card-subtitle">Where the stock comes from and where it is going</div></div>
+              <a href="stock.html" class="text-xs font-semibold text-navy-700 hover:underline">Check branch stock</a>
+            </div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="min-w-0">
+                  <label class="label" for="tc-from">Source branch (sends stock) <span class="req">*</span></label>
+                  <select id="tc-from" class="select" x-model="form.from_branch_id" :class="errors.from && 'is-invalid'" @change="onSourceChange()">
+                    <option value="">Select a branch…</option>
+                    <template x-for="b in sourceOptions" :key="b.id"><option :value="String(b.id)" :selected="String(b.id) === form.from_branch_id" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                  <p class="field-error" x-show="errors.from" x-text="errors.from"></p>
+                  <p class="help" x-show="!errors.from && fromBranch" x-text="fromBranch ? (fromBranch.address || '') : ''"></p>
+                </div>
+                <div class="min-w-0">
+                  <label class="label" for="tc-to">Destination branch (receives) <span class="req">*</span></label>
+                  <template x-if="isSuperAdmin">
+                    <select id="tc-to" class="select" x-model="form.to_branch_id" :class="errors.to && 'is-invalid'" @change="onDestChange()">
+                      <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" :selected="String(b.id) === form.to_branch_id" x-text="b.code + ' · ' + b.name"></option></template>
+                    </select>
+                  </template>
+                  <template x-if="!isSuperAdmin">
+                    <div class="input bg-slate-50 flex items-center gap-2 min-w-0"><span class="badge badge-green flex-none" x-text="toBranchCode"></span><span class="truncate" x-text="toBranchName"></span></div>
+                  </template>
+                  <p class="field-error" x-show="errors.to" x-text="errors.to"></p>
+                  <p class="help" x-show="!errors.to">Your active branch is the requesting branch.</p>
+                </div>
+                <div class="sm:col-span-2 min-w-0">
+                  <div class="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                    <span class="badge badge-slate" x-text="fromBranch ? fromBranch.code : '—'"></span>
+                    <span class="font-medium text-slate-700 truncate max-w-[9rem] sm:max-w-none" x-text="fromBranch ? fromBranch.name : 'No source selected'"></span>
+                    <span class="text-slate-400 flex-none" x-html="ABM.icon('arrow-right','w-4 h-4')"></span>
+                    <span class="badge badge-green" x-text="toBranchCode"></span>
+                    <span class="font-medium text-slate-700 truncate max-w-[9rem] sm:max-w-none" x-text="toBranchName"></span>
+                  </div>
+                </div>
+                <div class="sm:col-span-2 min-w-0">
+                  <label class="label" for="tc-notes">Reason / notes</label>
+                  <textarea id="tc-notes" class="textarea !min-h-[4rem]" x-model="form.notes" maxlength="300" placeholder="e.g. Urgent — S24 out of stock at Gulberg, customer waiting"></textarea>
+                  <p class="help">Shown to the approver. <span x-text="300 - (form.notes || '').length"></span> characters left.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Items -->
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Items requested</div><div class="card-subtitle"><span x-text="lines.length"></span> line<span x-text="lines.length === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(totals.units)"></span> unit<span x-text="totals.units === 1 ? '' : 's'"></span></div></div>
+              <span class="text-xs text-slate-500" x-show="fromBranch">Availability at <b x-text="fromBranch ? fromBranch.code : ''"></b></span>
+            </div>
+            <div class="card-body space-y-4">
+              <div class="relative" @click.outside="search.open = false">
+                <div class="input-icon">
+                  <span x-html="ABM.icon('search')"></span>
+                  <input x-ref="productSearch" type="text" class="input" :disabled="!form.from_branch_id" :placeholder="form.from_branch_id ? 'Search product by name, model, SKU, brand…' : 'Select the source branch first'" x-model="search.q" @focus="search.open = true" @input="search.open = true" @keydown.enter.prevent="pickFirstProduct()" autocomplete="off" aria-label="Search products">
+                </div>
+                <div x-show="search.open && form.from_branch_id" x-cloak class="dropdown left-0 right-0 mt-1 max-h-80">
+                  <div class="dropdown-label" x-text="search.q.trim() ? 'Matching products' : 'Products in stock at ' + (fromBranch ? fromBranch.code : '')"></div>
+                  <template x-for="p in productResults" :key="p.id">
+                    <button type="button" class="dropdown-item" @click="addLine(p.id)">
+                      <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center" :class="p.available > 0 ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-400'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate font-medium text-slate-800" x-text="p.label"></span>
+                        <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span><span x-show="p.serialized"> · <span x-text="p.serialLabel"></span> tracked</span> · <span x-text="p.categoryName"></span></span>
+                      </span>
+                      <span class="badge flex-none" :class="p.available > 0 ? 'badge-green' : 'badge-red'" x-text="p.available + ' at ' + (fromBranch ? fromBranch.code : '')"></span>
+                    </button>
+                  </template>
+                  <div x-show="!productResults.length" class="px-2.5 py-3 text-sm text-slate-500">No transferable product matches. Services and inactive products cannot be transferred.</div>
+                </div>
+                <p class="help">Press <span class="kbd">Enter</span> to add the first match. Services / labor cannot be transferred.</p>
+              </div>
+              <p class="field-error" x-show="errors.lines" x-text="errors.lines"></p>
+
+              <template x-if="!lines.length">
+                <div class="empty border border-dashed border-slate-300 rounded-xl">
+                  <span x-html="ABM.icon('cube')"></span>
+                  <div class="empty-title">No items yet</div>
+                  <div class="text-sm mt-1">Search above to add the products this branch needs.</div>
+                </div>
+              </template>
+
+              <template x-for="(line, idx) in lines" :key="line.key">
+                <div class="rounded-xl border p-4 min-w-0" :class="line.error ? 'border-rose-300' : 'border-slate-200'">
+                  <div class="flex items-start gap-3">
+                    <span class="w-10 h-10 rounded-xl flex-none flex items-center justify-center" :class="line.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(line.icon,'w-5 h-5')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                        <a :href="'product-view.html?id=' + line.product_id" class="font-semibold text-slate-800 hover:text-navy-700 truncate max-w-full" x-text="line.label"></a>
+                        <span x-html="$badge(line.product_type)"></span>
+                        <span class="badge badge-navy" x-show="line.serialized" x-text="line.serialLabel"></span>
+                      </div>
+                      <div class="text-xs text-slate-500 mt-0.5 truncate"><span class="mono" x-text="line.sku"></span> · available at <span x-text="fromBranch ? fromBranch.code : ''"></span>: <b :class="line.available > 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="line.available"></b> · at <span x-text="toBranchCode"></span>: <b class="text-slate-700" x-text="line.atDest"></b></div>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600 flex-none" title="Remove line" @click="removeLine(idx)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                    <div class="min-w-0">
+                      <label class="label">Quantity <span class="req">*</span></label>
+                      <div class="input-group">
+                        <input type="number" min="1" step="1" :max="line.available" class="input" x-model.number="line.qty" :disabled="line.units.length > 0" @input="recalc()" aria-label="Quantity">
+                        <span class="addon" x-text="'of ' + line.available"></span>
+                      </div>
+                      <p class="help" x-show="line.units.length">Locked to the <span x-text="line.units.length"></span> picked unit(s).</p>
+                    </div>
+                    <div class="min-w-0">
+                      <label class="label">Unit cost (source)</label>
+                      <div class="input input-money bg-slate-50 text-slate-700" x-text="$money(line.unit_cost)"></div>
+                    </div>
+                    <div class="min-w-0">
+                      <label class="label">Line value at cost</label>
+                      <div class="input input-money bg-slate-50 font-bold text-slate-900" x-text="$money(line.total)"></div>
+                    </div>
+                  </div>
+
+                  <template x-if="line.serialized">
+                    <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+                      <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div class="text-sm font-semibold text-slate-800 flex items-center gap-2 min-w-0"><span class="flex-none" x-html="ABM.icon('qr','w-4 h-4 text-slate-500')"></span><span class="truncate">Pick specific units <span class="font-normal text-slate-500">(optional)</span></span></div>
+                        <div class="flex items-center gap-2">
+                          <button type="button" class="btn btn-secondary btn-sm" data-pick @click="openPicker(idx)" :disabled="!line.available"><span x-html="ABM.icon('scan','w-4 h-4')"></span><span x-text="line.units.length ? 'Change units' : 'Pick units'"></span></button>
+                          <button type="button" class="btn btn-ghost btn-sm" x-show="line.units.length" @click="clearUnits(line)">Clear</button>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5 mt-2" x-show="line.units.length">
+                        <template x-for="u in line.units" :key="u.id">
+                          <span class="badge badge-navy"><span x-html="ABM.icon('check','w-3 h-3')"></span><span class="mono" x-text="u.imei"></span></span>
+                        </template>
+                      </div>
+                      <p class="help" x-show="!line.units.length">Leave empty and the source branch picks the units when it ships.</p>
+                    </div>
+                  </template>
+                  <p class="field-error mt-2" x-show="line.error" x-text="line.error"></p>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: summary -->
+        <div class="space-y-4 min-w-0">
+          <div class="card xl:sticky xl:top-20">
+            <div class="card-header"><div><div class="card-title">Summary</div><div class="card-subtitle" x-text="lines.length ? lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' · ' + ABM.utils.num(totals.units) + ' unit' + (totals.units === 1 ? '' : 's') : 'Nothing added yet'"></div></div></div>
+            <div class="card-body space-y-3">
+              <div class="flex items-center justify-between text-sm gap-2"><span class="text-slate-500">Lines</span><b class="tabular text-slate-800" x-text="lines.length"></b></div>
+              <div class="flex items-center justify-between text-sm gap-2"><span class="text-slate-500">Units requested</span><b class="tabular text-slate-800" x-text="ABM.utils.num(totals.units)"></b></div>
+              <div class="flex items-center justify-between text-sm gap-2"><span class="text-slate-500">Units pre-picked</span><b class="tabular text-slate-800" x-text="ABM.utils.num(totals.picked)"></b></div>
+              <div class="divider"></div>
+              <div class="flex items-center justify-between gap-2"><span class="text-sm font-semibold text-slate-700">Value at cost</span><b class="text-lg font-extrabold tabular text-slate-900 min-w-0 truncate" x-text="$money(totals.value)"></b></div>
+              <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><div>The request is created as <b>pending</b>. <span x-text="fromBranch ? fromBranch.name : 'The source branch'"></span>'s manager (or a Super Admin) approves it, ships the units, then <b x-text="toBranchName"></b> inspects and receives them.</div></div>
+              <button type="button" class="btn btn-primary btn-block" :disabled="busy || !lines.length" @click="save()"><span x-html="ABM.icon('transfer')"></span>Send request</button>
+              <a href="transfers.html" class="btn btn-secondary btn-block">Cancel</a>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><div class="card-title">Low stock at <span x-text="toBranchCode"></span></div><a href="stock.html?filter=low" class="text-xs font-semibold text-navy-700 hover:underline">See all</a></div>
+            <ul class="divide-y divide-slate-100">
+              <template x-for="p in suggestions" :key="p.id">
+                <li class="px-5 py-2.5 flex items-center gap-3 min-w-0">
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-medium text-slate-800 truncate" x-text="p.label"></div>
+                    <div class="text-[11px] text-slate-500"><span x-text="toBranchCode"></span>: <b x-text="p.atDest"></b> · <span x-text="fromBranch ? fromBranch.code : 'source'"></span>: <b class="text-emerald-700" x-text="p.available"></b></div>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm flex-none" @click="addLine(p.id)" :disabled="!p.available">Add</button>
+                </li>
+              </template>
+              <template x-if="!suggestions.length"><li class="empty py-8 text-sm" x-text="form.from_branch_id ? 'Nothing at or below minimum stock that the source branch can cover.' : 'Select a source branch to see suggestions.'"></li></template>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Unit picker modal -->
+    <div x-show="picker.open" x-cloak class="modal-backdrop" @click.self="closePicker()">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="pickerTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title" id="pickerTitle">Pick units to request</div>
+            <div class="text-xs text-slate-500 truncate" x-text="picker.label"></div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="closePicker()" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="input-icon flex-1 min-w-[11rem]">
+              <span x-html="ABM.icon('scan')"></span>
+              <input x-ref="pickerScan" type="text" class="input mono" :placeholder="'Scan or type ' + picker.serialLabel + ' and press Enter'" x-model="picker.scan" @keydown.enter.prevent="scanPick()" autocomplete="off" aria-label="Scan unit">
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" @click="selectFirst()" x-text="'Select first ' + picker.max"></button>
+            <button type="button" class="btn btn-ghost btn-sm" @click="picker.selected = []">Clear</button>
+          </div>
+          <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span class="text-slate-500"><b class="text-slate-800" x-text="picker.selected.length"></b> selected · max <span x-text="picker.max"></span> · <span x-text="picker.units.length"></span> sellable at <span x-text="fromBranch ? fromBranch.code : ''"></span></span>
+            <span class="badge" :class="picker.selected.length > picker.max ? 'badge-red' : 'badge-green'" x-show="picker.selected.length" x-text="picker.selected.length > picker.max ? 'Too many selected' : 'Ready'"></span>
+          </div>
+          <div class="table-wrap border border-slate-200 rounded-xl max-h-[22rem] overflow-y-auto">
+            <table class="table table-compact">
+              <thead><tr><th class="w-10"></th><th x-text="picker.serialLabel"></th><th class="hidden sm:table-cell">Status</th><th class="num hidden md:table-cell">Cost</th></tr></thead>
+              <tbody>
+                <template x-for="u in picker.units" :key="u.id">
+                  <tr :class="picker.selected.includes(u.id) && 'selected'" class="cursor-pointer" @click="toggleUnit(u.id)">
+                    <td><input type="checkbox" class="checkbox" :checked="picker.selected.includes(u.id)" @click.stop="toggleUnit(u.id)" :aria-label="'Select ' + u.imei"></td>
+                    <td class="mono font-medium text-slate-800" x-text="u.imei"></td>
+                    <td class="hidden sm:table-cell"><span x-html="$badge(u.status)"></span></td>
+                    <td class="num hidden md:table-cell text-slate-600" x-text="$money(u.cost_price, {decimals:0})"></td>
+                  </tr>
+                </template>
+                <template x-if="!picker.units.length"><tr><td colspan="4" class="empty py-8 text-sm">No sellable units at the source branch.</td></tr></template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="closePicker()">Cancel</button>
+          <button type="button" class="btn btn-primary" :disabled="picker.selected.length > picker.max" @click="applyPicker()"><span x-html="ABM.icon('check')"></span><span x-text="'Use ' + picker.selected.length + ' unit' + (picker.selected.length === 1 ? '' : 's')"></span></button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function transferCreatePage() {
+      const { db, utils, ui, session, stock } = ABM;
+      let keySeq = 0;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        me: session.user() || { id: null, name: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        lines: [], busy: false, errors: {},
+        form: { from_branch_id: '', to_branch_id: String(session.branchId() || ''), notes: '' },
+        search: { q: '', open: false },
+        picker: { open: false, idx: -1, label: '', serialLabel: 'IMEI', units: [], selected: [], max: 0, scan: '' },
+
+        get fromBranch() { return this.form.from_branch_id ? db.find('branches', this.form.from_branch_id) : null; },
+        get toBranchName() { return db.branchName(this.form.to_branch_id); },
+        get toBranchCode() { return db.branchCode(this.form.to_branch_id); },
+        get sourceOptions() { return this.branches.filter((b) => String(b.id) !== String(this.form.to_branch_id)); },
+
+        init() {
+          if (!this.isSuperAdmin) this.form.to_branch_id = String(session.branchId());
+          const from = utils.qs('from', ''); const opts = this.sourceOptions;
+          if (from && opts.some((b) => String(b.id) === String(from))) this.form.from_branch_id = String(from);
+          else if (opts.length === 1) this.form.from_branch_id = String(opts[0].id);
+          const pid = utils.qs('product', '');
+          if (pid && this.form.from_branch_id) this.addLine(pid, true);
+        },
+
+        /* ----------------------------------------------------------- route */
+        onSourceChange() { this.errors.from = ''; this.revalidateLines(); },
+        onDestChange() {
+          if (String(this.form.from_branch_id) === String(this.form.to_branch_id)) this.form.from_branch_id = '';
+          this.errors.to = '';
+          this.revalidateLines();
+        },
+
+        /* --------------------------------------------------------- catalog */
+        productMeta(p) {
+          const serialized = db.isSerialized(p);
+          return {
+            id: p.id, label: db.productLabel(p.id), sku: p.sku || '', product_type: db.productType(p),
+            serialized, serialLabel: db.serialLabel(p), categoryName: db.categoryName(p.category_id),
+            icon: ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : serialized ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube',
+            unit_cost: Number(p.cost_price) || 0,
+          };
+        },
+        availableAt(branchId, productId) { return branchId ? stock.qty(branchId, productId) : 0; },
+        get productResults() {
+          if (!this.form.from_branch_id) return [];
+          const q = this.search.q.trim().toLowerCase();
+          const taken = new Set(this.lines.map((l) => String(l.product_id)));
+          const out = db.all('products')
+            .filter((p) => p.is_active && db.isStockTracked(p) && !taken.has(String(p.id)))
+            .filter((p) => !q || [p.name, p.model, p.variant, p.color, p.sku, p.barcode, db.brandName(p.brand_id), db.categoryName(p.category_id)].some((v) => String(v || '').toLowerCase().includes(q)))
+            .map((p) => ({ ...this.productMeta(p), available: this.availableAt(this.form.from_branch_id, p.id) }));
+          return utils.sortBy(out, (r) => (r.available > 0 ? 0 : 1) + '|' + r.label).slice(0, 25);
+        },
+        get suggestions() {
+          if (!this.form.from_branch_id) return [];
+          const taken = new Set(this.lines.map((l) => String(l.product_id)));
+          return db.all('products')
+            .filter((p) => p.is_active && db.isStockTracked(p) && !taken.has(String(p.id)))
+            .map((p) => ({ ...this.productMeta(p), atDest: this.availableAt(this.form.to_branch_id, p.id), available: this.availableAt(this.form.from_branch_id, p.id), min_stock: Number(p.min_stock) || 0 }))
+            .filter((p) => p.atDest <= p.min_stock && p.available > 0)
+            .sort((a, b) => a.atDest - b.atDest || b.available - a.available)
+            .slice(0, 5);
+        },
+        pickFirstProduct() { const r = this.productResults; if (r.length) this.addLine(r[0].id); },
+
+        /* ----------------------------------------------------------- lines */
+        addLine(productId, silent = false) {
+          if (!this.form.from_branch_id) { ui.warn('Select the source branch first.'); return; }
+          const p = db.find('products', productId);
+          if (!p || !p.is_active) { ui.error('Product not found.'); return; }
+          if (!db.isStockTracked(p)) { ui.warn('Services and labor items cannot be transferred.'); return; }
+          if (this.lines.some((l) => String(l.product_id) === String(p.id))) { ui.toast('That product is already on the request.', 'info'); return; }
+          const meta = this.productMeta(p);
+          const available = this.availableAt(this.form.from_branch_id, p.id);
+          if (available <= 0) { ui.warn(meta.label + ' has no sellable stock at ' + db.branchCode(this.form.from_branch_id) + '.'); return; }
+          this.lines.push({ key: 'l' + (++keySeq), product_id: p.id, ...meta, available, atDest: this.availableAt(this.form.to_branch_id, p.id), qty: 1, units: [], total: meta.unit_cost, error: '' });
+          this.search.q = ''; this.search.open = false;
+          this.errors.lines = '';
+          this.recalc();
+          if (!silent) this.$nextTick(() => { if (this.$refs.productSearch) this.$refs.productSearch.focus(); });
+        },
+        removeLine(idx) { this.lines.splice(idx, 1); this.recalc(); },
+        clearUnits(line) { line.units = []; this.recalc(); },
+        revalidateLines() {
+          this.lines.forEach((l) => {
+            l.available = this.availableAt(this.form.from_branch_id, l.product_id);
+            l.atDest = this.availableAt(this.form.to_branch_id, l.product_id);
+            l.units = [];
+          });
+          this.recalc();
+        },
+        recalc() {
+          this.lines.forEach((l) => {
+            if (l.units.length) l.qty = l.units.length;
+            const qty = Math.max(0, Math.floor(Number(l.qty) || 0));
+            l.error = '';
+            if (qty < 1) l.error = 'Enter a quantity of at least 1.';
+            else if (qty > l.available) l.error = `Only ${l.available} unit(s) are sellable at ${db.branchCode(this.form.from_branch_id)}.`;
+            l.total = utils.round2((Number(l.unit_cost) || 0) * qty);
+          });
+        },
+        get totals() {
+          const units = this.lines.reduce((a, l) => a + (Math.max(0, Math.floor(Number(l.qty) || 0))), 0);
+          return { units, picked: this.lines.reduce((a, l) => a + l.units.length, 0), value: utils.sum(this.lines, 'total') };
+        },
+
+        /* ---------------------------------------------------------- picker */
+        openPicker(idx) {
+          const line = this.lines[idx];
+          if (!line) return;
+          const units = db.all('product_imeis').filter((i) => String(i.product_id) === String(line.product_id) && String(i.branch_id) === String(this.form.from_branch_id) && stock.SELLABLE.includes(i.status));
+          this.picker = {
+            open: true, idx, label: line.label + ' · ' + db.branchCode(this.form.from_branch_id),
+            serialLabel: line.serialLabel, units: utils.sortBy(units, 'imei'),
+            selected: line.units.map((u) => u.id).filter((id) => units.some((x) => x.id === id)),
+            max: Math.max(1, Math.min(line.available, Math.max(1, Math.floor(Number(line.qty) || 1)))), scan: '',
+          };
+          this.$nextTick(() => { if (this.$refs.pickerScan) this.$refs.pickerScan.focus(); });
+        },
+        closePicker() { if (this.picker.open) { this.picker.open = false; this.picker.scan = ''; } },
+        toggleUnit(id) {
+          const i = this.picker.selected.indexOf(id);
+          if (i >= 0) this.picker.selected.splice(i, 1);
+          else if (this.picker.selected.length >= this.picker.max) ui.warn('You asked for ' + this.picker.max + ' unit(s). Remove one first or raise the quantity.');
+          else this.picker.selected.push(id);
+        },
+        selectFirst() { this.picker.selected = this.picker.units.slice(0, this.picker.max).map((u) => u.id); },
+        scanPick() {
+          const v = String(this.picker.scan || '').trim().toUpperCase();
+          if (!v) return;
+          const u = this.picker.units.find((x) => String(x.imei).toUpperCase() === v);
+          if (!u) { ui.error('No sellable unit with that ' + this.picker.serialLabel + ' at the source branch.'); return; }
+          if (!this.picker.selected.includes(u.id)) this.toggleUnit(u.id);
+          this.picker.scan = '';
+        },
+        applyPicker() {
+          const line = this.lines[this.picker.idx];
+          if (!line) { this.closePicker(); return; }
+          line.units = this.picker.selected.map((id) => { const u = db.find('product_imeis', id); return { id, imei: u ? u.imei : String(id) }; });
+          if (line.units.length) line.qty = line.units.length;
+          this.closePicker();
+          this.recalc();
+          ui.success(line.units.length ? line.units.length + ' unit(s) pre-picked.' : 'Unit selection cleared.');
+        },
+
+        /* ------------------------------------------------------------ save */
+        validate() {
+          const e = {};
+          if (!this.form.from_branch_id) e.from = 'Choose the branch that will send the stock.';
+          else if (String(this.form.from_branch_id) === String(this.form.to_branch_id)) e.from = 'Source and destination must be different branches.';
+          if (!this.form.to_branch_id) e.to = 'Choose the receiving branch.';
+          if (!this.lines.length) e.lines = 'Add at least one product to the request.';
+          this.recalc();
+          if (this.lines.some((l) => l.error)) e.lines = 'Fix the highlighted lines before sending.';
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        save() {
+          if (this.busy) return;
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); return; }
+          this.busy = true;
+          try {
+            const fromId = Number(this.form.from_branch_id), toId = Number(this.form.to_branch_id);
+            const code = db.branchCode(fromId);
+            const t = db.insert('stock_transfers', {
+              transfer_no: db.nextNumber('TRF', code), from_branch_id: fromId, to_branch_id: toId, status: 'pending',
+              requested_by: this.me.id, approved_by: null, shipped_by: null, received_by: null,
+              notes: String(this.form.notes || '').trim(), rejection_reason: null,
+              requested_at: utils.now(), approved_at: null, shipped_at: null, received_at: null,
+            });
+            this.lines.forEach((l) => {
+              db.insert('transfer_items', {
+                transfer_id: t.id, product_id: Number(l.product_id), quantity: Math.floor(Number(l.qty) || 0),
+                shipped_quantity: null, received_quantity: 0, unit_cost: utils.round2(l.unit_cost),
+                imei_ids: l.units.map((u) => Number(u.id)),
+              });
+            });
+            db.audit('transfer.request', 'stock_transfer', t.id, `${t.transfer_no} requested: ${this.totals.units} unit(s) in ${this.lines.length} line(s) from ${db.branchName(fromId)} to ${db.branchName(toId)}`);
+            ui.success(t.transfer_no + ' created — waiting for approval.');
+            location.href = 'transfer-view.html?id=' + t.id;
+          } catch (err) {
+            ui.error(err.message || 'Could not create the transfer request.');
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

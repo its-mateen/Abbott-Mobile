@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Roles &amp; Permissions · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .perm-dot { display: inline-flex; align-items: center; justify-content: center; width: 1.25rem; height: 1.25rem; border-radius: .375rem; font-size: 10px; font-weight: 800; }
+    .perm-dot.on { background: rgb(var(--emerald-600) / .16); color: rgb(4 120 87); }
+    .perm-dot.off { color: rgb(var(--slate-300)); }
+    .perm-dot.na { color: transparent; }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="roles" data-title="Roles & Permissions" data-perm="roles.view">
+  <main x-data="rolesPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Roles &amp; permissions</h2>
+        <p class="page-subtitle">Decide what each role can see and do, screen by screen. People get their role on the <a href="users.html" class="font-semibold text-navy-700 hover:underline">Users</a> page.</p>
+      </div>
+      <div class="page-actions">
+        <a href="audit-log.html?prefix=role&amp;range=all" class="btn btn-secondary" x-show="$can('audit.view')"><span x-html="ABM.icon('clipboard')"></span>Change history</a>
+        <template x-if="canAdd"><a href="role-edit.html" class="btn btn-primary"><span x-html="ABM.icon('plus')"></span>New role</a></template>
+      </div>
+    </div>
+
+    <!-- Tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div class="stat stat-accent">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Roles</div><div class="stat-value" x-text="rows.length"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('shield')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.builtIn"></span> built in · <span x-text="k.custom"></span> custom</div>
+      </div>
+      <a href="users.html" class="stat stat-money" title="Open Users">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Active staff</div><div class="stat-value" x-text="k.people"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('user-group')"></span>
+        </div>
+        <div class="stat-meta">each with exactly one role</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Screens covered</div><div class="stat-value" x-text="modules.length"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.keys"></span> permissions to tick</div>
+      </div>
+      <div class="stat" :class="k.unused ? 'stat-warning' : ''">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Roles nobody has</div><div class="stat-value" x-text="k.unused"></div></div>
+          <span class="chip" :class="k.unused ? 'chip-warning' : 'chip-slate'" x-html="ABM.icon('user')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.unused ? 'safe to delete if not needed' : 'every role is in use'"></div>
+      </div>
+    </div>
+
+    <!-- Role cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
+      <template x-for="r in rows" :key="r.id">
+        <div class="card flex flex-col">
+          <div class="card-body flex-1 flex flex-col">
+            <div class="flex items-start gap-3">
+              <span class="chip flex-none" :class="chipClass(r.color)" x-html="ABM.icon(r.icon)"></span>
+              <div class="min-w-0 flex-1">
+                <a :href="'role-edit.html?id=' + r.id" class="font-bold text-slate-900 hover:text-navy-700 block truncate" x-text="r.name"></a>
+                <div class="flex flex-wrap items-center gap-1 mt-0.5">
+                  <span class="badge badge-purple" x-show="r.full">Full access</span>
+                  <span class="badge badge-slate" x-show="r.is_system && !r.full">Built in</span>
+                  <span class="badge badge-navy" x-show="!r.is_system">Custom</span>
+                  <span class="badge badge-green" x-show="r.mine">Your role</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-sm text-slate-600 mt-3 line-clamp-2 min-h-[2.5rem]" x-text="r.description || 'No description.'"></p>
+
+            <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3">
+              <div class="flex items-baseline justify-between gap-2">
+                <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Permissions</div>
+                <div class="text-xs text-slate-500"><b class="text-slate-800 tabular" x-text="r.count"></b> of <span x-text="k.keys"></span></div>
+              </div>
+              <div class="progress mt-2"><div :style="'width:' + r.pct + '%'"></div></div>
+              <div class="text-xs text-slate-500 mt-2 truncate" :title="r.moduleNames" x-text="r.full ? 'Every screen, every branch' : (r.modules + ' screen' + (r.modules === 1 ? '' : 's') + ': ' + (r.moduleNames || '—'))"></div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3">
+              <a :href="'role-edit.html?id=' + r.id" class="btn btn-secondary btn-sm"><span x-html="ABM.icon(r.editable ? 'edit' : 'eye','w-4 h-4')"></span><span x-text="r.editable ? 'Edit permissions' : 'View permissions'"></span></a>
+              <a :href="'users.html?role=' + r.key" class="btn btn-ghost btn-sm" :title="'People with the ' + r.name + ' role'"><span x-html="ABM.icon('user-group','w-4 h-4')"></span><span x-text="r.users + ' user' + (r.users === 1 ? '' : 's')"></span></a>
+              <template x-if="canAdd && !r.full"><a :href="'role-edit.html?copy=' + r.id" class="btn btn-ghost btn-sm btn-icon ml-auto" title="Duplicate as a new role" x-html="ABM.icon('document','w-4 h-4')"></a></template>
+              <template x-if="canDelete && !r.is_system"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" :class="(canAdd && !r.full) ? '' : 'ml-auto'" :title="r.assigned ? 'Move its users to another role first' : 'Delete role'" :disabled="r.assigned > 0" @click="remove(r)" x-html="ABM.icon('trash','w-4 h-4')"></button></template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Side-by-side comparison -->
+    <div class="card mt-4">
+      <div class="card-header flex-wrap gap-2">
+        <div class="min-w-0">
+          <div class="card-title">Compare roles</div>
+          <div class="card-subtitle">V view · A add · E edit · D delete · X export · + extra actions</div>
+        </div>
+        <label class="flex items-center gap-2 text-sm cursor-pointer select-none ml-auto">
+          <input type="checkbox" class="checkbox" x-model="onlyDiff"> Only rows that differ
+        </label>
+      </div>
+      <div class="table-wrap">
+        <table class="table table-compact">
+          <thead>
+            <tr>
+              <th class="min-w-[10rem]">Screen</th>
+              <template x-for="r in rows" :key="r.id"><th class="text-center whitespace-nowrap"><a :href="'role-edit.html?id=' + r.id" class="hover:text-navy-700" x-text="r.name"></a></th></template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="m in compareRows" :key="m.key">
+              <tr :class="m.groupStart && 'border-t-2 border-slate-200'">
+                <td>
+                  <div class="font-medium text-slate-800 whitespace-nowrap" x-text="m.label"></div>
+                  <div class="text-[11px] text-slate-400" x-show="m.groupStart" x-text="m.group"></div>
+                </td>
+                <template x-for="c in m.cells" :key="c.role">
+                  <td class="text-center whitespace-nowrap">
+                    <span class="inline-flex gap-0.5" :title="c.title">
+                      <template x-for="a in c.acts" :key="a.k"><span class="perm-dot" :class="a.state" x-text="a.k"></span></template>
+                      <span class="perm-dot" :class="c.extras ? 'on' : 'na'" x-show="m.hasExtras" x-text="'+' + (c.extras || '')"></span>
+                    </span>
+                  </td>
+                </template>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function rolesPage() {
+      const { db, utils, ui, session, roles } = ABM;
+      const me = session.user() || {};
+      const LETTER = { view: 'V', add: 'A', edit: 'E', delete: 'D', export: 'X' };
+      const CHIP = { navy: 'chip-navy', blue: 'chip-info', green: 'chip-money', amber: 'chip-warning', red: 'chip-danger', purple: 'bg-purple-100 text-purple-700', slate: 'chip-slate' };
+      const iconFor = (key) => (roles.isFull(key) ? 'shield' : roles.isBench(key) ? 'wrench' : roles.has(key, 'dashboard.view') ? 'building' : roles.has(key, 'pos.view') ? 'cart' : 'user');
+      return {
+        canAdd: session.can('roles.add'), canEdit: session.can('roles.edit'), canDelete: session.can('roles.delete'),
+        modules: roles.MODULES, rows: [], onlyDiff: false,
+        k: { builtIn: 0, custom: 0, people: 0, keys: roles.KEYS.length, unused: 0 },
+
+        init() { this.load(); },
+        load() {
+          const users = db.all('users');
+          this.rows = roles.all().map((r) => {
+            const perms = roles.permsOf(r);
+            const mods = roles.MODULES.filter((m) => perms.some((p) => p.startsWith(m.key + '.')));
+            return {
+              ...r, full: roles.isFull(r), icon: iconFor(r.key), mine: r.key === me.role,
+              count: perms.length, pct: Math.round((perms.length / roles.KEYS.length) * 100),
+              modules: mods.length, moduleNames: mods.map((m) => m.label).join(', '),
+              users: users.filter((u) => u.role === r.key && u.is_active).length,
+              assigned: users.filter((u) => u.role === r.key).length,
+              editable: this.canEdit && !roles.isFull(r) && roles.canGrant(r),
+            };
+          });
+          this.k.builtIn = this.rows.filter((r) => r.is_system).length;
+          this.k.custom = this.rows.length - this.k.builtIn;
+          this.k.people = users.filter((u) => u.is_active).length;
+          this.k.unused = this.rows.filter((r) => !r.assigned).length;
+        },
+        chipClass(color) { return CHIP[color] || 'chip-slate'; },
+        /** One row per screen; each cell shows the role's V/A/E/D/X and how many extra actions it has. */
+        get compareRows() {
+          let last = '';
+          return roles.MODULES.map((m) => {
+            const extras = (m.extras || []).map((x) => x.key);
+            const cells = this.rows.map((r) => {
+              const has = (a) => roles.has(r, m.key + '.' + a);
+              const acts = ['view', 'add', 'edit', 'delete', 'export'].map((a) => ({ k: LETTER[a], state: m.actions.includes(a) ? (has(a) ? 'on' : 'off') : 'na' }));
+              const ex = extras.filter(has);
+              const granted = m.actions.filter(has).map((a) => roles.ACTIONS.find((x) => x.key === a).label)
+                .concat(ex.map((k) => (m.extras.find((x) => x.key === k) || {}).label));
+              return { role: r.key, acts, extras: ex.length, sig: acts.map((a) => a.state).join('') + ex.join(','), title: r.name + ' — ' + (granted.length ? granted.join(', ') : 'no access') };
+            });
+            const row = { key: m.key, label: m.label, group: m.group, groupStart: m.group !== last, hasExtras: extras.length > 0, cells, differs: new Set(cells.map((c) => c.sig)).size > 1 };
+            last = m.group;
+            return row;
+          }).filter((row) => !this.onlyDiff || row.differs);
+        },
+        async remove(r) {
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete roles.'); return; }
+          if (r.assigned) { ui.warn('Move the ' + r.assigned + ' user' + (r.assigned === 1 ? '' : 's') + ' with this role to another role first.'); return; }
+          const ok = await ui.confirm({ title: 'Delete the ' + r.name + ' role?', message: 'Nobody has this role, so nothing else changes. This cannot be undone.', confirmText: 'Delete role', danger: true });
+          if (!ok) return;
+          try { roles.remove(r.id); ui.success('Role ' + r.name + ' deleted.'); this.load(); }
+          catch (err) { ui.error(err.message); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

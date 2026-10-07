@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Day-End History · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .reg-line { display: flex; align-items: center; gap: .75rem; padding: .5rem 0; border-bottom: 1px solid rgb(var(--slate-200) / .7); font-size: .875rem; }
+    .reg-line:last-child { border-bottom: 0; }
+    @media print {
+      @page { size: A4 landscape; margin: 10mm; }
+      .print-area .card { border: 1px solid #cbd5e1 !important; box-shadow: none !important; }
+      .print-area .card-header { padding: .5rem .75rem; }
+      .print-area .table { font-size: .66rem; }
+      .print-area .table th, .print-area .table td { padding: .22rem .3rem !important; }
+      .print-area .table-wrap { overflow: visible !important; }
+      .print-area .badge { border: 1px solid #cbd5e1; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="closings" data-title="Day-End History" data-perm="closing.view">
+  <main x-data="closingsPage()" @keydown.escape.window="qv = null">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Day-End History</h2>
+        <p class="page-subtitle">
+          <b x-text="ABM.utils.num(rows.length)"></b> closing<span x-text="rows.length === 1 ? '' : 's'"></span> ·
+          <span x-text="range.label"></span> · <b x-text="scopeLabel"></b>
+        </p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="busy"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-secondary" @click="printRegister()" :disabled="busy"><span x-html="ABM.icon('printer')"></span>Print register</button>
+        <a :href="'day-end.html' + (isSuperAdmin && scopeBranchId ? '?branch=' + scopeBranchId : '')" class="btn btn-primary"><span x-html="ABM.icon('lock')"></span>Close today</a>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')" aria-label="From date">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')" aria-label="To date">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 no-print">
+      <a :href="latestLink" class="stat stat-accent" title="Open the most recent Z-report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Days closed</div><div class="stat-value" x-text="ABM.utils.num(rows.length)"></div></div>
+          <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('lock','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.daysLabel"></span><span x-show="tiles.reopened"> · <span class="font-semibold text-amber-700" x-text="tiles.reopened + ' reopened'"></span></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="reportLink" class="stat stat-money" title="Open the sales report for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Cash sales</div><div class="stat-value" x-text="$money(tiles.cashSales, {decimals:0})"></div></div>
+          <span class="chip chip-money !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">+ <span x-text="$money(tiles.cashReceived, {decimals:0})"></span> khata · <span x-text="$money(tiles.cashRepairs, {decimals:0})"></span> repairs</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="selfLink({ disc: '1' })" class="stat" :class="tiles.disc === 0 ? 'stat-money' : (tiles.disc < 0 ? 'stat-danger' : 'stat-warning')" title="Show only days that did not balance">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="stat-label">Short / over</div>
+            <div class="stat-value" :class="discTextClass(tiles.disc)" x-text="ABM.utils.money(tiles.disc)"></div>
+          </div>
+          <span class="chip !w-9 !h-9" :class="tiles.disc === 0 ? 'chip-money' : (tiles.disc < 0 ? 'chip-danger' : 'chip-warning')" x-html="ABM.icon('scale','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">
+          <span x-text="tiles.discDays"></span> day<span x-text="tiles.discDays === 1 ? '' : 's'"></span> off ·
+          short <span class="font-semibold text-rose-600" x-text="ABM.utils.money(Math.abs(tiles.short), {decimals:0})"></span> ·
+          over <span class="font-semibold text-amber-700" x-text="ABM.utils.money(tiles.over, {decimals:0})"></span>
+        </div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#cash-trend" class="stat" title="See the daily cash trend">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Average daily cash</div><div class="stat-value" x-text="$money(tiles.avgCashSales, {decimals:0})"></div></div>
+          <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('chart','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">cash sales per closed day · counted avg <span class="font-semibold" x-text="$money(tiles.avgCounted, {decimals:0})"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Unclosed days alert -->
+    <div class="alert alert-warning mt-4 no-print" x-show="unclosed.length" x-cloak>
+      <span x-html="ABM.icon('warning')"></span>
+      <div class="min-w-0">
+        <b><span x-text="unclosed.length"></span> day<span x-text="unclosed.length === 1 ? '' : 's'"></span> in this period had activity but <span x-text="unclosed.length === 1 ? 'was' : 'were'"></span> never closed.</b>
+        <span class="inline-flex flex-wrap gap-1.5 mt-1">
+          <template x-for="u in unclosed.slice(0, 8)" :key="u.key">
+            <a :href="'day-end.html?date=' + u.date + '&branch=' + u.branch_id" class="badge badge-amber hover:underline" x-text="(scopeBranchId === null ? u.code + ' · ' : '') + ABM.utils.date(u.date, 'short')"></a>
+          </template>
+          <span class="badge badge-slate" x-show="unclosed.length > 8" x-text="'+' + (unclosed.length - 8) + ' more'"></span>
+        </span>
+        <div class="text-xs mt-1 opacity-80">The opening balance carries over from the last <i>closed</i> day — close the oldest one first to keep the float accurate.</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4 no-print">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div class="relative md:col-span-5 min-w-0">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search date (12 Sep or 2025-09-12), branch, staff…" x-model.debounce.200ms="q" aria-label="Search closings">
+          </div>
+          <template x-if="isSuperAdmin">
+            <select class="select md:col-span-4" data-branch-filter x-model="f.branch" aria-label="Branch">
+              <option value="">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <label class="inline-flex items-center gap-2 text-sm font-medium text-slate-700 select-none" :class="isSuperAdmin ? 'md:col-span-3' : 'md:col-span-7'">
+            <input type="checkbox" class="checkbox" x-model="f.disc">
+            <span>With discrepancy only</span>
+          </label>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <div class="text-slate-500 min-w-0">
+            <b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> closing<span x-text="rows.length === 1 ? '' : 's'"></span> shown ·
+            counted <b class="text-slate-800" x-text="$money(totals.actual, {decimals:0})"></b>
+          </div>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cash vs discrepancy chart -->
+    <div class="card mt-4 no-print" id="cash-trend">
+      <div class="card-header">
+        <div><div class="card-title">Daily cash sales vs discrepancy</div><div class="card-subtitle" x-text="chartSubtitle"></div></div>
+        <a :href="reportLink" class="text-xs font-semibold text-navy-700 hover:underline">Sales report</a>
+      </div>
+      <div class="card-body">
+        <div class="h-64 sm:h-72" x-show="rows.length"><canvas id="cashChart"></canvas></div>
+        <div class="empty !py-10" x-show="!rows.length" x-cloak>
+          <span x-html="ABM.icon('chart')"></span>
+          <div class="empty-title">Nothing to chart yet</div>
+          <div class="text-sm mt-1">No day was closed in this period.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Register (printable) -->
+    <div class="print-area mt-4">
+      <!-- Print-only header -->
+      <div class="hidden print:block mb-3">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-xl font-extrabold" x-text="ABM.db.setting('company_name') || 'Abbott Mobile'"></div>
+            <div class="text-sm" x-text="scopeLabel + (scopeBranchId ? ' · ' + (ABM.db.branch(scopeBranchId) || {}).address : '')"></div>
+          </div>
+          <div class="text-right">
+            <div class="text-lg font-bold">DAY-END REGISTER</div>
+            <div class="text-sm" x-text="range.label"></div>
+            <div class="text-xs" x-text="filtered.length + ' closing' + (filtered.length === 1 ? '' : 's') + ' · all amounts in ' + (ABM.db.setting('currency_symbol') || 'Rs.')"></div>
+            <div class="text-xs" x-text="'Printed by ' + user.name + ' · ' + ABM.utils.datetime(new Date())"></div>
+          </div>
+        </div>
+        <div class="border-b border-slate-300 mt-2"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header no-print">
+          <div><div class="card-title">Closing register</div><div class="card-subtitle" x-text="range.label + ' · ' + scopeLabel + ' · amounts in ' + (ABM.db.setting('currency_symbol') || 'Rs.')"></div></div>
+          <div class="text-xs text-slate-500 hidden sm:block">Newest first</div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th class="hidden xl:table-cell print:table-cell">Branch</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Opening</th>
+                <th class="num hidden md:table-cell print:table-cell">Cash sales</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Khata</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Repairs</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Refunds</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Expenses</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Supplier</th>
+                <th class="num hidden lg:table-cell print:table-cell">Expected</th>
+                <th class="num hidden sm:table-cell print:table-cell">Counted</th>
+                <th class="num">Discrepancy</th>
+                <th class="num hidden xl:table-cell print:table-cell">Deposit</th>
+                <th class="num hidden 2xl:table-cell print:table-cell">Float</th>
+                <th class="hidden lg:table-cell print:table-cell">Closed by</th>
+                <th class="actions no-print">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in pager.items" :key="r.id">
+                <tr>
+                  <td>
+                    <a :href="dayLink(r)" class="font-semibold text-navy-700 hover:underline whitespace-nowrap" x-text="r.dateLabel"></a>
+                    <span class="ml-1" x-show="r.status !== 'closed'" x-html="$badge('open', 'Reopened')"></span>
+                    <div class="text-xs text-slate-400 xl:hidden print:hidden truncate max-w-[9rem]" x-text="r.branchCode + ' · ' + r.closedByName"></div>
+                    <div class="text-xs text-slate-500 md:hidden print:hidden max-w-[9rem]">Cash <span class="font-semibold" x-text="ABM.utils.money(r.cash_sales, {decimals:0})"></span> · counted <span class="font-semibold" x-text="ABM.utils.money(r.actual_cash, {decimals:0})"></span></div>
+                  </td>
+                  <td class="hidden xl:table-cell print:table-cell whitespace-nowrap">
+                    <span class="badge badge-slate" x-text="r.branchCode"></span>
+                    <span class="text-slate-600 ml-1 hidden print:inline" x-text="r.branchName"></span>
+                  </td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(r.opening_balance)"></td>
+                  <td class="num hidden md:table-cell print:table-cell tabular font-semibold" x-text="amt(r.cash_sales)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(r.cash_received)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(r.cash_repairs)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(r.cash_refunds)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(r.cash_expenses)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(r.supplier_cash_payments)"></td>
+                  <td class="num hidden lg:table-cell print:table-cell tabular" x-text="amt(r.expected_cash)"></td>
+                  <td class="num hidden sm:table-cell print:table-cell tabular font-semibold" x-text="amt(r.actual_cash)"></td>
+                  <td class="num whitespace-nowrap"><span x-html="discBadge(r.discrepancy)"></span></td>
+                  <td class="num hidden xl:table-cell print:table-cell tabular" x-text="amt(r.bank_deposit)"></td>
+                  <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(r.retained_float)"></td>
+                  <td class="hidden lg:table-cell print:table-cell">
+                    <div class="text-slate-700 truncate max-w-[9rem]" x-text="r.closedByName"></div>
+                    <div class="text-xs text-slate-400 whitespace-nowrap" x-text="r.closedAtText"></div>
+                  </td>
+                  <td class="actions no-print">
+                    <div class="inline-flex items-center gap-0.5">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" data-quick-view :title="'Quick view · ' + r.dateLabel" :aria-label="'Quick view ' + r.dateLabel" @click="open(r)" x-html="ABM.icon('eye','w-4 h-4')"></button>
+                      <a :href="dayLink(r)" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Open Z-report" x-html="ABM.icon('document','w-4 h-4')"></a>
+                      <a :href="dayLink(r, '&print=1')" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print Z-report" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!pager.items.length">
+                <tr><td colspan="16">
+                  <div class="empty">
+                    <span x-html="ABM.icon('lock')"></span>
+                    <div class="empty-title">No closings found</div>
+                    <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No day was closed in this period for ' + scopeLabel + '.'"></div>
+                    <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="!rows.length && range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                      <a href="day-end.html" class="btn btn-money btn-sm">Go to day-end</a>
+                    </div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+            <tfoot x-show="filtered.length">
+              <tr class="bg-slate-50 font-bold text-slate-900">
+                <td class="whitespace-nowrap">Totals · <span x-text="filtered.length"></span> day<span x-text="filtered.length === 1 ? '' : 's'"></span></td>
+                <td class="hidden xl:table-cell print:table-cell"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(totals.opening)"></td>
+                <td class="num hidden md:table-cell print:table-cell tabular" x-text="amt(totals.cashSales)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(totals.cashReceived)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(totals.cashRepairs)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(totals.refunds)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(totals.expenses)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular text-rose-600" x-text="amt(totals.supplier)"></td>
+                <td class="num hidden lg:table-cell print:table-cell tabular" x-text="amt(totals.expected)"></td>
+                <td class="num hidden sm:table-cell print:table-cell tabular" x-text="amt(totals.actual)"></td>
+                <td class="num tabular whitespace-nowrap" :class="discTextClass(totals.disc)" x-text="ABM.utils.money(totals.disc)"></td>
+                <td class="num hidden xl:table-cell print:table-cell tabular" x-text="amt(totals.deposit)"></td>
+                <td class="num hidden 2xl:table-cell print:table-cell tabular" x-text="amt(totals.float)"></td>
+                <td class="hidden lg:table-cell print:table-cell"></td>
+                <td class="actions no-print"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print" x-show="!printing">
+          <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+          <div class="flex items-center gap-1">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick-view modal -->
+    <div x-show="qv" x-cloak class="modal-backdrop no-print" @click.self="qv = null">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="qvTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title" id="qvTitle" x-text="qv ? qv.dateLong : ''"></div>
+            <div class="text-xs text-slate-500 truncate" x-text="qv ? (qv.branchName + ' · closed by ' + qv.closedByName + ' · ' + qv.closedAtText) : ''"></div>
+          </div>
+          <div class="flex items-center gap-1 flex-none">
+            <span x-html="qv ? $badge(qv.status === 'closed' ? 'closed' : 'open', qv.status === 'closed' ? 'Closed' : 'Reopened') : ''"></span>
+            <button type="button" class="btn btn-ghost btn-icon" @click="qv = null" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+        </div>
+        <div class="modal-body space-y-4" x-show="qv">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <!-- Drawer breakdown -->
+            <div class="min-w-0">
+              <div class="section-title">Cash drawer</div>
+              <div class="rounded-xl border border-slate-200 px-3">
+                <template x-for="l in qvLines" :key="l.label">
+                  <div class="reg-line">
+                    <span class="chip !w-7 !h-7" :class="l.sign > 0 ? 'chip-money' : (l.sign < 0 ? 'chip-danger' : 'chip-slate')" x-html="ABM.icon(l.icon,'w-3.5 h-3.5')"></span>
+                    <span class="flex-1 min-w-0 text-slate-600 truncate" x-text="l.label"></span>
+                    <span class="font-semibold tabular whitespace-nowrap" :class="l.sign > 0 ? 'text-emerald-700' : (l.sign < 0 ? 'text-rose-600' : 'text-slate-800')" x-text="(l.sign > 0 ? '+ ' : (l.sign < 0 ? '− ' : '')) + ABM.utils.money(l.amount)"></span>
+                  </div>
+                </template>
+                <div class="reg-line bg-transparent">
+                  <span class="chip chip-navy !w-7 !h-7" x-html="ABM.icon('calculator','w-3.5 h-3.5')"></span>
+                  <span class="flex-1 min-w-0 font-bold text-slate-900">Expected</span>
+                  <span class="font-extrabold tabular whitespace-nowrap text-slate-900" x-text="qv ? $money(qv.expected_cash) : ''"></span>
+                </div>
+              </div>
+            </div>
+            <!-- Result -->
+            <div class="min-w-0 space-y-3">
+              <div class="section-title">Result</div>
+              <div class="grid grid-cols-2 gap-3">
+                <div class="rounded-xl bg-slate-50 p-3 min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Expected</div><div class="text-base font-bold text-slate-900 tabular truncate" x-text="qv ? $money(qv.expected_cash) : ''"></div></div>
+                <div class="rounded-xl bg-slate-50 p-3 min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Counted</div><div class="text-base font-bold text-slate-900 tabular truncate" x-text="qv ? $money(qv.actual_cash) : ''"></div></div>
+              </div>
+              <div class="rounded-xl p-3 flex items-center justify-between gap-3" :class="qv ? discBoxClass(qv.discrepancy) : ''">
+                <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider">Discrepancy</div><div class="text-xs opacity-80" x-text="qv ? discLabel(qv.discrepancy) : ''"></div></div>
+                <div class="text-lg font-extrabold tabular whitespace-nowrap" x-text="qv ? ABM.utils.money(qv.discrepancy) : ''"></div>
+              </div>
+              <dl class="text-sm divide-y divide-slate-100 rounded-xl border border-slate-200 px-3">
+                <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Bank deposit</dt><dd class="font-semibold tabular" x-text="qv ? $money(qv.bank_deposit) : ''"></dd></div>
+                <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Retained float</dt><dd class="font-semibold tabular" x-text="qv ? $money(qv.retained_float) : ''"></dd></div>
+              </dl>
+            </div>
+          </div>
+
+          <div x-show="qvDenoms.length">
+            <div class="section-title">Denominations counted</div>
+            <ul class="text-sm divide-y divide-slate-100 rounded-xl border border-slate-200">
+              <template x-for="d in qvDenoms" :key="d.label">
+                <li class="flex items-center gap-3 px-3 py-1.5"><span class="w-24 text-slate-600" x-text="d.label"></span><span class="flex-1 text-xs text-slate-400" x-text="d.count !== null ? '× ' + d.count : ''"></span><span class="font-semibold tabular" x-text="$money(d.amount)"></span></li>
+              </template>
+            </ul>
+          </div>
+
+          <div x-show="qv && qv.notes">
+            <div class="section-title">Notes</div>
+            <p class="text-sm text-slate-700 whitespace-pre-line" x-text="qv ? qv.notes : ''"></p>
+          </div>
+        </div>
+        <div class="modal-footer flex-wrap">
+          <button type="button" class="btn btn-secondary" @click="qv = null">Close</button>
+          <a :href="qv ? dayLink(qv, '&print=1') : '#'" class="btn btn-secondary"><span x-html="ABM.icon('printer')"></span>Print Z-report</a>
+          <a :href="qv ? dayLink(qv) : '#'" class="btn btn-primary"><span x-html="ABM.icon('arrow-right')"></span>Open Z-report</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function closingsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const DENOMS = [5000, 1000, 500, 100, 50, 20, 10];
+      const num = (v) => Number(v) || 0;
+      const user = session.user() || { name: '' };
+      return {
+        user,
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        range: null,
+        rows: [], unclosed: [], charts: {}, chartSubtitle: '',
+        tiles: { daysInRange: 0, reopened: 0, cashSales: 0, cashReceived: 0, cashRepairs: 0, disc: 0, discDays: 0, short: 0, over: 0, avgCashSales: 0, avgCounted: 0 },
+        q: '',
+        f: { branch: '', disc: false },
+        page: 1, busy: false, printing: false,
+        qv: null,
+
+        init() {
+          const qs = utils.qs;
+          if (this.isSuperAdmin) {
+            const b = qs('branch');
+            if (b === 'all') this.f.branch = '';
+            else if (b && this.branches.some((x) => String(x.id) === String(b))) this.f.branch = String(b);
+            else this.f.branch = String(session.branchId() || '');
+          }
+          if (qs('disc') === '1') this.f.disc = true;
+          if (qs('q')) this.q = qs('q');
+          this.range = ABM.range('this_month', () => this.refresh(), 'closings');
+          this.refresh();
+          ABM.theme.onChange(() => this.drawChart());
+          // the <option> list is rendered by x-for *after* x-model binds, so re-apply the selected branch
+          this.$nextTick(() => { const sel = this.$el.querySelector('[data-branch-filter]'); if (sel) sel.value = this.f.branch; });
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('f.disc', () => { this.page = 1; });
+          this.$watch('f.branch', () => { this.refresh(); });
+          if (qs('print') === '1' && !/__layout|__click/.test(location.search)) setTimeout(() => this.printRegister(), 900);
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeBranchId() { return this.isSuperAdmin ? (this.f.branch === '' ? null : Number(this.f.branch)) : session.branchId(); },
+        get scopeLabel() { const id = this.scopeBranchId; return id === null ? 'All branches' : db.branchName(id); },
+        inScope(row) { const id = this.scopeBranchId; return id === null || Number(row.branch_id) === Number(id); },
+
+        /* ------------------------------------------------------------- data */
+        refresh() { this.page = 1; this.compute(); this.$nextTick(() => this.drawChart()); },
+        decorate(c) {
+          return {
+            ...c,
+            opening_balance: num(c.opening_balance), cash_sales: num(c.cash_sales), cash_received: num(c.cash_received),
+            cash_repairs: num(c.cash_repairs), cash_refunds: num(c.cash_refunds), cash_expenses: num(c.cash_expenses),
+            supplier_cash_payments: num(c.supplier_cash_payments), expected_cash: num(c.expected_cash), actual_cash: num(c.actual_cash),
+            discrepancy: utils.round2(c.discrepancy), bank_deposit: num(c.bank_deposit), retained_float: num(c.retained_float),
+            branchCode: db.branchCode(c.branch_id), branchName: db.branchName(c.branch_id),
+            closedByName: db.userName(c.closed_by), closedAtText: c.closed_at ? utils.datetime(c.closed_at) : '—',
+            dateLabel: utils.date(c.closing_date), dateLong: utils.date(c.closing_date, 'long'),
+            notes: String(c.notes || ''),
+          };
+        },
+        compute() {
+          const r = this.range;
+          const list = db.all('daily_closings').filter((c) => this.inScope(c) && r.contains(c.closing_date)).map((c) => this.decorate(c));
+          this.rows = list.sort((a, b) => (a.closing_date < b.closing_date ? 1 : a.closing_date > b.closing_date ? -1 : String(a.branchCode).localeCompare(String(b.branchCode))));
+          const today = utils.today();
+          const v = r.value;
+          const openEnded = !v.from && !v.to;
+          const days = r.days().filter((d) => d <= today);
+          const branchCount = this.scopeBranchId === null ? Math.max(1, this.branches.length) : 1;
+          const slots = openEnded ? 0 : days.length * branchCount;
+          const off = this.rows.filter((x) => x.discrepancy !== 0);
+          this.tiles = {
+            daysInRange: slots,
+            daysLabel: openEnded ? 'across all recorded days' : 'of ' + utils.num(slots) + ' day' + (slots === 1 ? '' : 's') + ' in range',
+            reopened: this.rows.filter((x) => x.status !== 'closed').length,
+            cashSales: utils.sum(this.rows, 'cash_sales'),
+            cashReceived: utils.sum(this.rows, 'cash_received'),
+            cashRepairs: utils.sum(this.rows, 'cash_repairs'),
+            disc: utils.sum(this.rows, 'discrepancy'),
+            discDays: off.length,
+            short: utils.sum(off.filter((x) => x.discrepancy < 0), 'discrepancy'),
+            over: utils.sum(off.filter((x) => x.discrepancy > 0), 'discrepancy'),
+            avgCashSales: this.rows.length ? utils.round2(utils.sum(this.rows, 'cash_sales') / this.rows.length) : 0,
+            avgCounted: this.rows.length ? utils.round2(utils.sum(this.rows, 'actual_cash') / this.rows.length) : 0,
+          };
+          this.computeUnclosed();
+        },
+        /** Days inside the range that had activity but never got a closed row. */
+        computeUnclosed() {
+          const r = this.range, today = utils.today();
+          const ids = this.scopeBranchId === null ? this.branches.map((b) => b.id) : [this.scopeBranchId];
+          const allowed = new Set(ids.map(String));
+          const seen = new Set();
+          const note = (branchId, value) => {
+            const d = String(value || '').slice(0, 10);
+            if (!d || d > today || !allowed.has(String(branchId)) || !r.contains(d)) return;
+            seen.add(String(branchId) + '|' + d);
+          };
+          db.all('sales').forEach((s) => { if (s.status !== 'void') note(s.branch_id, s.sale_date); });
+          db.all('expenses').forEach((e) => note(e.branch_id, e.expense_date));
+          const jobs = new Map(db.all('repair_jobs').map((j) => [String(j.id), j]));
+          db.all('repair_payments').forEach((p) => { const j = jobs.get(String(p.job_id)); if (j) note(j.branch_id, p.created_at); });
+          const closed = new Set(db.all('daily_closings').filter((c) => c.status === 'closed').map((c) => String(c.branch_id) + '|' + c.closing_date));
+          this.unclosed = [...seen].filter((k) => !closed.has(k)).map((k) => {
+            const i = k.indexOf('|');
+            const bid = Number(k.slice(0, i));
+            return { key: k, branch_id: bid, date: k.slice(i + 1), code: db.branchCode(bid) };
+          }).sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+        },
+
+        /* ---------------------------------------------------------- filters */
+        get hasFilters() { return !!(this.q.trim() || this.f.disc); },
+        clearFilters() { this.q = ''; this.f.disc = false; this.page = 1; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((r) => {
+            if (this.f.disc && r.discrepancy === 0) return false;
+            if (q && ![r.closing_date, r.dateLabel, r.dateLong, r.branchName, r.branchCode, r.closedByName, r.notes].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get totals() {
+          const f = this.filtered;
+          return {
+            opening: utils.sum(f, 'opening_balance'), cashSales: utils.sum(f, 'cash_sales'), cashReceived: utils.sum(f, 'cash_received'),
+            cashRepairs: utils.sum(f, 'cash_repairs'), refunds: utils.sum(f, 'cash_refunds'), expenses: utils.sum(f, 'cash_expenses'),
+            supplier: utils.sum(f, 'supplier_cash_payments'), expected: utils.sum(f, 'expected_cash'), actual: utils.sum(f, 'actual_cash'),
+            disc: utils.sum(f, 'discrepancy'), deposit: utils.sum(f, 'bank_deposit'), float: utils.sum(f, 'retained_float'),
+          };
+        },
+        get pager() { const f = this.filtered; return utils.paginate(f, this.printing ? 1 : this.page, this.printing ? Math.max(1, f.length) : PER_PAGE); },
+        get pageNumbers() {
+          const { page, pages } = this.pager; const out = [];
+          for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n);
+          return out;
+        },
+
+        /* ------------------------------------------------------------ links */
+        dayLink(r, extra = '') { return 'day-end.html?date=' + r.closing_date + '&branch=' + r.branch_id + extra; },
+        get latestLink() { return this.rows.length ? this.dayLink(this.rows[0]) : 'day-end.html'; },
+        get branchQuery() { return this.isSuperAdmin ? '&branch=' + (this.f.branch === '' ? 'all' : this.f.branch) : ''; },
+        get reportLink() { return 'report-sales.html?' + this.range.query + this.branchQuery; },
+        selfLink(extra = {}) {
+          const p = new URLSearchParams(this.range.query);
+          if (this.isSuperAdmin) p.set('branch', this.f.branch === '' ? 'all' : this.f.branch);
+          Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+          return 'closings.html?' + p.toString();
+        },
+
+        /* --------------------------------------------------------- display */
+        amt(v) { return utils.money(v, { symbol: false }); },
+        discTextClass(v) { const n = utils.round2(v); return n === 0 ? 'text-emerald-700' : n < 0 ? 'text-rose-600' : 'text-amber-700'; },
+        discBoxClass(v) { const n = utils.round2(v); return n === 0 ? 'bg-emerald-100 text-emerald-700' : n < 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'; },
+        discLabel(v) { const n = utils.round2(v); return n === 0 ? 'Drawer balanced' : n < 0 ? 'Short — less cash than expected' : 'Over — more cash than expected'; },
+        discBadge(v) { const n = utils.round2(v); return ui.badge(n === 0 ? 'ok' : n < 0 ? 'due' : 'partial', n === 0 ? 'Balanced' : (n < 0 ? 'Short ' : 'Over ') + utils.money(Math.abs(n), { decimals: 0 })); },
+
+        /* ------------------------------------------------------ quick view */
+        open(r) { this.qv = r; },
+        get qvLines() {
+          const r = this.qv; if (!r) return [];
+          return [
+            { label: 'Opening balance', icon: 'wallet', sign: 0, amount: r.opening_balance },
+            { label: 'Cash sales', icon: 'receipt', sign: 1, amount: r.cash_sales },
+            { label: 'Cash received (khata)', icon: 'users', sign: 1, amount: r.cash_received },
+            { label: 'Cash from repairs', icon: 'wrench', sign: 1, amount: r.cash_repairs },
+            { label: 'Cash refunds', icon: 'return', sign: -1, amount: r.cash_refunds },
+            { label: 'Cash expenses', icon: 'banknotes', sign: -1, amount: r.cash_expenses },
+            { label: 'Supplier cash payments', icon: 'truck', sign: -1, amount: r.supplier_cash_payments },
+          ];
+        },
+        get qvDenoms() {
+          const r = this.qv; if (!r || !r.denominations) return [];
+          let d = r.denominations;
+          if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { return []; } }
+          if (!d || typeof d !== 'object') return [];
+          const out = DENOMS.filter((n) => num(d[n]) > 0).map((n) => ({ label: 'Rs. ' + utils.num(n), count: num(d[n]), amount: num(d[n]) * n }));
+          if (num(d.coins) > 0) out.push({ label: 'Coins', count: null, amount: num(d.coins) });
+          return out;
+        },
+
+        /* ----------------------------------------------------------- chart */
+        drawChart() {
+          if (!window.Chart || !document.getElementById('cashChart')) return;
+          Object.values(this.charts).forEach((c) => c.destroy());
+          this.charts = {};
+          if (!this.rows.length) { this.chartSubtitle = 'No closings in this period'; return; }
+          const tc = ABM.theme.chart();
+          const v = this.range.value;
+          let days = this.range.days();
+          if (!v.from || !v.to) { // open-ended ("All"): span the closings we actually have
+            const dates = this.rows.map((x) => x.closing_date).sort();
+            const from = utils.parseDate(dates[0]), to = utils.parseDate(dates[dates.length - 1]);
+            days = [];
+            for (let d = new Date(from); d <= to && days.length < 400; d.setDate(d.getDate() + 1)) days.push(utils.isoDate(d));
+          }
+          const byMonth = days.length > 62;
+          const buckets = byMonth ? [...new Set(days.map((d) => d.slice(0, 7)))] : days;
+          const keyOf = (d) => (byMonth ? String(d).slice(0, 7) : String(d).slice(0, 10));
+          const label = (b) => (byMonth ? utils.parseDate(b + '-01').toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : utils.date(b, 'short'));
+          this.chartSubtitle = (byMonth ? 'By month · ' : 'By day · ') + this.range.label + ' · ' + this.scopeLabel;
+          const cash = {}, disc = {};
+          this.rows.forEach((r) => { const k = keyOf(r.closing_date); cash[k] = utils.round2((cash[k] || 0) + r.cash_sales); disc[k] = utils.round2((disc[k] || 0) + r.discrepancy); });
+          Chart.defaults.color = tc.tick;
+          Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+          this.charts.cash = new Chart(document.getElementById('cashChart'), {
+            type: 'bar',
+            data: {
+              labels: buckets.map(label),
+              datasets: [
+                { label: 'Cash sales', data: buckets.map((k) => cash[k] || 0), backgroundColor: tc.money, borderRadius: 4, yAxisID: 'y', order: 2 },
+                { type: 'line', label: 'Discrepancy', data: buckets.map((k) => (k in disc ? disc[k] : null)), borderColor: tc.danger, backgroundColor: tc.danger, borderWidth: 2, tension: .3, pointRadius: 3, spanGaps: true, yAxisID: 'y1', order: 1 },
+              ],
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false },
+              plugins: {
+                legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: tc.tick } },
+                tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + utils.money(c.raw, { decimals: 0 }) } },
+              },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: tc.tick, maxTicksLimit: 14, autoSkip: true } },
+                y: { beginAtZero: true, position: 'left', ticks: { color: tc.tick, callback: (v) => (Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v) }, grid: { color: tc.grid } },
+                y1: { position: 'right', grid: { display: false }, ticks: { color: tc.tick, callback: (v) => (Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v) } },
+              },
+            },
+          });
+        },
+
+        /* ---------------------------------------------------- export/print */
+        exportCsv() {
+          const rows = this.filtered;
+          if (!rows.length) { ui.warn('Nothing to export for this period.'); return; }
+          const cols = [
+            { label: 'Date', key: 'closing_date' }, { label: 'Branch', key: 'branchName' }, { label: 'Branch code', key: 'branchCode' },
+            { label: 'Opening', key: 'opening_balance' }, { label: 'Cash sales', key: 'cash_sales' }, { label: 'Cash received (khata)', key: 'cash_received' },
+            { label: 'Cash repairs', key: 'cash_repairs' }, { label: 'Cash refunds', key: 'cash_refunds' }, { label: 'Cash expenses', key: 'cash_expenses' },
+            { label: 'Supplier cash payments', key: 'supplier_cash_payments' }, { label: 'Expected', key: 'expected_cash' }, { label: 'Counted', key: 'actual_cash' },
+            { label: 'Discrepancy', key: 'discrepancy' }, { label: 'Bank deposit', key: 'bank_deposit' }, { label: 'Retained float', key: 'retained_float' },
+            { label: 'Status', value: (r) => ui.statusLabel(r.status) }, { label: 'Closed by', key: 'closedByName' },
+            { label: 'Closed at', value: (r) => (r.closed_at ? utils.datetime(r.closed_at) : '') }, { label: 'Notes', key: 'notes' },
+          ];
+          const v = this.range.value;
+          this.busy = true;
+          try {
+            if (!utils.download('day-end-register-' + (v.from || 'all') + '-to-' + (v.to || utils.today()) + '.csv', utils.toCsv(rows, cols))) return;
+            ui.success('Exported ' + rows.length + ' closing' + (rows.length === 1 ? '' : 's') + '.');
+          } catch (e) { ui.error(e.message || 'Could not export the register.'); } finally { this.busy = false; }
+        },
+        printRegister() {
+          if (!this.filtered.length) { ui.warn('Nothing to print for this period.'); return; }
+          this.qv = null;
+          this.printing = true;
+          this.$nextTick(() => {
+            window.print();
+            setTimeout(() => { this.printing = false; }, 400);
+          });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

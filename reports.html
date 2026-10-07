@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Reports · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .print-only { display: none; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      main { padding: 0 !important; max-width: none !important; }
+      .card { border: 1px solid #cbd5e1 !important; box-shadow: none !important; break-inside: avoid; }
+      .report-grid { display: grid !important; grid-template-columns: 1fr 1fr !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="reports" data-title="Reports" data-perm="reports.view">
+  <main x-data="reportsHub()">
+    <!-- Print header -->
+    <div class="print-only mb-4">
+      <div class="text-xl font-extrabold text-slate-900" x-text="companyName + ' — Report Centre'"></div>
+      <div class="text-sm text-slate-600"><span x-text="scopeLabel"></span> · <span x-text="range.label"></span> · printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="userName"></span></div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Reports</h2>
+        <p class="page-subtitle">Every figure below is live from your data · <b x-text="scopeLabel"></b> · <span x-text="range.label"></span></p>
+      </div>
+      <div class="page-actions">
+        <button type="button" class="btn btn-secondary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a :href="'report-sales.html?' + linkQuery" class="btn btn-primary"><span x-html="ABM.icon('chart')"></span>Sales report</a>
+      </div>
+    </div>
+
+    <!-- Toolbar: range + branch -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto font-semibold" x-model="branchSel" x-ref="branchSelect" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg"><span x-text="ABM.db.branchCode(scopeId)"></span> · <span x-text="scopeLabel"></span></span>
+          </template>
+          <span class="text-xs text-slate-500 min-w-0">Numbers follow the period and branch chosen here; each report opens with the same filters.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Headline strip (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 no-print">
+      <a :href="'report-sales.html?' + linkQuery" class="stat stat-money" title="Open the sales report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Net sales</div><div class="stat-value" x-text="$money(k.netSales, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.invoices)"></span> invoice<span x-text="k.invoices === 1 ? '' : 's'"></span> · avg <span x-text="$money(k.avgBasket, {decimals:0})"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-profit-loss.html?' + linkQuery" class="stat stat-accent" title="Open profit &amp; loss">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Gross profit</div><div class="stat-value" x-text="$money(k.grossProfit, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('chart')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.margin"></span>% margin · net <b :class="k.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="$money(k.netProfit, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-receivables.html?' + linkQuery" class="stat stat-warning" title="Open receivables aging">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Receivables</div><div class="stat-value" x-text="$money(k.receivables, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('users')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.debtors"></span> customer<span x-text="k.debtors === 1 ? '' : 's'"></span> owe · payables <b class="text-rose-600" x-text="$money(k.payables, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-stock-valuation.html?' + linkQuery" class="stat" title="Open stock valuation">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Stock at cost</div><div class="stat-value" x-text="$money(k.stockValue, {decimals:0})"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.units)"></span> units · <span :class="k.lowStock ? 'text-rose-600 font-semibold' : ''" x-text="k.lowStock + ' low stock'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Report catalogue -->
+    <div class="print-area">
+      <template x-for="g in groups" :key="g.title">
+        <section class="mt-6">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="section-title !mb-0" x-text="g.title"></span>
+            <span class="h-px flex-1 bg-slate-200"></span>
+          </div>
+          <div class="report-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <template x-for="t in g.tiles" :key="t.href">
+              <a :href="t.href" class="card card-hover p-4 flex items-start gap-3 min-w-0">
+                <span class="chip flex-none" :class="t.chip" x-html="ABM.icon(t.icon)"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-bold text-slate-900" x-text="t.title"></div>
+                  <div class="text-xs text-slate-500 mt-0.5" x-text="t.desc"></div>
+                  <div class="mt-2 text-lg font-extrabold tabular text-slate-900 truncate" :class="t.tone" x-text="t.value"></div>
+                  <div class="text-[11px] text-slate-500 truncate" x-text="t.meta"></div>
+                </div>
+                <span class="flex-none text-slate-300 mt-1 no-print" x-html="ABM.icon('chevron-right','w-4 h-4')"></span>
+              </a>
+            </template>
+          </div>
+        </section>
+      </template>
+    </div>
+
+    <!-- Quick exports -->
+    <section class="mt-6 no-print">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="section-title !mb-0">Quick exports</span>
+        <span class="h-px flex-1 bg-slate-200"></span>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-slate-600 mb-3">Download the raw master data as CSV — open it in Excel for ad-hoc analysis.</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+            <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary justify-start" @click="exportProducts()"><span x-html="ABM.icon('cube')"></span><span class="truncate">Products (<span x-text="counts.products"></span>)</span></button>
+            <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary justify-start" @click="exportCustomers()"><span x-html="ABM.icon('users')"></span><span class="truncate">Customers (<span x-text="counts.customers"></span>)</span></button>
+            <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary justify-start" @click="exportSuppliers()"><span x-html="ABM.icon('store')"></span><span class="truncate">Suppliers (<span x-text="counts.suppliers"></span>)</span></button>
+            <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary justify-start" @click="exportStock()"><span x-html="ABM.icon('archive')"></span><span class="truncate">Stock (<span x-text="counts.stock"></span>)</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function reportsHub() {
+      const { db, utils, ui, session } = ABM;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        branchSel: String(session.branchId() || ''),
+        companyName: db.setting('company_name', 'Abbott Mobile'),
+        userName: (session.user() || {}).name || '',
+        range: null,
+        k: { netSales: 0, invoices: 0, avgBasket: 0, grossProfit: 0, margin: 0, netProfit: 0, receivables: 0, debtors: 0, payables: 0, creditors: 0, stockValue: 0, units: 0, lowStock: 0, expenses: 0, repairRevenue: 0, repairJobs: 0, openJobs: 0, onlineTotal: 0, onlineOrders: 0, skus: 0, serialUnits: 0, availableUnits: 0, purchases: 0 },
+        groups: [],
+        counts: { products: 0, customers: 0, suppliers: 0, stock: 0 },
+
+        init() {
+          const qb = utils.qs('branch');
+          if (this.isSuperAdmin && qb !== null) this.branchSel = (qb === 'all' || this.branches.some((b) => String(b.id) === String(qb))) ? String(qb) : String(session.branchId() || '');
+          this.range = ABM.range('this_month', () => this.compute(), 'reports-hub');
+          this.compute();
+          // <select> options come from an x-for template, so sync the DOM value once they exist
+          this.$nextTick(() => { if (this.$refs.branchSelect) this.$refs.branchSelect.value = this.branchSel; });
+          this.$watch('branchSel', () => this.compute());
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeId() { return this.isSuperAdmin ? (this.branchSel === 'all' ? null : Number(this.branchSel)) : session.branchId(); },
+        get scopeLabel() { return this.scopeId === null ? 'All branches' : db.branchName(this.scopeId); },
+        inScope(row) { const id = this.scopeId; return id === null || Number(row.branch_id) === Number(id); },
+        get linkQuery() { return this.range.query + (this.isSuperAdmin ? '&branch=' + encodeURIComponent(this.branchSel) : ''); },
+        /** Compact money for headline numbers: Rs. 3.0M / Rs. 42.5k / Rs. 900 */
+        compact(n) {
+          const v = Number(n) || 0, a = Math.abs(v), sym = (db.setting('currency_symbol') || 'Rs.') + ' ';
+          const sign = v < 0 ? '-' : '';
+          if (a >= 1e6) return sign + sym + (a / 1e6).toFixed(1) + 'M';
+          if (a >= 1e4) return sign + sym + (a / 1e3).toFixed(a >= 1e5 ? 0 : 1) + 'k';
+          return utils.money(v, { decimals: 0 });
+        },
+        periodWord() {
+          const p = this.range.preset;
+          const map = { today: 'today', yesterday: 'yesterday', this_week: 'this week', last_week: 'last week', this_month: 'this month', last_month: 'last month', all: 'all time' };
+          return map[p] || 'selected period';
+        },
+
+        /* -------------------------------------------------------------- data */
+        compute() {
+          const r = this.range;
+          const period = this.periodWord();
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && this.inScope(s) && r.contains(s.sale_date));
+          const saleIds = new Set(sales.map((s) => s.id));
+          const items = db.all('sale_items').filter((i) => saleIds.has(i.sale_id));
+          const netQty = (i) => (Number(i.quantity) || 0) - (Number(i.returned_quantity) || 0);
+          const revenue = utils.sum(items, (i) => (Number(i.total) || 0) / (Number(i.quantity) || 1) * netQty(i));
+          const cogs = utils.sum(items, (i) => (Number(i.unit_cost) || 0) * netQty(i));
+          const netSales = utils.sum(sales, 'total');
+          const grossProfit = utils.round2(revenue - cogs);
+          const expenses = db.all('expenses').filter((e) => this.inScope(e) && r.contains(e.expense_date));
+          const expenseTotal = utils.sum(expenses, 'amount');
+          const returns = db.all('sale_returns').filter((x) => this.inScope(x) && r.contains(x.return_date));
+          const purchases = db.all('purchases').filter((p) => p.status !== 'cancelled' && this.inScope(p) && r.contains(p.purchase_date));
+
+          // Ledgers are global, so scope them the same way the aging reports do: partners with activity at this branch.
+          const bidScope = this.scopeId;
+          const custTx = utils.groupBy(db.all('customer_transactions'), 'customer_id');
+          const supTx = utils.groupBy(db.all('supplier_transactions'), 'supplier_id');
+          const customers = db.all('customers').filter((c) => Number(c.balance) > 0 && (bidScope === null || (custTx[c.id] || []).some((t) => Number(t.branch_id) === Number(bidScope))));
+          const suppliers = db.all('suppliers').filter((s) => Number(s.balance) > 0 && (bidScope === null || (supTx[s.id] || []).some((t) => Number(t.branch_id) === Number(bidScope))));
+          const stockRows = db.all('branch_stock').filter((s) => this.inScope(s) && Number(s.quantity) !== 0);
+          const stockValue = utils.sum(stockRows, (s) => (Number(s.quantity) || 0) * (Number(s.avg_cost) || 0));
+          const units = stockRows.reduce((a, s) => a + (Number(s.quantity) || 0), 0);
+          const branchIds = this.scopeId === null ? this.branches.map((b) => b.id) : [this.scopeId];
+          let lowStock = 0;
+          db.all('products').filter((p) => p.is_active && db.isStockTracked(p)).forEach((p) => branchIds.forEach((bid) => { if (db.stockQty(bid, p.id) <= (Number(p.min_stock) || 0)) lowStock += 1; }));
+
+          const jobs = db.all('repair_jobs').filter((j) => this.inScope(j));
+          const delivered = jobs.filter((j) => j.status === 'delivered' && r.contains(j.delivered_at || j.completed_at || j.received_at));
+          const openJobs = jobs.filter((j) => !['delivered', 'cancelled'].includes(j.status));
+          const orders = db.all('online_orders').filter((o) => this.inScope(o) && o.status !== 'cancelled' && r.contains(o.created_at));
+
+          const serialUnits = db.all('product_imeis').filter((u) => this.inScope(u));
+          const skus = db.all('products').filter((p) => p.is_active).length;
+
+          this.k = {
+            netSales, invoices: sales.length, avgBasket: sales.length ? utils.round2(netSales / sales.length) : 0,
+            grossProfit, margin: revenue ? Math.round(grossProfit / revenue * 100) : 0, netProfit: utils.round2(grossProfit - expenseTotal),
+            receivables: utils.sum(customers, 'balance'), debtors: customers.length,
+            payables: utils.sum(suppliers, 'balance'), creditors: suppliers.length,
+            stockValue, units, lowStock, expenses: expenseTotal, expenseCount: expenses.length,
+            repairRevenue: utils.sum(delivered, 'total'), repairJobs: delivered.length, openJobs: openJobs.length,
+            onlineTotal: utils.sum(orders, 'total'), onlineOrders: orders.length,
+            skus, serialUnits: serialUnits.length, availableUnits: serialUnits.filter((u) => ABM.stock.SELLABLE.includes(u.status)).length,
+            purchases: utils.sum(purchases, 'total'), purchaseCount: purchases.length,
+            returns: returns.length, returnsAmount: utils.sum(returns, 'refund_amount'),
+          };
+          this.counts = {
+            products: db.all('products').length,
+            customers: db.all('customers').filter((c) => !c.is_walkin).length,
+            suppliers: db.all('suppliers').length,
+            stock: stockRows.length,
+          };
+
+          const q = this.linkQuery;
+          const k = this.k;
+          this.groups = [
+            { title: 'Sales', tiles: [
+              { href: 'report-sales.html?' + q, icon: 'receipt', chip: 'chip-money', title: 'Sales analysis', desc: 'By day, product, category, cashier, payment method & customer', value: this.compact(k.netSales) + ' ' + period, meta: k.invoices + ' invoices · avg ' + this.compact(k.avgBasket), tone: 'text-slate-900' },
+              { href: 'report-profit-loss.html?' + q, icon: 'chart', chip: 'chip-navy', title: 'Profit & loss', desc: 'Revenue, cost of goods, expenses and net profit with comparison', value: this.compact(k.netProfit) + ' net', meta: 'Gross ' + this.compact(k.grossProfit) + ' · ' + k.margin + '% margin', tone: k.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600' },
+            ] },
+            { title: 'Inventory', tiles: [
+              { href: 'report-stock-valuation.html?' + q, icon: 'scale', chip: 'chip-info', title: 'Stock valuation', desc: 'Value of every product at weighted average cost vs retail', value: this.compact(k.stockValue) + ' at cost', meta: utils.num(k.units) + ' units in ' + this.scopeLabel, tone: 'text-slate-900' },
+              { href: 'report-inventory.html?' + q, icon: 'archive', chip: 'chip-slate', title: 'Inventory movement', desc: 'Opening, in, out and closing quantities per product', value: utils.num(k.skus) + ' active SKUs', meta: k.lowStock + ' at or below minimum stock', tone: 'text-slate-900' },
+              { href: 'report-imei-history.html?' + q, icon: 'qr', chip: 'chip-navy', title: 'IMEI / serial history', desc: 'Trace one unit from purchase to sale, return or transfer', value: utils.num(k.serialUnits) + ' units tracked', meta: utils.num(k.availableUnits) + ' currently in stock', tone: 'text-slate-900' },
+            ] },
+            { title: 'Financial', tiles: [
+              { href: 'report-expenses.html?' + q, icon: 'banknotes', chip: 'chip-danger', title: 'Expenses', desc: 'Spending by category, by month and the largest entries', value: this.compact(k.expenses) + ' ' + period, meta: k.expenseCount + ' entries recorded', tone: 'text-rose-600' },
+              { href: 'report-balance-sheet.html?' + q, icon: 'document', chip: 'chip-navy', title: 'Balance sheet', desc: 'Assets, liabilities and owner equity at a point in time', value: this.compact(k.stockValue + k.receivables - k.payables) + ' net', meta: 'Stock + receivables − payables', tone: 'text-slate-900' },
+            ] },
+            { title: 'Partners', tiles: [
+              { href: 'report-receivables.html?' + q, icon: 'users', chip: 'chip-warning', title: 'Receivables aging', desc: 'Who owes you, bucketed 0–30 / 31–60 / 61–90 / 90+ days', value: k.debtors + ' customer' + (k.debtors === 1 ? '' : 's') + ' owe', meta: this.compact(k.receivables) + ' outstanding', tone: 'text-amber-700' },
+              { href: 'report-payables.html?' + q, icon: 'store', chip: 'chip-slate', title: 'Payables aging', desc: 'What you owe suppliers and how old each purchase is', value: this.compact(k.payables) + ' payable', meta: k.creditors + ' supplier' + (k.creditors === 1 ? '' : 's') + ' · ' + this.compact(k.purchases) + ' purchased ' + period, tone: 'text-rose-600' },
+            ] },
+            { title: 'Repairs & Online', tiles: [
+              { href: 'report-repairs.html?' + q, icon: 'wrench', chip: 'chip-money', title: 'Repair jobs', desc: 'Delivered jobs, revenue, parts vs labor and technician load', value: this.compact(k.repairRevenue) + ' ' + period, meta: k.repairJobs + ' delivered · ' + k.openJobs + ' open job' + (k.openJobs === 1 ? '' : 's'), tone: 'text-slate-900' },
+              { href: 'report-online-sales.html?' + q, icon: 'bag', chip: 'chip-info', title: 'Online sales', desc: 'Website orders, fulfilment status and top online products', value: this.compact(k.onlineTotal) + ' ' + period, meta: k.onlineOrders + ' order' + (k.onlineOrders === 1 ? '' : 's') + ' from the storefront', tone: 'text-slate-900' },
+            ] },
+          ];
+        },
+
+        /* ----------------------------------------------------------- exports */
+        stamp() { const v = this.range.value; return (v.from || 'all') + '-to-' + (v.to || utils.today()); },
+        exportCsv() {
+          const rows = [];
+          this.groups.forEach((g) => g.tiles.forEach((t) => rows.push({ group: g.title, report: t.title, headline: t.value, detail: t.meta, link: t.href.split('?')[0] })));
+          const cols = [{ label: 'Section', key: 'group' }, { label: 'Report', key: 'report' }, { label: 'Headline', key: 'headline' }, { label: 'Detail', key: 'detail' }, { label: 'Page', key: 'link' }];
+          if (!utils.download('report-summary-' + this.stamp() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported the report summary.');
+        },
+        exportProducts() {
+          const cols = [
+            { label: 'SKU', key: 'sku' }, { label: 'Name', value: (p) => db.productLabel(p.id) }, { label: 'Category', value: (p) => db.categoryName(p.category_id) },
+            { label: 'Brand', value: (p) => db.brandName(p.brand_id) }, { label: 'Type', value: (p) => db.productTypeLabel(db.productType(p)) },
+            { label: 'Device type', value: (p) => (p.device_type ? db.deviceTypeLabel(p.device_type) : '') }, { label: 'Serialized', value: (p) => (db.isSerialized(p) ? db.serialLabel(p) : 'No') },
+            { label: 'Cost', key: 'cost_price' }, { label: 'Retail', key: 'retail_price' }, { label: 'Wholesale', key: 'wholesale_price' },
+            { label: 'Min stock', key: 'min_stock' }, { label: 'Stock (' + this.scopeLabel + ')', value: (p) => (this.scopeId === null ? this.branches.reduce((a, b) => a + db.stockQty(b.id, p.id), 0) : db.stockQty(this.scopeId, p.id)) },
+            { label: 'Active', value: (p) => (p.is_active ? 'Yes' : 'No') },
+          ];
+          if (!utils.download('products-' + utils.today() + '.csv', utils.toCsv(db.all('products'), cols))) return;
+          ui.success('Exported ' + this.counts.products + ' products.');
+        },
+        exportCustomers() {
+          const rows = db.all('customers').filter((c) => !c.is_walkin);
+          const cols = [
+            { label: 'Name', key: 'name' }, { label: 'Phone', key: 'phone' }, { label: 'Email', key: 'email' }, { label: 'CNIC', key: 'cnic' },
+            { label: 'Address', key: 'address' }, { label: 'Credit limit', key: 'credit_limit' }, { label: 'Balance', key: 'balance' },
+            { label: 'Status', value: (c) => (c.is_active ? 'Active' : 'Inactive') },
+          ];
+          if (!utils.download('customers-' + utils.today() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' customers.');
+        },
+        exportSuppliers() {
+          const cols = [
+            { label: 'Name', key: 'name' }, { label: 'Contact', key: 'contact_person' }, { label: 'Phone', key: 'phone' }, { label: 'Email', key: 'email' },
+            { label: 'Address', key: 'address' }, { label: 'Tax ID', key: 'tax_id' }, { label: 'Payable balance', key: 'balance' },
+            { label: 'Status', value: (s) => (s.is_active ? 'Active' : 'Inactive') },
+          ];
+          if (!utils.download('suppliers-' + utils.today() + '.csv', utils.toCsv(db.all('suppliers'), cols))) return;
+          ui.success('Exported ' + this.counts.suppliers + ' suppliers.');
+        },
+        exportStock() {
+          const rows = db.all('branch_stock').filter((s) => this.inScope(s));
+          const cols = [
+            { label: 'Branch', value: (s) => db.branchCode(s.branch_id) }, { label: 'SKU', value: (s) => (db.product(s.product_id) || {}).sku || '' },
+            { label: 'Product', value: (s) => db.productLabel(s.product_id) }, { label: 'Quantity', key: 'quantity' },
+            { label: 'Avg cost', key: 'avg_cost' }, { label: 'Stock value', value: (s) => utils.round2((Number(s.quantity) || 0) * (Number(s.avg_cost) || 0)) },
+          ];
+          if (!utils.download('stock-' + utils.today() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' stock rows.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

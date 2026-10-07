@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>DRIVE money / financial reports</title></head>
+<body>
+<pre id="log"></pre>
+<script>
+/* QA driver — cross-checks report-profit-loss / receivables / payables / balance-sheet against raw data. */
+const TAG = 'DRIVE';
+let fails = 0, checks = 0;
+const L = (...a) => { const s = a.join(' '); console.log(TAG + ' ' + s); document.getElementById('log').textContent += s + '\n'; };
+const ok = (cond, msg, extra) => { checks++; if (!cond) { fails++; L('FAIL ' + msg + (extra ? '  [' + extra + ']' : '')); } else L('ok   ' + msg + (extra ? '  [' + extra + ']' : '')); };
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const near = (a, b, tol) => Math.abs(r2(a) - r2(b)) <= (tol === undefined ? 0.01 : tol);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function load(url, opts) {
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    const f = document.createElement('iframe');
+    f.width = 1400; f.height = 900; f.style.border = '1px solid #ccc';
+    f.onload = () => {
+      const w = f.contentWindow;
+      if (opts.plain) return resolve({ f, w, st: null });
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        let st = null;
+        try { const el = w.document.querySelector('main[x-data]'); if (el) st = (w.Alpine && w.Alpine.$data) ? w.Alpine.$data(el) : (el._x_dataStack || [])[0]; } catch (e) { /* ignore */ }
+        if (st) { clearInterval(t); resolve({ f, w, st }); }
+        else if (n > 200) { clearInterval(t); reject(new Error('Alpine component never appeared on ' + url)); }
+      }, 25);
+    };
+    f.src = url;
+    document.body.appendChild(f);
+  });
+}
+
+(async function () {
+  try {
+    const boot = await load('autologin.html?as=admin&reset=1', { plain: true });
+    const A = boot.w.ABM;
+    const U = A.utils, DB = A.db;
+    const TODAY = U.today();
+    const MONTH = { from: TODAY.slice(0, 8) + '01', to: TODAY };
+    const inR = (d, r) => U.inRange(d, r);
+    L('seeded; today=' + TODAY + ' sales=' + DB.all('sales').length + ' customers=' + DB.all('customers').length);
+
+    /* =============== 1. PROFIT & LOSS =============== */
+    const pl = await load('../report-profit-loss.html?range=this_month&branch=all');
+    const P = pl.st, DP = pl.w.ABM;
+    ok(P.range.preset === 'this_month' && P.branchSel === 'all', 'P&L opened on This Month / all branches', P.range.preset + '/' + P.branchSel);
+    ok(near(P.range.value.from, 0) || P.range.value.from === MONTH.from, 'range is the calendar month to date', P.range.value.from + ' – ' + P.range.value.to);
+
+    // --- independent recomputation from raw rows ---
+    const rawFor = (rv, bid) => {
+      const scope = (row) => bid === null || Number(row.branch_id) === Number(bid);
+      const sales = DB.all('sales').filter((s) => s.status !== 'void' && scope(s) && inR(s.sale_date, rv));
+      const ids = new Set(sales.map((s) => s.id));
+      const items = DB.all('sale_items').filter((i) => ids.has(i.sale_id));
+      const rets = DB.all('sale_returns').filter((x) => scope(x) && inR(x.return_date, rv));
+      const retIds = new Set(rets.map((x) => x.id));
+      const jobs = DB.all('repair_jobs').filter((j) => j.status === 'delivered' && scope(j) && inR(j.delivered_at || j.completed_at || j.received_at, rv));
+      const jobIds = new Set(jobs.map((j) => j.id));
+      const parts = DB.all('repair_items').filter((it) => jobIds.has(it.job_id) && it.type === 'part');
+      const gross = U.sum(sales, 'subtotal'), disc = U.sum(sales, 'discount_amount'), ret = U.sum(rets, 'refund_amount');
+      const repair = U.sum(jobs, 'total');
+      const cogsGross = U.sum(items, (i) => (Number(i.unit_cost) || 0) * (Number(i.quantity) || 0));
+      const cogsNet = U.sum(items, (i) => (Number(i.unit_cost) || 0) * Math.max(0, (Number(i.quantity) || 0) - (Number(i.returned_quantity) || 0)));
+      // cost of stock that physically came back in this period (defective units are written off, not restocked)
+      const returnedCost = U.sum(DB.all('sale_return_items').filter((ri) => retIds.has(ri.return_id) && ri.condition !== 'defective'), (ri) => {
+        const si = DB.find('sale_items', ri.sale_item_id);
+        return (si ? Number(si.unit_cost) || 0 : 0) * (Number(ri.quantity) || 0);
+      });
+      const partsCost = U.sum(parts, (it) => (Number(it.unit_cost) || 0) * (Number(it.quantity) || 0));
+      // sale.subtotal is gross of line discounts (they are rolled into sale.discount_amount), so the
+      // line-level equivalent is unit_price × quantity
+      const lineRevenue = U.sum(items, (i) => (Number(i.unit_price) || 0) * (Number(i.quantity) || 0));
+      const exp = U.sum(DB.all('expenses').filter((e) => scope(e) && inR(e.expense_date, rv)), 'amount');
+      return { sales, items, gross, disc, ret, repair, cogsGross, cogsNet, returnedCost, partsCost, lineRevenue, exp, jobs, parts,
+        productRevenue: r2(gross - disc - ret), revenue: r2(gross - disc - ret + repair) };
+    };
+    const raw = rawFor(P.range.value, null);
+    ok(near(P.cur.gross, raw.gross), 'P&L gross sales == Σ sale.subtotal', P.cur.gross + ' vs ' + raw.gross);
+    ok(near(P.cur.discounts, raw.disc), 'P&L discounts == Σ sale.discount_amount', P.cur.discounts + ' vs ' + raw.disc);
+    ok(near(P.cur.returns, raw.ret), 'P&L returns == Σ refund_amount in period', P.cur.returns + ' vs ' + raw.ret);
+    ok(near(P.cur.repair, raw.repair), 'P&L repair revenue == Σ delivered job totals', P.cur.repair + ' vs ' + raw.repair);
+    ok(near(P.cur.revenue, raw.revenue), 'P&L total revenue reconciles', P.cur.revenue + ' vs ' + raw.revenue);
+    ok(near(P.cur.cogsParts, raw.partsCost), 'P&L repair parts cost == Σ repair_items(part) cost', P.cur.cogsParts + ' vs ' + raw.partsCost);
+    ok(near(P.cur.cogsSold, raw.cogsGross), 'P&L cost of products sold == Σ unit_cost × qty invoiced in the period', P.cur.cogsSold + ' vs ' + raw.cogsGross);
+    ok(near(P.cur.returnedCost, raw.returnedCost), 'P&L returned-stock credit == cost of GOOD returns processed in the period', P.cur.returnedCost + ' vs ' + raw.returnedCost);
+    ok(near(P.cur.cogsProducts, r2(raw.cogsGross - raw.returnedCost)), 'P&L product COGS == cost sold − cost returned to stock', P.cur.cogsProducts);
+    ok(near(P.cur.grossProfit, r2(P.cur.revenue - P.cur.cogs)), 'P&L gross profit == revenue − COGS', P.cur.grossProfit);
+    ok(near(P.cur.expenses, raw.exp), 'P&L operating expenses == Σ expenses in period', P.cur.expenses + ' vs ' + raw.exp);
+    ok(near(P.cur.netProfit, r2(P.cur.grossProfit - P.cur.expenses)), 'P&L net profit == gross profit − expenses', P.cur.netProfit);
+    // line-level identity: Σ(line revenue) − header discounts − refunds − Σ(unit_cost×qty) + returned cost + repair − parts
+    const gpLine = r2(raw.lineRevenue - raw.disc - raw.ret - raw.cogsGross + raw.returnedCost + raw.repair - raw.partsCost);
+    L('  cross-check GP: page=' + P.cur.grossProfit + '  line-level=' + gpLine + '  delta=' + r2(P.cur.grossProfit - gpLine));
+    ok(near(P.cur.grossProfit, gpLine, 1), 'gross profit == Σ(line revenue − unit_cost×qty) − discounts − returns + returned cost + repair − parts', 'page=' + P.cur.grossProfit + ' formula=' + gpLine);
+    ok(near(raw.lineRevenue, raw.gross, 1), 'Σ(unit_price × qty) reconciles with Σ sale.subtotal', raw.lineRevenue + ' vs ' + raw.gross);
+    // a cross-period return must NOT strip cost from the month of the sale
+    const augRv = { from: '2026-08-01', to: '2026-08-31' };
+    const augRaw = rawFor(augRv, null);
+    P.range.set('custom'); P.range.from = augRv.from; P.range.to = augRv.to; P.range.set('custom'); await sleep(250);
+    L('  August: page cogsProducts=' + P.cur.cogsProducts + ' full cost=' + augRaw.cogsGross + ' netQty cost=' + augRaw.cogsNet + ' returned-in-Aug cost=' + augRaw.returnedCost);
+    ok(near(P.cur.cogsProducts, r2(augRaw.cogsGross - augRaw.returnedCost)), 'August COGS keeps the cost of units returned in September', P.cur.cogsProducts + ' vs ' + r2(augRaw.cogsGross - augRaw.returnedCost));
+    P.range.set('this_month'); await sleep(250);
+    // statement rows agree with the model
+    const st = P.statement;
+    const grand = st.filter((r) => r.kind === 'grand');
+    ok(grand.length === 2 && near(grand[0].value, P.cur.grossProfit) && near(grand[1].value, P.cur.netProfit), 'statement grand totals match the model', grand.map((g) => g.value).join(' / '));
+    const catRows = st.filter((r) => r.kind === 'line' && r.link && r.link.indexOf('expenses.html') === 0);
+    ok(near(U.sum(catRows, 'value'), P.cur.expenses), 'expense category lines add up to total expenses', U.sum(catRows, 'value') + ' vs ' + P.cur.expenses);
+
+    // branch split must add up
+    const rawB1 = rawFor(P.range.value, 1), rawB2 = rawFor(P.range.value, 2);
+    ok(near(r2(rawB1.revenue + rawB2.revenue), raw.revenue), 'branch revenues add up to the all-branch figure', rawB1.revenue + '+' + rawB2.revenue + ' vs ' + raw.revenue);
+    ok(P.branchRows.length === 2 && near(P.branchTotals.revenue, raw.revenue), 'per-branch table totals == all-branch revenue', P.branchTotals.revenue + ' vs ' + raw.revenue);
+    ok(near(P.branchRows[0].revenue, rawB1.revenue) && near(P.branchRows[1].revenue, rawB2.revenue), 'each branch row matches its raw revenue', P.branchRows.map((b) => b.code + ':' + b.revenue).join(' '));
+
+    // range bar really filters
+    P.range.set('today'); await sleep(200);
+    const rawToday = rawFor({ from: TODAY, to: TODAY }, null);
+    ok(near(P.cur.gross, rawToday.gross) && P.cur.invoices === rawToday.sales.length, 'P&L Today == raw rows dated today', P.cur.invoices + ' invoices, gross ' + P.cur.gross + ' vs ' + rawToday.gross);
+    P.range.set('this_month'); await sleep(200);
+    ok(near(P.cur.gross, raw.gross) && P.cur.invoices === raw.sales.length, 'back on This Month the figures return', P.cur.invoices + '/' + raw.sales.length);
+    ok(rawToday.sales.length < raw.sales.length, 'Today is a strict subset of This Month', rawToday.sales.length + ' < ' + raw.sales.length);
+    // previous period
+    const prevRaw = rawFor(P.range.previous, null);
+    ok(near(P.prev.revenue, prevRaw.revenue), 'comparison column == previous equal-length period', P.prev.revenue + ' vs ' + prevRaw.revenue);
+
+    /* =============== 2. RECEIVABLES AGING =============== */
+    const sumPosCust = () => r2(DB.all('customers').filter((c) => Number(c.balance) > 0).reduce((a, c) => a + Number(c.balance), 0));
+    const sumNegCust = () => r2(Math.abs(DB.all('customers').filter((c) => Number(c.balance) < 0).reduce((a, c) => a + Number(c.balance), 0)));
+    const rc = await load('../report-receivables.html?range=all&branch=all');
+    const R = rc.st;
+    ok(R.range.preset === 'all', 'receivables opens on All time', R.range.preset);
+    L('  receivables: report total=' + R.totals.total + '  Σ positive customer balances=' + sumPosCust());
+    ok(near(R.totals.total, sumPosCust()), 'receivables aging total == Σ positive customer balances', R.totals.total + ' vs ' + sumPosCust());
+    ok(near(R.storeCredit.amount, sumNegCust()), 'store-credit box == Σ negative customer balances', R.storeCredit.amount + ' vs ' + sumNegCust());
+    ok(near(r2(R.totals.current + R.totals.d31 + R.totals.d61 + R.totals.d90), R.totals.total), 'aging buckets add up to the total', R.totals.total);
+    ok(R.rows.every((r) => near(r.total, r2(r.current + r.d31 + r.d61 + r.d90))), 'every customer row adds up');
+    const worst = R.rows.map((r) => ({ id: r.id, name: r.name, row: r.total, bal: r2(Number(DB.find('customers', r.id).balance) || 0) })).filter((x) => !near(x.row, x.bal));
+    ok(worst.length === 0, 'each customer row equals that customer stored balance', worst.slice(0, 4).map((x) => x.name + ' row=' + x.row + ' bal=' + x.bal).join(' | '));
+
+    /* ---- spend the whole store credit exactly like POS does, then buy on khata ---- */
+    const creditCust = DB.all('customers').filter((c) => Number(c.balance) < 0)[0];
+    const spendId = creditCust.id;
+    const spend = Math.abs(Number(creditCust.balance));
+    A.ledger.customer(spendId, 1, 'store_credit', spend, 0, { referenceType: 'sale', referenceId: 1, paymentMethod: 'store_credit', notes: 'Store credit applied to INV (QA driver — same call pos.js makes)' });
+    A.ledger.customer(spendId, 1, 'sale', 18000, 0, { referenceType: 'sale', referenceId: 1, notes: 'QA driver credit sale after the credit was used up' });
+    L('  customer ' + spendId + ' "' + creditCust.name + '" spent all ' + spend + ' of store credit then bought 18000 on khata; balance now ' + DB.find('customers', spendId).balance);
+    const payCust = DB.all('customers').filter((c) => Number(c.balance) > 0 && String(c.id) !== String(spendId))[0];
+    A.ledger.customer(payCust.id, 1, 'sale', 12000, 0, { referenceType: 'sale', referenceId: 2, notes: 'QA driver credit sale' });
+    const rc2 = await load('../report-receivables.html?range=all&branch=all&v=2');
+    const R2 = rc2.st;
+    L('  after store-credit spend: report total=' + R2.totals.total + '  Σ positive balances=' + sumPosCust() + '  delta=' + r2(R2.totals.total - sumPosCust()));
+    ok(near(R2.totals.total, sumPosCust()), 'receivables total still == Σ positive balances after store credit is spent', R2.totals.total + ' vs ' + sumPosCust());
+    const row2 = R2.rows.find((r) => String(r.id) === String(spendId));
+    const bal2 = r2(Number(DB.find('customers', spendId).balance) || 0);
+    ok(row2 && near(row2.total, bal2), 'the customer who spent store credit ages at the full balance', 'balance=' + bal2 + ' row=' + (row2 ? row2.total : 'absent'));
+    ok(near(R2.storeCredit.amount, sumNegCust()), 'store-credit box tracks the remaining negative balances', R2.storeCredit.amount + ' vs ' + sumNegCust());
+    /* ---- the range bar sets the as-of date of the aging ---- */
+    const totalNow = R2.totals.total;
+    R2.range.set('last_month'); await sleep(200);
+    const lastMonthEnd = U.isoDate(new Date(U.parseDate(TODAY).getFullYear(), U.parseDate(TODAY).getMonth(), 0));
+    ok(R2.asOf === lastMonthEnd, 'Last Month ages the book as of the end of last month', R2.asOf + ' vs ' + lastMonthEnd);
+    const txUpTo = DB.all('customer_transactions').filter((t) => String(t.created_at).slice(0, 10) <= lastMonthEnd);
+    const balUpTo = {};
+    txUpTo.forEach((t) => { balUpTo[t.customer_id] = r2((balUpTo[t.customer_id] || 0) + (Number(t.debit) || 0) - (Number(t.credit) || 0)); });
+    const posUpTo = r2(Object.values(balUpTo).filter((v) => v > 0.01).reduce((a, v) => a + v, 0));
+    L('  as of ' + lastMonthEnd + ': report=' + R2.totals.total + ' replayed positive balances=' + posUpTo);
+    ok(near(R2.totals.total, posUpTo), 'historical aging == ledger replayed to that date', R2.totals.total + ' vs ' + posUpTo);
+    ok(R2.totals.total !== totalNow, 'the range bar actually changes the figures', totalNow + ' -> ' + R2.totals.total);
+    R2.range.set('all'); await sleep(200);
+    ok(near(R2.totals.total, totalNow), 'back to All time restores the figures', R2.totals.total);
+
+    /* ---- per-branch views must add up to the all-branch total ---- */
+    const rcB1 = await load('../report-receivables.html?range=all&branch=1');
+    const rcB2 = await load('../report-receivables.html?range=all&branch=2');
+    L('  receivables B1=' + rcB1.st.totals.total + ' B2=' + rcB2.st.totals.total + ' sum=' + r2(rcB1.st.totals.total + rcB2.st.totals.total) + ' all=' + R2.totals.total);
+    ok(near(r2(rcB1.st.totals.total + rcB2.st.totals.total), R2.totals.total), 'per-branch receivables add up to the all-branch total (no double counting)', r2(rcB1.st.totals.total + rcB2.st.totals.total) + ' vs ' + R2.totals.total);
+
+    /* =============== 3. PAYABLES AGING =============== */
+    const sumPosSup = () => r2(DB.all('suppliers').filter((s) => Number(s.balance) > 0).reduce((a, s) => a + Number(s.balance), 0));
+    const sumNegSup = () => r2(Math.abs(DB.all('suppliers').filter((s) => Number(s.balance) < 0).reduce((a, s) => a + Number(s.balance), 0)));
+    const pa = await load('../report-payables.html?range=all&branch=all');
+    const PA = pa.st;
+    L('  payables: report total=' + PA.totals.total + '  Σ positive supplier balances=' + sumPosSup());
+    ok(near(PA.totals.total, sumPosSup()), 'payables aging total == Σ positive supplier balances', PA.totals.total + ' vs ' + sumPosSup());
+    ok(near(PA.advances.amount, sumNegSup()), 'advances box == Σ negative supplier balances', PA.advances.amount + ' vs ' + sumNegSup());
+    ok(near(r2(PA.totals.current + PA.totals.d31 + PA.totals.d61 + PA.totals.d90), PA.totals.total), 'payables buckets add up');
+    const supBad = PA.rows.filter((r) => !near(r.total, r2(Number(DB.find('suppliers', r.id).balance) || 0)));
+    ok(supBad.length === 0, 'each supplier row equals that supplier stored balance', supBad.slice(0, 4).map((x) => x.name + ' ' + x.total).join(' | '));
+    const rawOpenPurch = r2(DB.all('purchases').filter((p) => p.status !== 'cancelled' && r2((Number(p.total) || 0) - (Number(p.paid_amount) || 0)) > 0.01).reduce((a, p) => a + (p.total - p.paid_amount), 0));
+    ok(near(PA.openPurchaseTotal, rawOpenPurch), 'open purchase bills list == raw unpaid purchase dues', PA.openPurchaseTotal + ' vs ' + rawOpenPurch);
+    // supplier payment posted via the service must show up straight away
+    const supX = DB.all('suppliers').filter((s) => Number(s.balance) > 5000)[0];
+    const beforeBal = Number(supX.balance);
+    A.ledger.supplier(supX.id, 1, 'payment', 5000, 0, { paymentMethod: 'cash', notes: 'QA driver payment' });
+    const pa2 = await load('../report-payables.html?range=all&branch=all&v=2');
+    ok(near(pa2.st.totals.total, sumPosSup()), 'payables total tracks a new payment', pa2.st.totals.total + ' vs ' + sumPosSup());
+    const rowX = pa2.st.rows.find((r) => String(r.id) === String(supX.id));
+    ok(rowX && near(rowX.total, r2(beforeBal - 5000)), 'the paid supplier row dropped by the payment', rowX && rowX.total);
+    const paB1 = await load('../report-payables.html?range=all&branch=1');
+    const paB2 = await load('../report-payables.html?range=all&branch=2');
+    L('  payables B1=' + paB1.st.totals.total + ' B2=' + paB2.st.totals.total + ' sum=' + r2(paB1.st.totals.total + paB2.st.totals.total) + ' all=' + pa2.st.totals.total);
+    ok(near(r2(paB1.st.totals.total + paB2.st.totals.total), pa2.st.totals.total), 'per-branch payables add up to the all-branch total', r2(paB1.st.totals.total + paB2.st.totals.total) + ' vs ' + pa2.st.totals.total);
+
+    /* =============== 4. BALANCE SHEET =============== */
+    const bs = await load('../report-balance-sheet.html?branch=all');
+    const B = bs.st;
+    B.assets.forEach((r) => L('  ASSET ' + r.key.padEnd(13) + r.total));
+    B.liabilities.forEach((r) => L('  LIAB  ' + r.key.padEnd(13) + r.total));
+    L('  totalAssets=' + B.totalAssets + ' totalLiabilities=' + B.totalLiabilities + ' equity=' + B.equity + ' bankNet=' + B.bankNet);
+    ok(near(B.totalAssets, r2(B.totalLiabilities + B.equity)), 'balance sheet balances (assets = liabilities + equity)', B.totalAssets + ' = ' + B.totalLiabilities + ' + ' + B.equity);
+    ok(B.assets.every((r) => r.total >= 0), 'no asset line is negative', B.assets.filter((r) => r.total < 0).map((r) => r.key + ':' + r.total).join(','));
+    ok(B.totalAssets >= B.line('inventory'), 'total assets are at least the inventory they contain', B.totalAssets + ' vs ' + B.line('inventory'));
+    ok(near(B.totalAssets, r2(B.assets.reduce((a, r) => a + r.total, 0))), 'total assets == Σ asset rows');
+    ok(near(B.totalLiabilities, r2(B.liabilities.reduce((a, r) => a + r.total, 0))), 'total liabilities == Σ liability rows');
+    ok(near(B.bankNet, r2(B.line('bank') - B.line('bank_funding'))), 'bank net == asset side − liability side', B.bankNet);
+    ok(near(B.line('receivable'), sumPosCust()), 'balance sheet receivable == Σ positive customer balances', B.line('receivable') + ' vs ' + sumPosCust());
+    ok(near(B.line('store_credit'), sumNegCust()), 'balance sheet store credit == Σ negative customer balances', B.line('store_credit') + ' vs ' + sumNegCust());
+    ok(near(B.line('payable'), sumPosSup()), 'balance sheet payable == Σ positive supplier balances', B.line('payable') + ' vs ' + sumPosSup());
+    const rawInv = r2(DB.all('branch_stock').reduce((a, s) => { const p = DB.find('products', s.product_id); if (!p || !DB.isStockTracked(p) || (Number(s.quantity) || 0) <= 0) return a; return a + (Number(s.quantity) || 0) * (Number(s.avg_cost) || 0); }, 0));
+    ok(near(B.line('inventory'), rawInv), 'balance sheet inventory == Σ qty × avg cost', B.line('inventory') + ' vs ' + rawInv);
+    const rawRepairDue = r2(DB.all('repair_jobs').filter((j) => j.status !== 'cancelled').reduce((a, j) => a + (Number(j.due_amount) || 0), 0));
+    ok(near(B.line('repair_dues'), rawRepairDue), 'balance sheet repair dues == Σ open job dues', B.line('repair_dues') + ' vs ' + rawRepairDue);
+    // cash vs the last closed day-end
+    const lastClose = A.utils.sortBy(DB.all('daily_closings').filter((c) => Number(c.branch_id) === 1 && c.status === 'closed'), 'closing_date', 'desc')[0];
+    L('  balance sheet cash=' + B.line('cash') + '  (last closed day ' + (lastClose && lastClose.closing_date) + ' counted ' + (lastClose && lastClose.actual_cash) + ')');
+    ok(B.line('cash') !== 0, 'cash line is populated', B.line('cash'));
+    // as-of date must move the figures
+    B.asOf = '2026-08-31'; await sleep(250);
+    const recvAug = B.line('receivable');
+    B.asOf = TODAY; await sleep(250);
+    ok(!near(recvAug, B.line('receivable')) || recvAug === 0, 'changing the as-of date changes the receivable figure', 'Aug=' + recvAug + ' today=' + B.line('receivable'));
+
+    L('checks=' + checks + ' fails=' + fails);
+    L('RESULT: ' + (fails ? 'FAIL' : 'PASS'));
+  } catch (e) {
+    L('EXCEPTION ' + (e && e.message) + '\n' + (e && e.stack));
+    L('RESULT: FAIL');
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Invoice · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    /* ---- printable document (always paper-white, never themed) ---- */
+    .doc-shell { display: flex; justify-content: center; min-width: 0; }
+    .doc {
+      background: #fff; color: #0f172a; width: 100%; margin: 0 auto; border-radius: .6rem;
+      box-shadow: 0 2px 6px -2px rgba(15,23,42,.18), 0 20px 50px -24px rgba(15,23,42,.5);
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    }
+    .doc-thermal { max-width: 80mm; padding: 4mm; font-size: 11.5px; line-height: 1.38; }
+    .doc-a4 { max-width: 190mm; padding: 10mm; font-size: 12.5px; line-height: 1.45; }
+    .doc .muted { color: #475569; }
+    .doc .dim { color: #64748b; }
+    .doc .hr { border-top: 1px dashed #94a3b8; margin: .5rem 0; }
+    .doc-a4 .hr { border-top: 1px solid #cbd5e1; margin: .8rem 0; }
+    .doc .rule { border-bottom: 1px dotted #cbd5e1; }
+    .doc table { width: 100%; border-collapse: collapse; }
+    .doc th, .doc td { padding: .18rem 0; vertical-align: top; text-align: left; }
+    .doc-a4 .items th, .doc-a4 .items td { padding: .4rem .5rem; border-bottom: 1px solid #e2e8f0; }
+    .doc-a4 .items thead th { background: #f1f5f9; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: #475569; border-bottom: 1px solid #cbd5e1; }
+    .doc-a4 .totals td { padding: .3rem .5rem; }
+    .doc .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .doc .mono { font-size: .95em; overflow-wrap: anywhere; }
+    .doc .sig { border-top: 1px solid #64748b; padding-top: .3rem; }
+    .doc .stamp { border: 2px solid #be123c; color: #be123c; border-radius: .4rem; font-weight: 800; letter-spacing: .2em; text-align: center; padding: .15rem .5rem; }
+    .doc .qr { width: 24mm; height: 24mm; }
+    .doc .qr svg { width: 100%; height: 100%; display: block; }
+    /* narrow screens: keep the A4 preview inside 400px (print is unaffected) */
+    @media screen and (max-width: 700px) {
+      .doc-a4 { padding: 5mm; font-size: 11px; }
+      .doc-a4 .col-opt { display: none; }
+      .doc-a4 .items th, .doc-a4 .items td { padding: .3rem .25rem; }
+      .doc .r { white-space: normal; }
+    }
+    @media print {
+      .doc { box-shadow: none !important; border-radius: 0 !important; width: 100%; max-width: none; }
+      .doc-thermal { padding: 0; font-size: 11px; }
+      .doc-a4 { padding: 0; }
+      .doc-shell { display: block; }
+      .doc .rule { border-bottom: 1px dotted #64748b; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="invoice" data-title="Invoice" data-perm="sales.print">
+  <main x-data="invoicePage()">
+    <!-- paper size follows the selected layout -->
+    <style x-text="layout === 'thermal' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4 portrait; margin: 12mm; }'"></style>
+
+    <!-- Not found -->
+    <template x-if="!doc">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('receipt','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Nothing to print</h2>
+          <p class="text-sm text-slate-600 mt-2" x-text="notFound"></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap">
+            <a href="sales.html" class="btn btn-primary"><span x-html="ABM.icon('receipt')"></span>Sales history</a>
+            <a href="repairs.html" class="btn btn-secondary" x-show="canRepairs"><span x-html="ABM.icon('wrench')"></span>Repair jobs</a>
+            <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New sale</a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="doc">
+      <div>
+        <!-- Toolbar (never printed) -->
+        <div class="page-header no-print">
+          <div class="min-w-0">
+            <a :href="doc.backHref" class="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-navy-700 mb-1"><span x-html="ABM.icon('arrow-left','w-3.5 h-3.5')"></span><span x-text="doc.backLabel"></span></a>
+            <h2 class="page-title flex items-center gap-2 flex-wrap"><span class="mono !text-2xl" x-text="doc.number"></span><span x-html="$badge(doc.status)"></span></h2>
+            <p class="page-subtitle">
+              <span x-text="doc.title"></span> · <span class="badge badge-slate" x-text="doc.branch.code"></span>
+              <span x-text="doc.branch.name"></span> · <span x-text="ABM.utils.datetime(doc.dateValue)"></span>
+            </p>
+          </div>
+          <div class="page-actions">
+            <div class="inline-flex rounded-xl border border-slate-300 bg-white p-0.5 text-sm font-semibold" role="group" aria-label="Print layout">
+              <button type="button" class="px-3 py-1.5 rounded-lg" :class="layout === 'thermal' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setLayout('thermal')">80 mm</button>
+              <button type="button" class="px-3 py-1.5 rounded-lg" :class="layout === 'a4' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setLayout('a4')">A4</button>
+            </div>
+            <button type="button" class="btn btn-primary" :disabled="printing" @click="doPrint()"><span x-html="ABM.icon('printer')"></span>Print</button>
+            <a :href="doc.backHref" class="btn btn-secondary"><span x-html="ABM.icon('eye')"></span><span x-text="doc.kind === 'repair' ? 'Job card' : 'Sale detail'"></span></a>
+            <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New sale</a>
+          </div>
+        </div>
+
+        <div class="alert alert-info no-print mb-4">
+          <span x-html="ABM.icon('info')"></span>
+          <div>Printing on <b x-text="layout === 'thermal' ? '80 mm roll paper' : 'A4 portrait'"></b>. Choose the matching paper size in the browser print dialog and turn <b>background graphics</b> on for the shaded table header.</div>
+        </div>
+
+        <!-- ================= THE DOCUMENT ================= -->
+        <div class="doc-shell">
+          <div class="print-area doc" :class="layout === 'thermal' ? 'doc-thermal' : 'doc-a4'">
+
+            <!-- Header -->
+            <div :class="layout === 'a4' ? 'flex items-start justify-between gap-6' : 'text-center'">
+              <div class="min-w-0">
+                <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[18mm] w-auto" :class="layout === 'a4' ? '' : 'mx-auto'" onerror="ABM.brand.onError(this)">
+                <div class="font-extrabold leading-tight" :class="layout === 'a4' ? 'text-2xl' : 'text-base'" x-text="settings.company_name || 'Abbott Mobile'"></div>
+                <div class="dim text-[.85em]" x-show="settings.company_tagline" x-text="settings.company_tagline"></div>
+                <div class="font-semibold mt-1 text-[.95em]" x-text="doc.branch.name"></div>
+                <div class="muted text-[.9em]" x-show="doc.branch.address" x-text="doc.branch.address"></div>
+                <div class="muted text-[.9em]" x-show="doc.branch.phone">Tel <span x-text="doc.branch.phone"></span></div>
+                <div class="muted text-[.9em]" x-show="doc.branch.tax_id"><span x-show="taxIdLabel" x-text="taxIdLabel"></span> <span class="mono" x-text="doc.branch.tax_id"></span></div>
+              </div>
+              <div class="flex-none" :class="layout === 'a4' ? 'text-right' : 'mt-2'">
+                <div class="font-extrabold uppercase tracking-[.12em]" :class="layout === 'a4' ? 'text-xl' : 'text-sm'" x-text="doc.title"></div>
+                <div class="font-bold mono mt-0.5" x-text="doc.number"></div>
+                <div class="text-[.9em]" x-text="ABM.utils.date(doc.dateValue) + ' · ' + ABM.utils.time(doc.dateValue)"></div>
+                <div class="text-[.9em] muted"><span x-text="doc.byLabel"></span>: <span x-text="doc.byName"></span></div>
+                <div class="text-[.85em] muted" x-show="doc.statusNote" x-text="doc.statusNote"></div>
+              </div>
+            </div>
+
+            <div class="mt-2" x-show="doc.voided"><div class="stamp" :class="layout === 'a4' ? 'text-lg' : 'text-sm'">VOID</div></div>
+
+            <div class="hr"></div>
+
+            <!-- Customer (+ device for repairs) -->
+            <div :class="layout === 'a4' ? 'grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-8' : 'space-y-2'">
+              <div class="min-w-0">
+                <div class="font-bold uppercase text-[.75em] tracking-[.1em] muted">Bill to</div>
+                <div class="font-semibold" x-text="doc.customer.name"></div>
+                <div class="text-[.9em]" x-show="doc.customer.phone" x-text="doc.customer.phone"></div>
+                <div class="text-[.9em] muted" x-show="doc.customer.address" x-text="doc.customer.address"></div>
+                <div class="text-[.9em] muted" x-show="doc.customer.cnic">CNIC <span class="mono" x-text="doc.customer.cnic"></span></div>
+                <div class="text-[.9em] dim" x-show="!doc.customer.phone && !doc.customer.address">Cash customer</div>
+              </div>
+              <div class="min-w-0" x-show="doc.device">
+                <div class="font-bold uppercase text-[.75em] tracking-[.1em] muted">Device</div>
+                <div class="font-semibold" x-text="doc.device ? doc.device.label : ''"></div>
+                <div class="text-[.9em]" x-show="doc.device && doc.device.serial"><span x-text="doc.device ? doc.device.serialLabel : ''"></span>: <span class="mono" x-text="doc.device ? doc.device.serial : ''"></span></div>
+                <div class="text-[.9em] muted" x-show="doc.device && doc.device.problem">Fault: <span x-text="doc.device ? doc.device.problem : ''"></span></div>
+                <div class="text-[.9em] muted" x-show="doc.device && doc.device.accessories">Accessories: <span x-text="doc.device ? doc.device.accessories : ''"></span></div>
+              </div>
+            </div>
+
+            <div class="hr"></div>
+
+            <!-- ---------- LINES · thermal ---------- -->
+            <template x-if="layout === 'thermal'">
+              <div>
+                <template x-for="l in doc.lines" :key="l.id">
+                  <div class="py-1 rule">
+                    <div class="font-semibold"><span x-text="l.no + '. '"></span><span x-text="l.label"></span></div>
+                    <div class="dim text-[.92em]" x-show="l.kindLabel" x-text="l.kindLabel"></div>
+                    <div class="dim text-[.92em]" x-show="l.serialValue"><span x-text="l.serialLabel"></span>: <span class="mono" x-text="l.serialValue"></span></div>
+                    <div class="dim text-[.92em]" x-show="l.imei2">IMEI 2: <span class="mono" x-text="l.imei2"></span></div>
+                    <div class="dim text-[.92em]" x-show="l.warrantyText" x-text="l.warrantyText"></div>
+                    <div class="flex items-baseline justify-between gap-2">
+                      <span><span x-text="l.qty"></span> × <span x-text="ABM.utils.money(l.rate)"></span></span>
+                      <span class="font-semibold r" x-text="ABM.utils.money(l.gross)"></span>
+                    </div>
+                    <div class="flex items-baseline justify-between gap-2 dim" x-show="l.discount > 0">
+                      <span>Line discount</span><span class="r" x-text="'- ' + ABM.utils.money(l.discount)"></span>
+                    </div>
+                    <div class="dim text-[.92em]" x-show="l.returned > 0"><span x-text="l.returned"></span> unit(s) returned</div>
+                  </div>
+                </template>
+                <template x-if="!doc.lines.length"><div class="py-2 dim text-center">No chargeable lines on this document.</div></template>
+              </div>
+            </template>
+
+            <!-- ---------- LINES · A4 ---------- -->
+            <template x-if="layout === 'a4'">
+              <table class="items">
+                <thead>
+                  <tr>
+                    <th style="width:2.2rem">#</th>
+                    <th>Description</th>
+                    <th class="r" style="width:3rem">Qty</th>
+                    <th class="r col-opt" style="width:6.5rem">Rate</th>
+                    <th class="r col-opt" style="width:6rem" x-show="doc.hasLineDiscount">Discount</th>
+                    <th class="r" style="width:7rem">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="l in doc.lines" :key="l.id">
+                    <tr>
+                      <td class="dim" x-text="l.no"></td>
+                      <td>
+                        <div class="font-semibold" x-text="l.label"></div>
+                        <div class="dim text-[.88em]" x-show="l.kindLabel || l.sku"><span x-text="l.kindLabel"></span><span x-show="l.kindLabel && l.sku"> · </span><span x-text="l.sku"></span></div>
+                        <div class="muted text-[.88em]" x-show="l.serialValue"><span x-text="l.serialLabel"></span>: <span class="mono" x-text="l.serialValue"></span><span x-show="l.imei2"> · IMEI 2: <span class="mono" x-text="l.imei2"></span></span></div>
+                        <div class="muted text-[.88em]" x-show="l.warrantyText" x-text="l.warrantyText"></div>
+                        <div class="dim text-[.88em]" x-show="l.returned > 0"><span x-text="l.returned"></span> unit(s) returned</div>
+                      </td>
+                      <td class="r" x-text="l.qty"></td>
+                      <td class="r col-opt" x-text="ABM.utils.money(l.rate)"></td>
+                      <td class="r col-opt" x-show="doc.hasLineDiscount" x-text="l.discount > 0 ? '- ' + ABM.utils.money(l.discount) : '—'"></td>
+                      <!-- Amount = qty x rate. Line discounts are deducted once, in the totals block, so the column foots to Subtotal. -->
+                      <td class="r font-semibold" x-text="ABM.utils.money(l.amountShown)"></td>
+                    </tr>
+                  </template>
+                  <template x-if="!doc.lines.length">
+                    <tr><td colspan="6" class="dim" style="text-align:center">No chargeable lines on this document.</td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </template>
+
+            <!-- ---------- TOTALS ---------- -->
+            <div :class="layout === 'a4' ? 'mt-4 flex justify-end' : 'mt-1'">
+              <table class="totals" :class="layout === 'a4' ? 'max-w-[85mm] w-full' : ''">
+                <tbody>
+                  <tr><td class="muted">Subtotal</td><td class="r" x-text="ABM.utils.money(doc.subtotal)"></td></tr>
+                  <tr x-show="doc.lineDiscount > 0"><td class="muted">Line discounts</td><td class="r" x-text="'- ' + ABM.utils.money(doc.lineDiscount)"></td></tr>
+                  <tr x-show="doc.invoiceDiscount > 0"><td class="muted">Invoice discount<span x-show="doc.discountNote" x-text="' ' + doc.discountNote"></span></td><td class="r" x-text="'- ' + ABM.utils.money(doc.invoiceDiscount)"></td></tr>
+                  <tr x-show="doc.kind === 'sale'"><td class="muted"><span x-text="doc.taxLabel"></span> (<span x-text="doc.taxRate"></span>%)</td><td class="r" x-text="ABM.utils.money(doc.taxAmount)"></td></tr>
+                  <!-- online orders carry a delivery fee on the sale; without this row the document would not foot -->
+                  <tr x-show="doc.deliveryFee > 0"><td class="muted">Delivery</td><td class="r" x-text="ABM.utils.money(doc.deliveryFee)"></td></tr>
+                  <tr>
+                    <td class="font-extrabold uppercase tracking-wider" :class="layout === 'a4' ? 'text-base' : 'text-[1.05em]'" style="border-top:2px solid #0f172a">Grand total</td>
+                    <td class="r font-extrabold" :class="layout === 'a4' ? 'text-xl' : 'text-[1.25em]'" style="border-top:2px solid #0f172a" x-text="ABM.utils.money(doc.total)"></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="hr"></div>
+
+            <!-- ---------- PAYMENTS ---------- -->
+            <div :class="layout === 'a4' ? 'flex flex-wrap items-start gap-6' : ''">
+              <div class="min-w-0" :class="layout === 'a4' ? 'flex-1' : ''">
+                <div class="font-bold uppercase text-[.75em] tracking-[.1em] muted">Payments</div>
+                <table>
+                  <tbody>
+                    <template x-for="p in doc.payments" :key="p.id">
+                      <tr>
+                        <td><span x-text="p.label"></span><span class="dim text-[.88em]" x-show="p.reference"> · Ref <span class="mono" x-text="p.reference"></span></span><span class="dim text-[.88em]" x-show="!p.reference && p.time"> · <span x-text="p.time"></span></span></td>
+                        <td class="r" :style="p.voided ? 'text-decoration:line-through' : ''" x-text="ABM.utils.money(p.amount)"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!doc.payments.length"><tr><td class="dim" colspan="2">No payment recorded at the counter.</td></tr></template>
+                    <tr x-show="doc.change > 0"><td class="muted">Change returned</td><td class="r" x-text="ABM.utils.money(doc.change)"></td></tr>
+                    <tr x-show="doc.credit > 0"><td class="muted">Put on khata (account)</td><td class="r" x-text="ABM.utils.money(doc.credit)"></td></tr>
+                    <tr><td class="font-semibold">Total paid</td><td class="r font-semibold" x-text="ABM.utils.money(doc.paid)"></td></tr>
+                    <tr><td class="font-bold">Balance due</td><td class="r font-bold" x-text="ABM.utils.money(doc.due)"></td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- ledger snapshot for registered customers -->
+              <div class="min-w-0" :class="layout === 'a4' ? 'flex-1' : 'mt-2'" x-show="doc.showLedger">
+                <div class="font-bold uppercase text-[.75em] tracking-[.1em] muted">Account (khata)</div>
+                <table>
+                  <tbody>
+                    <tr><td class="muted">Previous balance</td><td class="r" x-text="ABM.utils.money(doc.prevBalance)"></td></tr>
+                    <tr><td class="muted">This <span x-text="doc.kind === 'repair' ? 'job' : 'invoice'"></span></td><td class="r" x-text="ABM.utils.money(doc.ledgerAmount != null ? doc.ledgerAmount : doc.due)"></td></tr>
+                    <tr><td class="font-bold">Closing balance</td><td class="r font-bold" x-text="ABM.utils.money(doc.closingBalance)"></td></tr>
+                  </tbody>
+                </table>
+                <div class="dim text-[.85em] mt-0.5">A positive balance is payable by the customer.</div>
+              </div>
+            </div>
+
+            <!-- amount in words (A4) -->
+            <div class="mt-3 text-[.9em]" x-show="layout === 'a4'">
+              <span class="muted font-semibold">Amount in words:</span> <span x-text="amountWords"></span>
+            </div>
+
+            <div class="hr"></div>
+
+            <!-- warranty note -->
+            <div class="text-[.9em]" x-show="doc.warrantyNote" x-text="doc.warrantyNote"></div>
+
+            <!-- terms + QR -->
+            <div :class="layout === 'a4' ? 'flex items-start justify-between gap-6 mt-2' : 'mt-2'">
+              <div class="min-w-0 text-[.82em] muted">
+                <div class="font-bold uppercase tracking-[.1em]">Terms &amp; conditions</div>
+                <div x-text="doc.terms"></div>
+              </div>
+              <div class="flex-none" :class="layout === 'a4' ? '' : 'mt-2 flex flex-col items-center'">
+                <div class="qr" x-html="qrSvg"></div>
+                <div class="dim text-center text-[.75em] mono" x-text="doc.number"></div>
+              </div>
+            </div>
+
+            <!-- signatures (A4) -->
+            <div class="grid grid-cols-2 gap-8 mt-8 text-[.85em]" x-show="layout === 'a4'">
+              <div class="sig muted">Customer signature</div>
+              <div class="sig muted">For <span x-text="settings.company_name || 'Abbott Mobile'"></span> · <span x-text="doc.byName"></span></div>
+            </div>
+
+            <div class="hr"></div>
+            <div class="text-center text-[.88em]">
+              <div class="font-semibold" x-show="settings.receipt_footer" x-text="settings.receipt_footer"></div>
+              <div class="dim text-[.9em] mt-0.5">Powered by Abbott Mobile</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function invoicePage() {
+      const { db, utils, ui, session } = ABM;
+      const settings = db.settings();
+      const addMonths = (d, n) => { const x = new Date(utils.parseDate(d) || new Date()); x.setMonth(x.getMonth() + Number(n || 0)); return x; };
+
+      /* ---- amount in words (PKR, sub-continent numbering) ---- */
+      const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+      const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+      const two = (n) => (n < 20 ? ONES[n] : TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : ''));
+      const three = (n) => (n >= 100 ? ONES[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' : '') : '') + (n % 100 ? two(n % 100) : '');
+      function words(n) {
+        n = Math.floor(n);
+        if (n <= 0) return 'Zero';
+        let out = '';
+        const crore = Math.floor(n / 10000000); n %= 10000000;
+        const lakh = Math.floor(n / 100000); n %= 100000;
+        const thousand = Math.floor(n / 1000); n %= 1000;
+        if (crore) out += words(crore) + ' Crore ';
+        if (lakh) out += two(lakh) + ' Lakh ';
+        if (thousand) out += two(thousand) + ' Thousand ';
+        if (n) out += three(n);
+        return out.trim();
+      }
+      function moneyWords(v) {
+        const abs = Math.abs(Number(v) || 0);
+        const rupees = Math.floor(abs);
+        const paisa = Math.round((abs - rupees) * 100);
+        let s = (Number(v) < 0 ? 'Minus ' : '') + 'Rupees ' + words(rupees);
+        if (paisa) s += ' and ' + two(paisa) + ' Paisa';
+        return s + ' only';
+      }
+
+      /* ---- QR placeholder: a deterministic module grid drawn from the document number ---- */
+      function buildQr(text) {
+        const N = 25;
+        let h = 2166136261;
+        const src = String(text || 'ABM');
+        for (let i = 0; i < src.length; i++) { h ^= src.charCodeAt(i); h = Math.imul(h, 16777619); }
+        const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; h |= 0; return (h >>> 0) / 4294967296; };
+        const finder = (x, y) => {
+          const zones = [[0, 0], [N - 7, 0], [0, N - 7]];
+          for (const [ox, oy] of zones) {
+            if (x >= ox - 1 && x <= ox + 7 && y >= oy - 1 && y <= oy + 7) {
+              const rx = x - ox, ry = y - oy;
+              if (rx < 0 || ry < 0 || rx > 6 || ry > 6) return 'quiet';
+              const edge = rx === 0 || rx === 6 || ry === 0 || ry === 6;
+              const core = rx >= 2 && rx <= 4 && ry >= 2 && ry <= 4;
+              return edge || core ? 'on' : 'off';
+            }
+          }
+          return null;
+        };
+        let rects = '';
+        for (let y = 0; y < N; y++) {
+          for (let x = 0; x < N; x++) {
+            const f = finder(x, y);
+            const on = f ? f === 'on' : (x === 6 || y === 6 ? (x + y) % 2 === 0 : rnd() > 0.5);
+            if (on) rects += '<rect x="' + x + '" y="' + y + '" width="1" height="1"/>';
+          }
+        }
+        return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 ' + (N + 2) + ' ' + (N + 2) + '" role="img" aria-label="Document code" shape-rendering="crispEdges">'
+          + '<rect x="-1" y="-1" width="' + (N + 2) + '" height="' + (N + 2) + '" fill="#ffffff"/><g fill="#0f172a">' + rects + '</g></svg>';
+      }
+
+      return {
+        settings,
+        layout: 'thermal',
+        doc: null,
+        printing: false,
+        notFound: 'Open an invoice from the sales history or a job card from the repair list.',
+        canPos: session.can('pos.view'),
+        canRepairs: session.can('repairs.view'),
+        /** The branch tax id usually already reads "NTN …"; only add a label when it does not. */
+        get taxIdLabel() { const v = this.doc ? String(this.doc.branch.tax_id || '') : ''; return /ntn|strn|tax|gst/i.test(v) ? '' : 'NTN / Tax ID'; },
+
+        init() {
+          const asked = String(utils.qs('layout') || '').toLowerCase();
+          this.layout = ['thermal', 'a4'].includes(asked) ? asked : (String(settings.default_print_layout || 'thermal').toLowerCase() === 'a4' ? 'a4' : 'thermal');
+          const jobId = utils.qs('job');
+          if (jobId) this.loadJob(jobId); else this.loadSale(utils.qs('id'));
+          if (this.doc && utils.qs('autoprint') === '1') setTimeout(() => this.doPrint(), 400);
+        },
+
+        get qrSvg() { return buildQr(this.doc ? this.doc.number + '|' + this.doc.total : 'ABM'); },
+        get amountWords() { return this.doc ? moneyWords(this.doc.total) : ''; },
+
+        setLayout(l) {
+          if (this.layout === l) return;
+          this.layout = l;
+          try {
+            const p = new URLSearchParams(location.search);
+            p.set('layout', l); p.delete('autoprint');
+            history.replaceState(null, '', location.pathname + '?' + p.toString());
+          } catch (e) { /* ignore */ }
+        },
+        doPrint() {
+          if (this.printing) return;
+          this.printing = true;
+          this.$nextTick(() => { try { window.print(); } catch (e) { ui.error('Printing is not available in this browser.'); } setTimeout(() => { this.printing = false; }, 600); });
+        },
+
+        /* ------------------------------------------------------ sale invoice */
+        loadSale(id) {
+          if (!id) { this.notFound = 'No invoice was selected. Open one from the sales history.'; return; }
+          const s = db.find('sales', id);
+          if (!s) { this.notFound = 'No invoice matches id ' + id + '. It may have been removed.'; return; }
+          if (!session.isSuperAdmin() && String(s.branch_id) !== String(session.branchId())) {
+            this.notFound = 'This invoice belongs to ' + db.branchName(s.branch_id) + ' and cannot be printed from your branch.'; return;
+          }
+          const branch = db.branch(s.branch_id) || { name: '—', code: '—', address: '', phone: '', tax_id: '' };
+          const cust = db.customer(s.customer_id);
+          const walkin = !cust || !!cust.is_walkin;
+          const lines = db.where('sale_items', { sale_id: s.id }).map((it, i) => {
+            const p = db.product(it.product_id) || {};
+            const unit = it.imei_id ? db.find('product_imeis', it.imei_id) : null;
+            const months = Number(it.warranty_months != null ? it.warranty_months : (p.warranty_months || 0)) || 0;
+            const until = months ? utils.isoDate(addMonths(s.sale_date, months)) : null;
+            const type = db.productType(p);
+            const amount = utils.round2(Number(it.total) || 0);
+            const discount = utils.round2(Number(it.discount_amount) || 0);
+            return {
+              id: 'i' + it.id, no: i + 1,
+              label: db.productLabel(it.product_id), sku: p.sku || '',
+              kindLabel: type === 'service' ? 'Service / labor' : (type === 'part' ? 'Spare part' : ''),
+              serialLabel: db.serialLabel(p), serialValue: it.imei || (unit ? unit.imei : ''), imei2: unit ? unit.imei2 || '' : '',
+              warrantyText: months ? 'Warranty ' + months + ' month' + (months === 1 ? '' : 's') + (until ? ' · valid till ' + utils.date(until) : '') : '',
+              qty: Number(it.quantity) || 0, rate: utils.round2(Number(it.unit_price) || 0),
+              discount, amount, gross: utils.round2(amount + discount), amountShown: utils.round2(amount + discount),
+              returned: Number(it.returned_quantity) || 0,
+            };
+          });
+          const pays = utils.sortBy(db.where('sale_payments', { sale_id: s.id }), 'created_at').map((p) => ({
+            id: 'p' + p.id, label: ui.statusLabel(p.method), reference: p.reference || '', amount: utils.round2(Number(p.amount) || 0), time: utils.time(p.created_at),
+          }));
+          const paid = utils.sum(pays, 'amount');
+          const total = utils.round2(Number(s.total) || 0);
+          const due = utils.round2(Number(s.due_amount) || 0);
+          const prevBalance = walkin ? 0 : this.previousBalance(cust, s, 'sale');
+          // sales.discount_amount holds line + invoice discounts together; split them so the printed
+          // document foots: Subtotal (= sum of qty x rate) - line discounts - invoice discount + tax = total.
+          const totalDiscount = utils.round2(Number(s.discount_amount) || 0);
+          const lineDiscount = utils.round2(Math.min(totalDiscount, utils.sum(lines, 'discount')));
+          const invoiceDiscount = utils.round2(Math.max(0, totalDiscount - lineDiscount));
+          this.doc = {
+            kind: 'sale', title: 'Tax Invoice', number: s.invoice_no, dateValue: s.sale_date,
+            byLabel: 'Cashier', byName: db.userName(s.user_id),
+            status: s.status, statusNote: s.status === 'completed' ? '' : ui.statusLabel(s.status),
+            voided: s.status === 'void',
+            branch,
+            customer: { name: walkin ? (cust ? cust.name : 'Walk-in Customer') : cust.name, phone: walkin ? '' : cust.phone || '', address: walkin ? '' : cust.address || '', cnic: walkin ? '' : cust.cnic || '' },
+            device: null,
+            lines, hasLineDiscount: lines.some((l) => l.discount > 0),
+            subtotal: utils.round2(Number(s.subtotal) || 0),
+            discount: totalDiscount, lineDiscount, invoiceDiscount,
+            discountNote: s.discount_type === 'percent' && s.discount_value ? '(' + s.discount_value + '%)' : '',
+            taxLabel: settings.tax_label || 'Sales Tax', taxRate: Number(s.tax_rate) || 0, taxAmount: utils.round2(Number(s.tax_amount) || 0),
+            deliveryFee: utils.round2(Number(s.delivery_fee) || 0),
+            total, payments: pays, paid: utils.round2(Number(s.paid_amount) || paid), change: paid > total ? utils.round2(paid - total) : 0, due,
+            showLedger: !walkin && (prevBalance !== 0 || due > 0), prevBalance, closingBalance: utils.round2(prevBalance + due),
+            warrantyNote: lines.some((l) => l.warrantyText) ? 'Warranty claims require this invoice and a matching IMEI / serial number. Warranty starts from the invoice date.' : '',
+            terms: settings.invoice_terms || '',
+            backHref: 'sale-view.html?id=' + s.id, backLabel: 'Back to ' + s.invoice_no,
+          };
+        },
+
+        /* ------------------------------------------------------ repair invoice */
+        loadJob(id) {
+          const j = db.find('repair_jobs', id);
+          if (!j) { this.notFound = 'No repair job matches id ' + id + '.'; return; }
+          if (!session.isSuperAdmin() && String(j.branch_id) !== String(session.branchId())) {
+            this.notFound = 'This job card belongs to ' + db.branchName(j.branch_id) + ' and cannot be printed from your branch.'; return;
+          }
+          const branch = db.branch(j.branch_id) || { name: '—', code: '—', address: '', phone: '', tax_id: '' };
+          const cust = db.customer(j.customer_id) || { name: 'Walk-in Customer', phone: '', address: '', cnic: '', is_walkin: 1 };
+          const walkin = !!cust.is_walkin;
+          const lines = utils.sortBy(db.where('repair_items', { job_id: j.id }), 'id').map((it, i) => {
+            const qty = Number(it.quantity) || 0;
+            const amount = utils.round2(Number(it.total) || 0);
+            return {
+              id: 'r' + it.id, no: i + 1,
+              label: it.description || db.productLabel(it.product_id), sku: '',
+              kindLabel: it.type === 'part' ? 'Spare part' : 'Labor',
+              serialLabel: '', serialValue: '', imei2: '', warrantyText: '',
+              qty, rate: utils.round2(Number(it.unit_price) || 0), discount: 0, amount, gross: amount, amountShown: amount, returned: 0,
+            };
+          });
+          // A refund (or the reversal of a voided payment) is money back OUT: it prints as a negative line and
+          // comes off what was paid, so a voided payment is never counted twice.
+          const payRows = utils.sortBy(db.where('repair_payments', { job_id: j.id }), (p) => String(p.created_at) + '|' + utils.pad(p.id, 8));
+          const pays = payRows.map((p) => {
+            const out = p.kind === 'refund';
+            const label = out ? (p.voids_payment_id ? 'Void' : 'Refund') + ' · ' + ui.statusLabel(p.method) : utils.titleCase(p.kind || 'payment') + ' · ' + ui.statusLabel(p.method) + (p.voided_by_id ? ' (voided)' : '');
+            return { id: 'rp' + p.id, label, reference: p.reference || '', amount: utils.round2((out ? -1 : 1) * (Number(p.amount) || 0)), time: utils.date(p.created_at), voided: !!p.voided_by_id };
+          });
+          const paid = utils.round2(utils.sum(pays, 'amount'));
+          const total = utils.round2(Number(j.total) || 0);
+          // what left with the device on the customer's khata is still owed on this invoice, but through the ledger
+          const credit = utils.round2(Number(j.credit_amount) || 0);
+          const jobDue = j.status === 'cancelled' ? 0 : Math.max(0, utils.round2(total - paid - credit));
+          const due = utils.round2(jobDue + credit);
+          const warrantyDays = Number(j.warranty_days) || 0;
+          const warrantyEnd = j.delivered_at && warrantyDays ? utils.isoDate(utils.addDays(j.delivered_at, warrantyDays)) : null;
+          const prevBalance = walkin ? 0 : this.previousBalance(cust, j, 'repair_job');
+          this.doc = {
+            kind: 'repair', title: 'Repair Invoice', number: j.job_no, dateValue: j.delivered_at || j.completed_at || j.received_at,
+            byLabel: 'Technician', byName: j.technician_id ? db.userName(j.technician_id) : db.userName(j.created_by),
+            status: j.status, statusNote: 'Status: ' + ui.statusLabel(j.status), voided: j.status === 'cancelled',
+            branch,
+            customer: { name: cust.name, phone: cust.phone || '', address: walkin ? '' : cust.address || '', cnic: walkin ? '' : cust.cnic || '' },
+            device: {
+              label: [db.deviceTypeLabel(j.device_type), j.brand, j.model].filter(Boolean).join(' · ') + (j.color ? ' · ' + j.color : ''),
+              serialLabel: j.serial_type === 'serial' ? 'Serial No.' : 'IMEI', serial: j.serial || '',
+              problem: j.problem_description || '', accessories: j.accessories_received || '',
+            },
+            lines, hasLineDiscount: false,
+            subtotal: utils.round2((Number(j.total_parts) || 0) + (Number(j.total_labor) || 0)),
+            // repair jobs carry a single job-level discount (no per-line discounts)
+            discount: utils.round2(Number(j.discount) || 0), lineDiscount: 0, invoiceDiscount: utils.round2(Number(j.discount) || 0), discountNote: '',
+            taxLabel: settings.tax_label || 'Sales Tax', taxRate: 0, taxAmount: 0,
+            total, payments: pays, paid, change: 0, due, credit,
+            // the khata box shows only what this job actually put on the customer's ledger
+            ledgerAmount: credit,
+            showLedger: !walkin && (prevBalance !== 0 || credit > 0), prevBalance, closingBalance: utils.round2(prevBalance + credit),
+            warrantyNote: warrantyDays
+              ? 'Repair warranty: ' + warrantyDays + ' day' + (warrantyDays === 1 ? '' : 's') + ' on the repaired fault only' + (warrantyEnd ? ' · valid till ' + utils.date(warrantyEnd) : '') + '. Parts carry their own manufacturer warranty.'
+              : 'No warranty is offered on this repair.',
+            terms: settings.repair_terms || settings.invoice_terms || '',
+            backHref: 'repair-view.html?id=' + j.id, backLabel: 'Back to ' + j.job_no,
+          };
+        },
+
+        /** Ledger balance the customer carried BEFORE this document (registered customers only). */
+        previousBalance(cust, row, refType) {
+          try {
+            const txs = utils.sortBy(db.where('customer_transactions', { customer_id: cust.id }), 'created_at');
+            const own = txs.find((t) => t.reference_type === refType && String(t.reference_id) === String(row.id));
+            if (own) return utils.round2((Number(own.balance_after) || 0) - (Number(own.debit) || 0) + (Number(own.credit) || 0));
+            const stamp = String(row.sale_date || row.received_at || row.created_at || '');
+            const before = txs.filter((t) => String(t.created_at) <= stamp);
+            return before.length ? utils.round2(Number(before[before.length - 1].balance_after) || 0) : 0;
+          } catch (e) { return 0; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

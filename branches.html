@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Branches · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="branches" data-title="Branches" data-perm="branches.view">
+  <main x-data="branchesPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Branches</h2>
+        <p class="page-subtitle">Shop locations, contact details and tax registration. Branches with financial history can only be deactivated, never deleted.</p>
+      </div>
+      <div class="page-actions">
+        <button type="button" class="btn btn-primary" x-show="canAdd" @click="openCreate()"><span x-html="ABM.icon('plus')"></span>Add branch</button>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a href="branches.html?status=active" class="stat stat-accent" title="Show active branches" @click.prevent="statusFilter = statusFilter === 'active' ? 'all' : 'active'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Active branches</div><div class="stat-value" x-text="k.active"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('building')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.total"></span> total · <span x-text="k.total - k.active"></span> inactive</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="users.html" class="stat" title="Open Users">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Staff</div><div class="stat-value" x-text="k.staff"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('user-group')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.technicians"></span> technician<span x-text="k.technicians === 1 ? '' : 's'"></span> · <span x-text="k.admins"></span> super admin<span x-text="k.admins === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-stock-valuation.html" class="stat stat-warning" title="Open stock valuation">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Stock units</div><div class="stat-value" x-text="ABM.utils.num(k.units)"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta">across active branches · value <b class="text-slate-700" x-text="$money(k.stockValue, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="sales.html?range=this_month" class="stat stat-money" title="Open this month's sales">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Month sales</div><div class="stat-value" x-text="$money(k.monthSales, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.monthInvoices"></span> invoices · <span x-text="k.monthRepairs"></span> repairs delivered · <span x-text="monthLabel"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Branch list -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div>
+          <div class="card-title">All branches</div>
+          <div class="card-subtitle"><span x-text="filtered.length"></span> of <span x-text="rows.length"></span> branches</div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div class="relative flex-1 sm:w-64">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 flex text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input input-sm !pl-9" placeholder="Search code, name, address, phone…" x-model.trim="q" aria-label="Search branches">
+          </div>
+          <select class="select input-sm sm:!w-auto" x-model="statusFilter" aria-label="Status filter">
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Branch</th>
+              <th class="hidden md:table-cell">Phone</th>
+              <th class="hidden lg:table-cell">Tax ID</th>
+              <th class="num">Users</th>
+              <th class="num hidden sm:table-cell">Stock</th>
+              <th class="num hidden md:table-cell">Month sales</th>
+              <th>Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="b in pg.items" :key="b.id">
+              <tr :class="!b.is_active && 'opacity-70'">
+                <td><span class="badge badge-navy mono font-bold" x-text="b.code"></span></td>
+                <td>
+                  <div class="font-semibold text-slate-800 flex items-center gap-1.5">
+                    <span x-text="b.name"></span>
+                    <span x-show="b.id === currentBranchId" class="badge badge-green" title="Currently selected in the top bar">current</span>
+                  </div>
+                  <div class="text-xs text-slate-500 max-w-xs truncate" x-text="b.address || '—'" :title="b.address"></div>
+                </td>
+                <td class="hidden md:table-cell text-slate-600 mono" x-text="b.phone || '—'"></td>
+                <td class="hidden lg:table-cell text-slate-600 mono" x-text="b.tax_id || '—'"></td>
+                <td class="num">
+                  <span class="font-semibold" x-text="b.users"></span>
+                  <span class="text-xs text-slate-400" x-show="b.usersInactive" x-text="'+' + b.usersInactive + ' off'"></span>
+                  <div class="text-[11px] text-emerald-700" x-show="b.technicians" x-text="b.technicians + ' tech'"></div>
+                </td>
+                <td class="num hidden sm:table-cell" x-text="ABM.utils.num(b.units)"></td>
+                <td class="num hidden md:table-cell">
+                  <div class="font-semibold" x-text="$money(b.monthSales, {decimals:0})"></div>
+                  <div class="text-[11px] text-slate-400" x-text="b.monthInvoices + ' inv · ' + b.monthRepairs + ' repairs'"></div>
+                </td>
+                <td><span x-html="$badge(b.is_active ? 'active' : 'inactive')"></span></td>
+                <td class="actions">
+                  <button type="button" class="btn btn-ghost btn-icon btn-sm" title="Edit branch" x-show="canEdit" @click="openEdit(b)"><span x-html="ABM.icon('edit')"></span></button>
+                  <button type="button" class="btn btn-ghost btn-icon btn-sm" x-show="canDelete" :class="b.is_active ? 'text-rose-600 hover:text-rose-700' : 'text-emerald-600 hover:text-emerald-700'" :title="b.is_active ? 'Deactivate branch' : 'Activate branch'" @click="toggleActive(b)"><span x-html="ABM.icon(b.is_active ? 'x-circle' : 'check-circle')"></span></button>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pg.items.length">
+              <tr>
+                <td colspan="9" class="empty">
+                  <span x-html="ABM.icon('building')"></span>
+                  <div class="empty-title" x-text="rows.length ? 'No branches match your search' : 'No branches yet'"></div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different keyword or clear the status filter.' : 'Add your first branch to start selling.'"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500" x-show="pg.total > 0">
+        <span>Showing <b class="text-slate-800" x-text="pg.from"></b>–<b class="text-slate-800" x-text="pg.to"></b> of <b class="text-slate-800" x-text="pg.total"></b></span>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pg.page <= 1" @click="page = pg.page - 1"><span x-html="ABM.icon('chevron-left')"></span>Prev</button>
+          <span class="px-2 tabular">Page <b x-text="pg.page"></b> / <b x-text="pg.pages"></b></span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pg.page >= pg.pages" @click="page = pg.page + 1">Next<span x-html="ABM.icon('chevron-right')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / Edit modal -->
+    <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="closeModal()" @keydown.escape.window="closeModal()">
+      <form class="modal-panel" @submit.prevent="save()" novalidate role="dialog" aria-modal="true" aria-labelledby="branch-modal-title">
+        <div class="modal-header">
+          <h3 class="modal-title" id="branch-modal-title" x-text="modal.id ? 'Edit branch' : 'Add branch'"></h3>
+          <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="closeModal()" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label class="label" for="b-code">Code <span class="req">*</span></label>
+              <input id="b-code" x-ref="first" type="text" class="input mono uppercase" :class="modal.errors.code && 'is-invalid'" x-model.trim="modal.form.code" maxlength="6" placeholder="MB" autocomplete="off" :disabled="modal.codeLocked" @input="modal.form.code = String(modal.form.code || '').toUpperCase()">
+              <p class="field-error" x-show="modal.errors.code" x-text="modal.errors.code"></p>
+              <p class="help" x-show="!modal.errors.code" x-text="modal.codeLocked ? 'Locked: used in document numbers.' : '2–6 uppercase letters or digits.'"></p>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="b-name">Branch name <span class="req">*</span></label>
+              <input id="b-name" type="text" class="input" :class="modal.errors.name && 'is-invalid'" x-model.trim="modal.form.name" maxlength="80" placeholder="e.g. Branch 4 - DHA" autocomplete="off">
+              <p class="field-error" x-show="modal.errors.name" x-text="modal.errors.name"></p>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="b-address">Address</label>
+            <textarea id="b-address" class="textarea !min-h-[4rem]" x-model.trim="modal.form.address" maxlength="200" placeholder="Shop / plaza, road, city"></textarea>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label" for="b-phone">Phone</label>
+              <input id="b-phone" type="tel" class="input" :class="modal.errors.phone && 'is-invalid'" x-model.trim="modal.form.phone" maxlength="20" placeholder="042-3xxxxxxx" autocomplete="off">
+              <p class="field-error" x-show="modal.errors.phone" x-text="modal.errors.phone"></p>
+            </div>
+            <div>
+              <label class="label" for="b-tax">Tax ID (NTN)</label>
+              <input id="b-tax" type="text" class="input" x-model.trim="modal.form.tax_id" maxlength="30" placeholder="NTN 1234567-8" autocomplete="off">
+              <p class="help">Printed on tax invoices.</p>
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <div class="text-sm font-semibold text-slate-800">Branch is active</div>
+              <div class="text-xs text-slate-500">Inactive branches are hidden from the branch switcher and POS.</div>
+            </div>
+            <button type="button" class="switch" :class="modal.form.is_active && 'on'" role="switch" :aria-checked="modal.form.is_active ? 'true' : 'false'" @click="modal.form.is_active = !modal.form.is_active" :disabled="modal.id && modal.id === currentBranchId" :title="modal.id && modal.id === currentBranchId ? 'Switch to another branch in the top bar first' : ''"></button>
+          </div>
+          <p class="field-error" x-show="modal.errors.form" x-text="modal.errors.form"></p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" :disabled="modal.busy" x-text="modal.id ? 'Save changes' : 'Create branch'"></button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script>
+    function branchesPage() {
+      const { db, utils, ui, session } = ABM;
+      const CODE_RE = /^[A-Z0-9]{2,6}$/;
+      const blank = () => ({ code: '', name: '', address: '', phone: '', tax_id: '', is_active: true });
+      return {
+        canAdd: ABM.session.can('branches.add'),
+        canEdit: ABM.session.can('branches.edit'),
+        canDelete: ABM.session.can('branches.delete'),
+        q: '', statusFilter: 'all', page: 1,
+        rows: [],
+        k: { active: 0, total: 0, staff: 0, admins: 0, technicians: 0, units: 0, stockValue: 0, monthSales: 0, monthInvoices: 0, monthRepairs: 0 },
+        monthLabel: new Date().toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }),
+        currentBranchId: session.branchId(),
+        modal: { open: false, busy: false, id: null, codeLocked: false, form: blank(), errors: {} },
+
+        init() {
+          if (['active', 'inactive'].includes(utils.qs('status'))) this.statusFilter = utils.qs('status');
+          this.load();
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('statusFilter', () => { this.page = 1; });
+          if (utils.qs('new') === '1' && this.canAdd) this.openCreate();
+        },
+
+        load() {
+          const month = utils.today().slice(0, 7);
+          const users = db.all('users');
+          const stock = db.all('branch_stock');
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && String(s.sale_date).slice(0, 7) === month);
+          const repairs = db.all('repair_jobs').filter((j) => j.status === 'delivered' && String(j.delivered_at || '').slice(0, 7) === month);
+          const docBranches = new Set([
+            ...db.all('sales').map((s) => s.branch_id), ...db.all('purchases').map((p) => p.branch_id),
+            ...db.all('stock_transfers').flatMap((t) => [t.from_branch_id, t.to_branch_id]), ...db.all('sale_returns').map((r) => r.branch_id),
+            ...db.all('repair_jobs').map((j) => j.branch_id), ...db.all('online_orders').map((o) => o.branch_id),
+          ]);
+          this.rows = db.all('branches').map((b) => {
+            const bStock = stock.filter((s) => s.branch_id === b.id);
+            const bSales = sales.filter((s) => s.branch_id === b.id);
+            const bRepairs = repairs.filter((j) => j.branch_id === b.id);
+            return {
+              ...b,
+              is_active: !!b.is_active,
+              users: users.filter((u) => u.branch_id === b.id && u.is_active).length,
+              usersInactive: users.filter((u) => u.branch_id === b.id && !u.is_active).length,
+              technicians: users.filter((u) => u.branch_id === b.id && u.is_active && ABM.roles.isBench(u.role)).length,
+              units: bStock.reduce((a, s) => a + (Number(s.quantity) || 0), 0),
+              stockValue: utils.sum(bStock, (s) => s.quantity * s.avg_cost),
+              monthSales: utils.sum(bSales, 'total'),
+              monthInvoices: bSales.length,
+              monthRepairs: bRepairs.length,
+              hasDocs: docBranches.has(b.id),
+            };
+          });
+          const active = this.rows.filter((b) => b.is_active);
+          this.k = {
+            active: active.length, total: this.rows.length,
+            staff: users.filter((u) => u.is_active && u.branch_id && active.some((b) => b.id === u.branch_id)).length,
+            admins: users.filter((u) => u.is_active && ABM.roles.isFull(u.role)).length,
+            technicians: users.filter((u) => u.is_active && u.role === 'technician' && active.some((b) => b.id === u.branch_id)).length,
+            units: active.reduce((a, b) => a + b.units, 0),
+            stockValue: utils.sum(active, 'stockValue'),
+            monthSales: utils.sum(this.rows, 'monthSales'),
+            monthInvoices: this.rows.reduce((a, b) => a + b.monthInvoices, 0),
+            monthRepairs: this.rows.reduce((a, b) => a + b.monthRepairs, 0),
+          };
+        },
+
+        get filtered() {
+          const q = this.q.toLowerCase();
+          return this.rows
+            .filter((b) => this.statusFilter === 'all' || (this.statusFilter === 'active') === b.is_active)
+            .filter((b) => !q || [b.code, b.name, b.address, b.phone, b.tax_id].some((v) => String(v || '').toLowerCase().includes(q)))
+            .sort((a, b) => (b.is_active - a.is_active) || a.code.localeCompare(b.code));
+        },
+        get pg() { return utils.paginate(this.filtered, this.page); },
+
+        /* ---- modal ---- */
+        openCreate() {
+          if (!this.canAdd) { ABM.ui.error('Your role is not allowed to add branches.'); return; }
+          this.modal = { open: true, busy: false, id: null, codeLocked: false, form: blank(), errors: {} };
+          this.$nextTick(() => this.$refs.first && this.$refs.first.focus());
+        },
+        openEdit(b) {
+          if (!this.canEdit) { ABM.ui.error('Your role is not allowed to edit branches.'); return; }
+          this.modal = { open: true, busy: false, id: b.id, codeLocked: b.hasDocs, form: { code: b.code, name: b.name, address: b.address || '', phone: b.phone || '', tax_id: b.tax_id || '', is_active: !!b.is_active }, errors: {} };
+          this.$nextTick(() => { const el = this.modal.codeLocked ? document.getElementById('b-name') : this.$refs.first; el && el.focus(); });
+        },
+        closeModal() { this.modal.open = false; },
+        validate() {
+          const f = this.modal.form; const e = {};
+          f.code = String(f.code || '').toUpperCase().trim();
+          if (!CODE_RE.test(f.code)) e.code = '2–6 uppercase letters or digits (e.g. MB, B4, DHA1).';
+          else if (db.all('branches').some((b) => b.code.toUpperCase() === f.code && b.id !== this.modal.id)) e.code = 'Code ' + f.code + ' is already used by another branch.';
+          if (!f.name || f.name.length < 2) e.name = 'Branch name is required.';
+          if (f.phone && !/^[0-9+\-() ]{6,20}$/.test(f.phone)) e.phone = 'Enter a valid phone number.';
+          this.modal.errors = e;
+          return !Object.keys(e).length;
+        },
+        save() {
+          if (!this.validate()) return;
+          this.modal.busy = true;
+          try {
+            const f = this.modal.form;
+            const patch = { code: f.code, name: f.name, address: f.address || '', phone: f.phone || '', tax_id: f.tax_id || '', is_active: f.is_active ? 1 : 0 };
+            if (this.modal.id) {
+              const before = db.find('branches', this.modal.id);
+              if (before && before.is_active && !patch.is_active) {
+                if (this.modal.id === this.currentBranchId) { this.modal.errors = { form: 'Switch to another branch in the top bar before deactivating this one.' }; return; }
+                if (this.rows.filter((b) => b.is_active).length <= 1) { this.modal.errors = { form: 'At least one branch must remain active.' }; return; }
+              }
+              const changed = Object.keys(patch).filter((k) => String(before[k] ?? '') !== String(patch[k] ?? ''));
+              db.update('branches', this.modal.id, patch);
+              db.audit('branch.update', 'branch', this.modal.id, `Branch ${patch.code} updated` + (changed.length ? ' (' + changed.join(', ') + ')' : ''));
+              if (before && !!before.is_active !== !!patch.is_active) db.audit(patch.is_active ? 'branch.activate' : 'branch.deactivate', 'branch', this.modal.id, `Branch ${patch.code} ${patch.is_active ? 'activated' : 'deactivated'}`);
+              ui.success('Branch ' + patch.code + ' updated.');
+            } else {
+              const row = db.insert('branches', patch);
+              db.audit('branch.create', 'branch', row.id, `Branch ${row.code} · ${row.name} created`);
+              ui.success('Branch ' + row.code + ' created. It will appear in the branch switcher after the next page load.');
+            }
+            this.load();
+            this.modal.open = false;
+          } catch (err) { ui.error(err.message); }
+          finally { this.modal.busy = false; }
+        },
+
+        /* ---- activate / deactivate ---- */
+        async toggleActive(b) {
+          if (!this.canDelete) { ABM.ui.error('Your role is not allowed to deactivate branches.'); return; }
+          if (b.is_active) {
+            if (b.id === this.currentBranchId) { ui.error('Switch to another branch in the top bar before deactivating this one.'); return; }
+            if (this.rows.filter((x) => x.is_active).length <= 1) { ui.error('At least one branch must remain active.'); return; }
+            const warn = [];
+            if (b.users) warn.push(`${b.users} active user${b.users > 1 ? 's' : ''} assigned`);
+            if (b.units) warn.push(`${utils.num(b.units)} stock unit${b.units > 1 ? 's' : ''} on hand`);
+            const ok = await ui.confirm({
+              title: `Deactivate ${b.code} · ${b.name}?`,
+              message: (warn.length ? `Warning: this branch has ${warn.join(' and ')}. ` : '') + 'It will be hidden from the branch switcher and POS. Sales, purchases and ledger history are kept and it can be re-activated at any time.',
+              confirmText: 'Deactivate', danger: true,
+            });
+            if (!ok) return;
+            db.update('branches', b.id, { is_active: 0 });
+            db.audit('branch.deactivate', 'branch', b.id, `Branch ${b.code} deactivated` + (warn.length ? ' (' + warn.join(', ') + ')' : ''));
+            ui.warn('Branch ' + b.code + ' deactivated.');
+          } else {
+            const ok = await ui.confirm({ title: `Activate ${b.code} · ${b.name}?`, message: 'The branch will be available in the branch switcher and staff assigned to it can sign in.', confirmText: 'Activate' });
+            if (!ok) return;
+            db.update('branches', b.id, { is_active: 1 });
+            db.audit('branch.activate', 'branch', b.id, `Branch ${b.code} activated`);
+            ui.success('Branch ' + b.code + ' activated.');
+          }
+          this.load();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

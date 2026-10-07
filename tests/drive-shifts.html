@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: cashier shifts</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives ABM.shift: opening a drawer, what it becomes accountable for, cash in and out,
+    // counting it at the end and handing it over.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || match.test(e.message), e.message); } }
+      var db = ABM.db, utils = ABM.utils, session = ABM.session, shift = ABM.shift;
+
+      try {
+        db.reset();
+        var cashier = db.all('users').find(function (u) { return u.username === 'cashier'; });
+        var manager = db.all('users').find(function (u) { return u.username === 'manager'; });
+        session.logout(); session.login(cashier);
+        var BID = session.branchId();
+
+        /* ---------------- seed ---------------- */
+        var shifts = db.all('cashier_shifts');
+        ok('seed ships cashier shifts', shifts.length >= 4, shifts.length + ' shifts');
+        ok('every shift has a number', shifts.every(function (s) { return /^SFT-[A-Z0-9]+-\d{6}$/.test(s.shift_no); }));
+        ok('seed covers open and closed drawers', shifts.some(function (s) { return s.status === 'open'; }) && shifts.some(function (s) { return s.status === 'closed'; }));
+        var closed = shifts.filter(function (s) { return s.status === 'closed'; });
+        ok('a closed shift records expected, counted and variance', closed.every(function (s) {
+          return s.expected_cash !== null && s.counted_cash !== null && Math.abs(s.counted_cash - s.expected_cash - s.variance) < 0.01;
+        }));
+        ok('the seed has a short drawer and an over drawer', closed.some(function (s) { return s.variance < 0; }) && closed.some(function (s) { return s.variance > 0; }));
+        ok('an open drawer has no count yet', shifts.filter(function (s) { return s.status === 'open'; }).every(function (s) { return s.counted_cash === null && s.variance === null; }));
+        ok('a closed shift froze its totals', closed.every(function (s) { return s.totals && typeof s.totals.cash_sales === 'number'; }));
+        ok('denominations add up to the counted cash', closed.filter(function (s) { return s.denominations; }).every(function (s) {
+          var d = s.denominations;
+          var sum = [5000, 1000, 500, 100, 50, 20, 10].reduce(function (a, n) { return a + (Number(d[n]) || 0) * n; }, Number(d.coins) || 0);
+          return Math.abs(sum - s.counted_cash) < 1500;    // a demo count, not a forensic one
+        }));
+        var nextNo = db.nextNumber('SFT', db.branchCode(BID));
+        ok('a new shift number never collides with a seeded one', !shifts.some(function (s) { return s.shift_no === nextNo; }), nextNo);
+
+        /* ---------------- one open drawer per cashier ---------------- */
+        var mine = shift.current(cashier.id, BID);
+        ok('the seeded cashier already has an open drawer', !!mine, mine && mine.shift_no);
+        throws('a second drawer cannot be opened for the same cashier', function () {
+          shift.open({ branchId: BID, userId: cashier.id, float: 5000 });
+        }, /already has an open shift/);
+        throws('a drawer needs a real cashier', function () { shift.open({ branchId: BID, userId: 99999, float: 0 }); }, /not found/);
+        throws('a negative float is refused', function () { shift.open({ branchId: BID, userId: manager.id, float: -5 }); }, /zero or more/);
+
+        /* ---------------- what the drawer is accountable for ---------------- */
+        var t0 = shift.tally(mine);
+        ok('the tally starts from the opening float', t0.expected >= mine.opening_float - 0.01, 'expected=' + t0.expected);
+        ok('the tally lists every cash line', t0.lines.length === 11, t0.lines.map(function (l) { return l.key; }).join(','));
+
+        // a cash sale by this cashier lands in the drawer
+        var before = shift.tally(mine).expected;
+        var sale = db.insert('sales', {
+          invoice_no: db.nextNumber('INV', db.branchCode(BID)), branch_id: BID, customer_id: 1, user_id: cashier.id,
+          sale_date: utils.now(), subtotal: 4500, discount_amount: 0, tax_amount: 0, total: 4500, paid_amount: 4500,
+          due_amount: 0, status: 'completed', shift_id: mine.id, notes: '',
+        });
+        db.insert('sale_payments', { sale_id: sale.id, method: 'cash', amount: 4500, reference: null });
+        ok('a cash sale raises what should be in the drawer', shift.tally(mine).expected === utils.round2(before + 4500), 'expected=' + shift.tally(mine).expected);
+        ok('and it shows on the cash sales line', shift.tally(mine).lines.find(function (l) { return l.key === 'cash_sales'; }).items.some(function (i) { return i.label === sale.invoice_no; }));
+
+        // a card sale does not
+        var carded = shift.tally(mine).expected;
+        var sale2 = db.insert('sales', { invoice_no: db.nextNumber('INV', db.branchCode(BID)), branch_id: BID, customer_id: 1, user_id: cashier.id, sale_date: utils.now(), subtotal: 9000, discount_amount: 0, tax_amount: 0, total: 9000, paid_amount: 9000, due_amount: 0, status: 'completed', shift_id: mine.id, notes: '' });
+        db.insert('sale_payments', { sale_id: sale2.id, method: 'card', amount: 9000, reference: 'TRX-1' });
+        ok('a card sale does not touch the drawer', shift.tally(mine).expected === carded);
+
+        // another cashier's sale does not
+        var other = db.all('users').find(function (u) { return u.role === 'cashier' && u.id !== cashier.id; });
+        var sale3 = db.insert('sales', { invoice_no: 'INV-X-1', branch_id: BID, customer_id: 1, user_id: other.id, sale_date: utils.now(), subtotal: 1000, discount_amount: 0, tax_amount: 0, total: 1000, paid_amount: 1000, due_amount: 0, status: 'completed', notes: '' });
+        db.insert('sale_payments', { sale_id: sale3.id, method: 'cash', amount: 1000, reference: null });
+        ok('another cashier\'s cash sale stays out of this drawer', shift.tally(mine).expected === utils.round2(carded));
+
+        // a void sale does not
+        var sale4 = db.insert('sales', { invoice_no: 'INV-X-2', branch_id: BID, customer_id: 1, user_id: cashier.id, sale_date: utils.now(), subtotal: 700, discount_amount: 0, tax_amount: 0, total: 700, paid_amount: 700, due_amount: 0, status: 'void', notes: '' });
+        db.insert('sale_payments', { sale_id: sale4.id, method: 'cash', amount: 700, reference: null });
+        ok('a voided sale is not counted', shift.tally(mine).expected === utils.round2(carded));
+
+        /* ---------------- cash in and out ---------------- */
+        var beforeIn = shift.tally(mine).expected;
+        shift.movement(mine.id, 'pay_in', 3000, 'Change from the safe');
+        ok('cash brought in raises the drawer', shift.tally(mine).expected === utils.round2(beforeIn + 3000));
+        shift.movement(mine.id, 'pay_out', 500, 'Tea for the staff');
+        ok('cash taken out lowers the drawer', shift.tally(mine).expected === utils.round2(beforeIn + 2500));
+        shift.movement(mine.id, 'bank_drop', 10000, 'Deposit slip 99001');
+        ok('a bank drop lowers the drawer', shift.tally(mine).expected === utils.round2(beforeIn - 7500));
+        throws('more cash than the drawer holds cannot be taken out', function () { shift.movement(mine.id, 'pay_out', 999999, 'nope'); }, /Only/);
+        throws('a zero movement is refused', function () { shift.movement(mine.id, 'pay_in', 0, 'nope'); }, /greater than zero/);
+        throws('an unknown movement type is refused', function () { shift.movement(mine.id, 'donation', 10, 'nope'); }, /Unknown cash movement/);
+        ok('every movement is recorded against the shift', db.where('cash_movements', { shift_id: mine.id }).length >= 3);
+
+        /* ---------------- closing ---------------- */
+        var expectedAtClose = shift.tally(mine).expected;
+        throws('handing over more than was counted is refused', function () {
+          shift.close(mine.id, { counted: 1000, handoverTo: manager.id, handoverAmount: 900, bankedAmount: 900 });
+        }, /cannot exceed/);
+        throws('a negative count is refused', function () { shift.close(mine.id, { counted: -1 }); }, /zero or more/);
+
+        var counted = utils.round2(expectedAtClose - 300);            // 300 short
+        var row = shift.close(mine.id, {
+          counted: counted, denominations: { 5000: 2, 1000: 3, 500: 1, 100: 5, 50: 0, 20: 0, 10: 0, coins: 0 },
+          handoverTo: manager.id, handoverAmount: 5000, bankedAmount: 2000, notes: 'Counted twice',
+        });
+        ok('the shift is closed', row.status === 'closed' && !!row.closed_at);
+        ok('the expected cash is frozen on the row', Math.abs(row.expected_cash - expectedAtClose) < 0.01);
+        ok('the variance is counted minus expected', Math.abs(row.variance - (counted - expectedAtClose)) < 0.01, 'variance=' + row.variance);
+        ok('a short drawer reads as short', row.variance < 0);
+        ok('the handover is recorded', row.handover_amount === 5000 && String(row.handover_to) === String(manager.id));
+        ok('the banking is recorded', row.banked_amount === 2000);
+        ok('the totals are frozen', !!row.totals && row.totals.cash_sales > 0);
+        ok('the cashier no longer has an open drawer', !shift.current(cashier.id, BID));
+        throws('a closed drawer cannot be closed again', function () { shift.close(mine.id, { counted: 10 }); }, /already closed/);
+        throws('cash cannot be recorded against a closed drawer', function () { shift.movement(mine.id, 'pay_in', 100, 'late'); }, /closed/);
+        ok('the audit log records the close', db.all('audit_logs').some(function (a) { return a.action === 'shift.close' && String(a.entity_id) === String(mine.id); }));
+        ok('the audit row belongs to the shift branch', db.all('audit_logs').filter(function (a) { return a.action === 'shift.close'; }).every(function (a) { return String(a.branch_id) === String(BID); }));
+
+        /* ---------------- the next drawer ---------------- */
+        ok('the suggested float is what the last shift handed over', shift.suggestedFloat(BID) === 5000, 'suggested=' + shift.suggestedFloat(BID));
+        var next = shift.open({ branchId: BID, userId: cashier.id, float: shift.suggestedFloat(BID), notes: 'Evening' });
+        ok('a fresh drawer can be opened once the old one is closed', next.status === 'open');
+        ok('it starts at the handed-over float', shift.tally(next).expected === 5000);
+        ok('it is numbered after the seeded shifts', next.shift_no !== mine.shift_no && /^SFT-/.test(next.shift_no));
+        ok('the closed shift keeps its own history', shift.tally(db.find('cashier_shifts', mine.id)).lines.find(function (l) { return l.key === 'cash_sales'; }).count >= 1);
+
+        /* ---------------- a second branch is independent ---------------- */
+        var b2 = db.all('cashier_shifts').find(function (s) { return String(s.branch_id) !== String(BID) && s.status === 'open'; });
+        if (b2) {
+          var b2Expected = shift.tally(b2).expected;
+          shift.movement(next.id, 'pay_in', 1000, 'branch 1 only');
+          ok('one branch drawer does not affect another', shift.tally(b2).expected === b2Expected);
+        } else { L.push('NOTE  no open drawer at another branch to compare'); }
+
+        /* ---------------- reporting consistency ---------------- */
+        ok('no shift is open twice for the same user', db.all('cashier_shifts').filter(function (s) { return s.status === 'open'; })
+          .every(function (s, i, arr) { return arr.filter(function (x) { return String(x.user_id) === String(s.user_id); }).length === 1; }));
+        ok('every movement belongs to a shift that exists', db.all('cash_movements').every(function (m) { return !!db.find('cashier_shifts', m.shift_id); }));
+        ok('closed shifts never hand over more than they counted', db.all('cashier_shifts').filter(function (s) { return s.status === 'closed'; })
+          .every(function (s) { return (Number(s.handover_amount) || 0) + (Number(s.banked_amount) || 0) <= (Number(s.counted_cash) || 0) + 0.01; }));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

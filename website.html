@@ -1,0 +1,2214 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Website &amp; CMS · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@400;600;700;800&family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    /* ---- rich text editor (CMS pages) ---- */
+    .rte-toolbar { display: flex; flex-wrap: wrap; gap: .25rem; padding: .5rem; border: 1px solid rgb(var(--slate-300)); border-bottom: 0; border-radius: .75rem .75rem 0 0; background: rgb(var(--slate-50)); }
+    .rte-btn { display: inline-flex; align-items: center; justify-content: center; gap: .25rem; min-width: 2rem; height: 2rem; padding: 0 .45rem; font-size: .75rem; font-weight: 700; color: rgb(var(--slate-600)); background: rgb(var(--surface)); border: 1px solid rgb(var(--slate-200)); border-radius: .5rem; cursor: pointer; flex: none; }
+    .rte-btn:hover { background: rgb(var(--slate-100)); color: rgb(var(--slate-900)); }
+    .rte-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(var(--ring) / .3); }
+    .rte-btn svg { width: 1rem; height: 1rem; }
+    .rte-btn.is-on { background: rgb(var(--navy-700)); color: #fff; border-color: rgb(var(--navy-700)); }
+    .rte-sep { width: 1px; align-self: stretch; background: rgb(var(--slate-300)); margin: 0 .15rem; }
+    .rte { min-height: 15rem; max-height: 32rem; overflow-y: auto; padding: 1rem; border: 1px solid rgb(var(--slate-300)); border-radius: 0 0 .75rem .75rem; background: rgb(var(--surface)); color: rgb(var(--slate-800)); font-size: .9375rem; line-height: 1.65; overflow-wrap: anywhere; }
+    .rte:focus { outline: none; border-color: rgb(var(--navy-500)); box-shadow: 0 0 0 3px rgb(var(--ring) / .25); }
+    .rte h2 { font-size: 1.25rem; font-weight: 800; margin: 1.1rem 0 .5rem; color: rgb(var(--slate-900)); }
+    .rte h3 { font-size: 1.0625rem; font-weight: 700; margin: 1rem 0 .4rem; color: rgb(var(--slate-900)); }
+    .rte h4 { font-size: .9375rem; font-weight: 700; margin: .9rem 0 .35rem; color: rgb(var(--slate-900)); }
+    .rte p { margin: .5rem 0; }
+    .rte ul { list-style: disc; padding-left: 1.4rem; margin: .5rem 0; }
+    .rte ol { list-style: decimal; padding-left: 1.4rem; margin: .5rem 0; }
+    .rte li { margin: .2rem 0; }
+    .rte a { color: rgb(var(--navy-700)); text-decoration: underline; }
+    .rte blockquote { margin: .75rem 0; padding: .3rem 0 .3rem .85rem; border-left: 3px solid rgb(var(--navy-500)); color: rgb(var(--slate-600)); font-style: italic; }
+    .rte img { max-width: 100%; height: auto; border-radius: .6rem; margin: .5rem 0; }
+    .rte b, .rte strong { font-weight: 700; }
+    .rte hr { border: 0; border-top: 1px solid rgb(var(--slate-200)); margin: 1rem 0; }
+    /* ---- misc ---- */
+    .star-on svg { fill: currentColor; }
+    .cms-scroll { max-height: 17rem; overflow-y: auto; }
+    .cms-row { border: 1px solid rgb(var(--slate-200)); border-radius: .9rem; background: rgb(var(--slate-50)); padding: .85rem; }
+    .seo-preview-title { color: #1a0dab; font-size: 1.0625rem; line-height: 1.35; }
+    html[data-theme="dark"] .seo-preview-title { color: #8ab4f8; }
+    .seo-preview-url { color: #0f7b2f; font-size: .78rem; }
+    html[data-theme="dark"] .seo-preview-url { color: #7bc98f; }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="website" data-title="Website &amp; CMS" data-perm="website.view">
+  <main x-data="websitePage()" @keydown.escape.window="linkPicker.open = false">
+
+    <!-- ===================================================== page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Website &amp; CMS</h2>
+        <p class="page-subtitle">
+          Everything the public storefront shows — branding, home page, pages, menu, commerce rules and colours.
+          Changes go live as soon as you save.
+        </p>
+      </div>
+      <div class="page-actions">
+        <span class="badge badge-amber badge-dot" x-show="anyDirty" x-cloak>Unsaved changes</span>
+        <a href="shop/index.html" target="_blank" rel="noopener" class="btn btn-secondary"><span x-html="ABM.icon('arrow-up-right')"></span>Open storefront</a>
+        <button type="button" class="btn btn-secondary text-rose-600" x-show="canEdit" @click="resetDemo()" :disabled="busy"><span x-html="ABM.icon('refresh')"></span>Reset to demo</button>
+        <button type="button" class="btn btn-primary" x-show="canEdit" @click="saveAll()" :disabled="busy || !anyDirty"><span x-html="ABM.icon('check')"></span>Save all</button>
+      </div>
+    </div>
+
+    <div class="alert alert-info mb-4" x-show="!canEdit" x-cloak><span x-html="ABM.icon('eye')"></span><span><b>View only.</b> Your role can look at the website settings but not change them.</span></div>
+
+    <!-- ===================================================== stat tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+      <a href="shop/index.html" target="_blank" rel="noopener" class="stat stat-accent" title="Open the public storefront in a new tab">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <div class="stat-label">Storefront</div>
+            <div class="stat-value truncate" x-text="f.site.name || 'Untitled site'"></div>
+          </div>
+          <span class="chip chip-navy" x-html="ABM.icon('globe')"></span>
+        </div>
+        <div class="stat-meta" x-text="f.site.commerce.allow_orders ? 'Online ordering is ON' : 'Browsing only — ordering is OFF'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="website.html?tab=pages" class="stat" @click.prevent="setTab('pages')" title="Manage CMS pages">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Published pages</div><div class="stat-value" x-text="publishedCount"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('document')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="f.pages.length"></span> total · <span x-text="f.menu.filter(m => m.is_active).length"></span> menu links</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="website.html?tab=home" class="stat" @click.prevent="setTab('home')" title="Edit the home page sections">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Home page content</div><div class="stat-value" x-text="f.site.featured_product_ids.length"></div></div>
+          <span class="chip chip-slate" x-html="ABM.icon('grid')"></span>
+        </div>
+        <div class="stat-meta">featured products · <span x-text="activeBanners"></span> banners · <span x-text="f.site.highlights.length"></span> highlights</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="online-orders.html?status=pending&range=all" class="stat stat-warning" title="Open the online orders that are waiting">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Pending web orders</div><div class="stat-value" :class="pendingOrders ? 'text-amber-700' : ''" x-text="pendingOrders"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('bag')"></span>
+        </div>
+        <div class="stat-meta">fulfilled at <b x-text="fulfilBranchName"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- ===================================================== tab rail + panels -->
+    <div class="grid grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)] gap-4 items-start">
+
+      <!-- mobile / tablet: horizontal pill rail -->
+      <div class="lg:hidden min-w-0">
+        <div class="tabs-pill w-full" role="tablist" aria-label="Website sections">
+          <template x-for="t in tabs" :key="t.key">
+            <button type="button" class="tab" :data-tab="t.key" :class="tab === t.key && 'active'" @click="setTab(t.key)" :aria-selected="tab === t.key ? 'true' : 'false'" role="tab">
+              <span x-text="t.short"></span>
+              <span x-show="dirty(t.key)" class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle ml-1"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- desktop: vertical rail -->
+      <nav class="hidden lg:flex lg:flex-col gap-1 lg:sticky lg:top-24" aria-label="Website sections">
+        <template x-for="t in tabs" :key="t.key">
+          <button type="button" class="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-semibold text-left transition-colors w-full min-w-0"
+                  :class="tab === t.key ? 'bg-navy-800 text-white shadow' : 'text-slate-600 hover:bg-white hover:text-slate-900'"
+                  @click="setTab(t.key)" :aria-current="tab === t.key ? 'page' : null">
+            <span class="flex-none" x-html="ABM.icon(t.icon, 'w-4 h-4')"></span>
+            <span class="flex-1 min-w-0 truncate" x-text="t.label"></span>
+            <span x-show="dirty(t.key)" class="w-2 h-2 rounded-full bg-amber-400 flex-none" title="Unsaved changes"></span>
+          </button>
+        </template>
+      </nav>
+
+      <div class="min-w-0 space-y-4">
+
+        <!-- ================================================= 1. BRANDING & HERO -->
+        <form x-show="tab === 'branding'" class="card" @submit.prevent="save('branding')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Branding &amp; hero</div>
+              <div class="card-subtitle">Site name, logo and the big banner at the top of the home page.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="w-name">Site name <span class="req">*</span></label>
+                <input id="w-name" type="text" class="input" :class="errors.name && 'is-invalid'" x-model.trim="f.site.name" maxlength="60" placeholder="Abbott Mobile">
+                <p class="field-error" x-show="errors.name" x-text="errors.name"></p>
+              </div>
+              <div>
+                <label class="label" for="w-tagline">Tagline</label>
+                <input id="w-tagline" type="text" class="input" x-model.trim="f.site.tagline" maxlength="120" placeholder="Phones, laptops &amp; expert repairs in Lahore">
+                <p class="help">Shown next to the logo and in the footer.</p>
+              </div>
+            </div>
+
+            <!-- logo + favicon -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="cms-row">
+                <div class="label">Logo</div>
+                <div class="flex flex-wrap items-center gap-3">
+                  <div class="w-20 h-20 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                    <img x-show="f.site.logo" :src="f.site.logo || ''" alt="Logo preview" class="max-w-full max-h-full object-contain">
+                    <span x-show="!f.site.logo" class="text-slate-300" x-html="ABM.icon('image','w-7 h-7')"></span>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs text-slate-500">PNG, JPG, WEBP or SVG up to 400 KB. Falls back to the first letter of the site name.</div>
+                    <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp,image/svg+xml" x-ref="logoFile" @change="onImageFile($event, 'logo')">
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      <button type="button" class="btn btn-secondary btn-sm" @click="$refs.logoFile.click()"><span x-html="ABM.icon('upload')"></span><span x-text="f.site.logo ? 'Replace' : 'Upload'"></span></button>
+                      <button type="button" class="btn btn-ghost btn-sm text-rose-600" x-show="f.site.logo" @click="f.site.logo = ''"><span x-html="ABM.icon('trash')"></span>Remove</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="cms-row">
+                <div class="label">Favicon</div>
+                <div class="flex flex-wrap items-center gap-3">
+                  <div class="w-20 h-20 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                    <img x-show="f.site.favicon" :src="f.site.favicon || ''" alt="Favicon preview" class="w-8 h-8 object-contain">
+                    <span x-show="!f.site.favicon" class="text-slate-300" x-html="ABM.icon('star','w-7 h-7')"></span>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs text-slate-500">Square PNG or SVG, 32×32 or larger, up to 100 KB. Shown in the browser tab.</div>
+                    <input type="file" class="hidden" accept="image/png,image/x-icon,image/svg+xml,image/webp" x-ref="favFile" @change="onImageFile($event, 'favicon', 100)">
+                    <div class="mt-2 flex flex-wrap gap-2">
+                      <button type="button" class="btn btn-secondary btn-sm" @click="$refs.favFile.click()"><span x-html="ABM.icon('upload')"></span><span x-text="f.site.favicon ? 'Replace' : 'Upload'"></span></button>
+                      <button type="button" class="btn btn-ghost btn-sm text-rose-600" x-show="f.site.favicon" @click="f.site.favicon = ''"><span x-html="ABM.icon('trash')"></span>Remove</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- hero -->
+            <div>
+              <div class="flex items-center gap-2 mb-3">
+                <span class="chip chip-navy" x-html="ABM.icon('sparkles')"></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-bold text-slate-800">Hero banner</div>
+                  <div class="text-xs text-slate-500">The first thing visitors see on the home page.</div>
+                </div>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                  <label class="label" for="w-hero-badge">Badge</label>
+                  <input id="w-hero-badge" type="text" class="input" x-model.trim="f.site.hero.badge" maxlength="60" placeholder="New arrivals every week">
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="label" for="w-hero-title">Headline <span class="req">*</span></label>
+                  <input id="w-hero-title" type="text" class="input" :class="errors['hero.title'] && 'is-invalid'" x-model.trim="f.site.hero.title" maxlength="120" placeholder="Latest phones &amp; laptops. Honest prices.">
+                  <p class="field-error" x-show="errors['hero.title']" x-text="errors['hero.title']"></p>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="label" for="w-hero-sub">Sub-headline</label>
+                  <textarea id="w-hero-sub" class="textarea" rows="2" x-model.trim="f.site.hero.subtitle" maxlength="260" placeholder="Shop genuine smartphones, laptops and accessories…"></textarea>
+                </div>
+                <div>
+                  <label class="label" for="w-cta1">Button 1 — text</label>
+                  <input id="w-cta1" type="text" class="input" x-model.trim="f.site.hero.cta_text" maxlength="30" placeholder="Shop now">
+                </div>
+                <div>
+                  <label class="label" for="w-cta1l">Button 1 — link</label>
+                  <div class="flex gap-2 min-w-0">
+                    <input id="w-cta1l" type="text" class="input min-w-0 mono" x-model.trim="f.site.hero.cta_link" placeholder="products.html">
+                    <button type="button" class="btn btn-secondary btn-icon flex-none" data-pick-link title="Pick a link" @click="openLink('hero.cta_link', f.site.hero.cta_link)" x-html="ABM.icon('search','w-4 h-4')"></button>
+                  </div>
+                </div>
+                <div>
+                  <label class="label" for="w-cta2">Button 2 — text</label>
+                  <input id="w-cta2" type="text" class="input" x-model.trim="f.site.hero.cta2_text" maxlength="30" placeholder="Book a repair">
+                </div>
+                <div>
+                  <label class="label" for="w-cta2l">Button 2 — link</label>
+                  <div class="flex gap-2 min-w-0">
+                    <input id="w-cta2l" type="text" class="input min-w-0 mono" x-model.trim="f.site.hero.cta2_link" placeholder="repair.html">
+                    <button type="button" class="btn btn-secondary btn-icon flex-none" title="Pick a link" @click="openLink('hero.cta2_link', f.site.hero.cta2_link)" x-html="ABM.icon('search','w-4 h-4')"></button>
+                  </div>
+                </div>
+                <div>
+                  <label class="label" for="w-hero-style">Hero style</label>
+                  <select id="w-hero-style" class="select" x-model="f.site.hero.style">
+                    <option value="gradient">Gradient (uses the theme colour)</option>
+                    <option value="image">Background image</option>
+                  </select>
+                  <p class="field-error" x-show="errors['hero.image']" x-text="errors['hero.image']"></p>
+                  <p class="help" x-show="!errors['hero.image']">“Background image” needs a hero image below.</p>
+                </div>
+                <div class="cms-row sm:col-span-2">
+                  <div class="label">Hero image</div>
+                  <div class="flex flex-wrap items-center gap-3">
+                    <div class="w-28 h-16 rounded-lg bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                      <img x-show="f.site.hero.image" :src="f.site.hero.image || ''" alt="Hero image preview" class="w-full h-full object-cover">
+                      <span x-show="!f.site.hero.image" class="text-slate-300" x-html="ABM.icon('image','w-6 h-6')"></span>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs text-slate-500">Wide image (about 1600×900), JPG or WEBP up to 400 KB.</div>
+                      <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp" x-ref="heroFile" @change="onImageFile($event, 'hero.image')">
+                      <div class="mt-2 flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-secondary btn-sm" @click="$refs.heroFile.click()"><span x-html="ABM.icon('upload')"></span><span x-text="f.site.hero.image ? 'Replace' : 'Upload'"></span></button>
+                        <button type="button" class="btn btn-ghost btn-sm text-rose-600" x-show="f.site.hero.image" @click="f.site.hero.image = ''"><span x-html="ABM.icon('trash')"></span>Remove</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('branding') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('branding')" @click="discard('branding')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save branding</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 2. ANNOUNCEMENT -->
+        <form x-show="tab === 'announcement'" class="card" @submit.prevent="save('announcement')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Announcement bar</div>
+              <div class="card-subtitle">A thin strip above the storefront header — offers, delivery news, holiday hours.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-5">
+            <div class="flex items-start gap-3">
+              <button type="button" class="switch mt-0.5" :class="f.site.announcement.enabled && 'on'" role="switch" :aria-checked="f.site.announcement.enabled ? 'true' : 'false'" aria-label="Show announcement bar" @click="f.site.announcement.enabled = f.site.announcement.enabled ? 0 : 1"></button>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-slate-800">Show the announcement bar</div>
+                <div class="text-xs text-slate-500">Turn off to hide the strip completely without losing the text.</div>
+              </div>
+            </div>
+            <div>
+              <label class="label" for="w-ann">Announcement text</label>
+              <input id="w-ann" type="text" class="input" :class="errors.announcement && 'is-invalid'" x-model.trim="f.site.announcement.text" maxlength="140" placeholder="Free delivery in Lahore on orders above Rs. 5,000">
+              <p class="field-error" x-show="errors.announcement" x-text="errors.announcement"></p>
+              <p class="help" x-show="!errors.announcement"><span x-text="(f.site.announcement.text || '').length"></span>/140 characters. Keep it to one short line.</p>
+            </div>
+            <div>
+              <div class="label">Preview</div>
+              <div class="rounded-xl overflow-hidden border border-slate-200">
+                <div class="px-4 py-2 text-center text-xs font-semibold text-white truncate" :style="'background:' + headerBg" x-text="f.site.announcement.text || 'Your announcement appears here'"></div>
+                <div class="px-4 py-3 bg-slate-50 text-xs text-slate-500" x-text="f.site.announcement.enabled ? 'Visible on every storefront page.' : 'Hidden — visitors will not see this strip.'"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('announcement') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('announcement')" @click="discard('announcement')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save announcement</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 3. HOME SECTIONS -->
+        <form x-show="tab === 'home'" class="space-y-4" @submit.prevent="save('home')" novalidate>
+
+          <!-- highlights -->
+          <div class="card">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Highlights</div>
+                <div class="card-subtitle">The four small promises under the hero (warranty, delivery, repairs…).</div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addHighlight()"><span x-html="ABM.icon('plus')"></span>Add highlight</button>
+            </div>
+            <div class="card-body space-y-3">
+              <template x-for="(h, i) in f.site.highlights" :key="i">
+                <div class="cms-row">
+                  <div class="grid grid-cols-1 sm:grid-cols-[3rem_minmax(0,1fr)] gap-3 items-start">
+                    <div class="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-navy-700 flex-none" x-html="ABM.icon(h.icon, 'w-6 h-6')"></div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0">
+                      <div>
+                        <label class="label">Icon</label>
+                        <!-- static <option>s on purpose: x-model binds before an x-for could create them -->
+                        <select class="select" x-model="h.icon">
+                          <option value="shield-check">shield-check</option><option value="truck">truck</option><option value="wrench">wrench</option>
+                          <option value="banknotes">banknotes</option><option value="card">card</option><option value="wallet">wallet</option>
+                          <option value="cart">cart</option><option value="bag">bag</option><option value="store">store</option>
+                          <option value="building">building</option><option value="phone">phone</option><option value="phone-call">phone-call</option>
+                          <option value="laptop">laptop</option><option value="desktop">desktop</option><option value="cpu">cpu</option>
+                          <option value="cube">cube</option><option value="tag">tag</option><option value="sparkles">sparkles</option>
+                          <option value="star">star</option><option value="heart">heart</option><option value="clock">clock</option>
+                          <option value="check-circle">check-circle</option><option value="key">key</option><option value="shield">shield</option>
+                          <option value="scan">scan</option><option value="qr">qr</option><option value="barcode">barcode</option>
+                          <option value="users">users</option><option value="user-group">user-group</option><option value="map-pin">map-pin</option>
+                          <option value="mail">mail</option><option value="globe">globe</option><option value="chat">chat</option>
+                          <option value="ticket">ticket</option><option value="document">document</option><option value="image">image</option>
+                          <option value="refresh">refresh</option><option value="calendar">calendar</option><option value="trend-up">trend-up</option>
+                          <option value="download">download</option><option value="printer">printer</option><option value="scale">scale</option>
+                          <option value="calculator">calculator</option><option value="lock">lock</option><option value="brush">brush</option>
+                          <option value="palette">palette</option><option value="archive">archive</option><option value="transfer">transfer</option>
+                          <option value="receipt">receipt</option><option value="eye">eye</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label class="label">Title <span class="req">*</span></label>
+                        <input type="text" class="input" :class="errors['hl.' + i] && 'is-invalid'" x-model.trim="h.title" maxlength="40" placeholder="Official warranty">
+                        <p class="field-error" x-show="errors['hl.' + i]" x-text="errors['hl.' + i]"></p>
+                      </div>
+                      <div class="sm:col-span-2">
+                        <label class="label">Text</label>
+                        <input type="text" class="input" x-model.trim="h.text" maxlength="90" placeholder="PTA approved phones with brand warranty">
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex flex-wrap items-center justify-end gap-1 mt-2 pt-2 border-t border-slate-200">
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.site.highlights, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === f.site.highlights.length - 1" @click="move(f.site.highlights, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="f.site.highlights.splice(i, 1)"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Remove</button>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!f.site.highlights.length">
+                <div class="empty !py-8">
+                  <span x-html="ABM.icon('sparkles')"></span>
+                  <div class="empty-title">No highlights yet</div>
+                  <div class="text-sm mt-1">Add three or four short selling points for the home page.</div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- featured categories -->
+          <div class="card">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Featured categories</div>
+                <div class="card-subtitle">Tick the categories to show as big tiles, then set the order.</div>
+              </div>
+              <span class="badge badge-navy"><span x-text="f.site.featured_category_ids.length"></span> selected</span>
+            </div>
+            <div class="card-body grid grid-cols-1 lg:grid-cols-2 gap-5">
+              <div class="min-w-0">
+                <div class="label">Available categories</div>
+                <div class="cms-scroll rounded-xl border border-slate-200 divide-y divide-slate-200">
+                  <template x-for="c in categories" :key="c.id">
+                    <label class="flex items-center gap-3 p-2.5 cursor-pointer hover:bg-slate-50">
+                      <input type="checkbox" class="checkbox flex-none" :checked="f.site.featured_category_ids.includes(c.id)" @change="toggleCategory(c.id)">
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-sm font-medium text-slate-800 truncate" x-text="c.name"></span>
+                        <span class="block text-xs text-slate-500" x-text="c.count + ' product' + (c.count === 1 ? '' : 's')"></span>
+                      </span>
+                    </label>
+                  </template>
+                  <template x-if="!categories.length"><div class="p-3 text-sm text-slate-500">No active categories.</div></template>
+                </div>
+              </div>
+              <div class="min-w-0">
+                <div class="label">Order shown on the home page</div>
+                <div class="space-y-2">
+                  <template x-for="(c, i) in featuredCategories" :key="c.id">
+                    <div class="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50 min-w-0">
+                      <span class="w-6 h-6 rounded-lg bg-navy-800 text-white text-[11px] font-bold flex items-center justify-center flex-none" x-text="i + 1"></span>
+                      <span class="min-w-0 flex-1 text-sm font-medium text-slate-800 truncate" x-text="c.name"></span>
+                      <span class="flex items-center gap-0.5 flex-none">
+                        <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.site.featured_category_ids, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                        <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === featuredCategories.length - 1" @click="move(f.site.featured_category_ids, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                        <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove" @click="toggleCategory(c.id)" x-html="ABM.icon('x','w-4 h-4')"></button>
+                      </span>
+                    </div>
+                  </template>
+                  <template x-if="!featuredCategories.length">
+                    <div class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500 text-center">Tick a category on the left to feature it.</div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- featured products -->
+          <div class="card">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Featured products</div>
+                <div class="card-subtitle">Hand-picked products for the home page grid. Prices and stock come from the catalogue.</div>
+              </div>
+              <a href="products.html" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('cube')"></span>Open catalogue</a>
+            </div>
+            <div class="card-body space-y-4">
+              <div class="min-w-0">
+                <label class="label" for="w-prodq">Add a product</label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+                  <input id="w-prodq" type="search" class="input pl-9" placeholder="Search by name, model, SKU or brand…" x-model.debounce.200ms="prodQ" autocomplete="off" @keydown.enter.prevent="if (productResults.length) addFeatured(productResults[0].id)">
+                </div>
+                <div x-show="prodQ.trim().length > 0" x-cloak class="mt-2 rounded-xl border border-slate-200 divide-y divide-slate-200 cms-scroll">
+                  <template x-for="p in productResults" :key="p.id">
+                    <button type="button" class="w-full flex items-center gap-3 p-2.5 text-left hover:bg-slate-50 min-w-0" @click="addFeatured(p.id)">
+                      <span class="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 flex-none" x-html="ABM.icon('cube','w-4 h-4')"></span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-sm font-medium text-slate-800 truncate" x-text="p.label"></span>
+                        <span class="block text-xs text-slate-500 truncate"><span x-text="$money(p.price, {decimals:0})"></span> · <span x-text="p.stockText"></span></span>
+                      </span>
+                      <span class="text-navy-700 flex-none" x-html="ABM.icon('plus','w-4 h-4')"></span>
+                    </button>
+                  </template>
+                  <template x-if="!productResults.length"><div class="p-3 text-sm text-slate-500">No matching product — or it is already featured.</div></template>
+                </div>
+              </div>
+
+              <div class="space-y-2">
+                <template x-for="(p, i) in featuredProducts" :key="p.id">
+                  <div class="flex items-center gap-2 p-2.5 rounded-xl border border-slate-200 bg-slate-50 min-w-0">
+                    <span class="w-9 h-9 rounded-lg bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                      <img x-show="p.image" :src="p.image || ''" alt="" class="max-w-full max-h-full object-contain">
+                      <span x-show="!p.image" class="text-slate-300" x-html="ABM.icon('cube','w-4 h-4')"></span>
+                    </span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-sm font-semibold text-slate-800 truncate" x-text="p.label"></span>
+                      <span class="block text-xs text-slate-500 truncate">
+                        <span x-show="p.exists" x-text="$money(p.price, {decimals:0})"></span><span x-show="p.exists"> · </span><span x-text="p.stockText"></span>
+                      </span>
+                    </span>
+                    <span class="flex items-center gap-0.5 flex-none">
+                      <a class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" :href="'product-view.html?id=' + p.id" title="Open product" x-show="p.exists" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.site.featured_product_ids, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === featuredProducts.length - 1" @click="move(f.site.featured_product_ids, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove" @click="f.site.featured_product_ids.splice(i, 1)" x-html="ABM.icon('x','w-4 h-4')"></button>
+                    </span>
+                  </div>
+                </template>
+                <template x-if="!featuredProducts.length">
+                  <div class="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500 text-center">No featured products yet — search above to add some.</div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- banners -->
+          <div class="card">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Promo banners</div>
+                <div class="card-subtitle">Wide colour cards between the home page sections.</div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addBanner()"><span x-html="ABM.icon('plus')"></span>Add banner</button>
+            </div>
+            <div class="card-body space-y-3">
+              <template x-for="(b, i) in f.banners" :key="b.id">
+                <div class="cms-row">
+                  <div class="flex flex-wrap items-center gap-2 mb-3">
+                    <span class="w-8 h-8 rounded-lg flex-none border border-slate-200" :style="'background:' + (b.color || '#1a336a')"></span>
+                    <span class="text-sm font-bold text-slate-800 min-w-0 truncate flex-1" x-text="b.title || 'Untitled banner'"></span>
+                    <span class="badge" :class="b.is_active ? 'badge-green' : 'badge-slate'" x-text="b.is_active ? 'Active' : 'Hidden'"></span>
+                    <span class="flex items-center gap-0.5 flex-none">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.banners, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === f.banners.length - 1" @click="move(f.banners, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove banner" @click="removeRow(f.banners, i, 'banner')" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="label">Title <span class="req">*</span></label>
+                      <input type="text" class="input" :class="errors['bn.' + i] && 'is-invalid'" x-model.trim="b.title" maxlength="60" placeholder="iPhone 15 Series">
+                      <p class="field-error" x-show="errors['bn.' + i]" x-text="errors['bn.' + i]"></p>
+                    </div>
+                    <div>
+                      <label class="label">Subtitle</label>
+                      <input type="text" class="input" x-model.trim="b.subtitle" maxlength="120" placeholder="Now in stock — PTA approved">
+                    </div>
+                    <div>
+                      <label class="label">Link</label>
+                      <div class="flex gap-2 min-w-0">
+                        <input type="text" class="input min-w-0 mono" x-model.trim="b.link" placeholder="products.html?category=1">
+                        <button type="button" class="btn btn-secondary btn-icon flex-none" title="Pick a link" @click="openLink('banner:' + i, b.link)" x-html="ABM.icon('search','w-4 h-4')"></button>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="label">Background colour</label>
+                      <div class="flex items-center gap-2 min-w-0">
+                        <input type="color" class="color-input flex-none" x-model="b.color" aria-label="Banner colour">
+                        <input type="text" class="input mono min-w-0" x-model.trim="b.color" maxlength="7" placeholder="#0b1a3a">
+                      </div>
+                    </div>
+                    <div class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                      <div class="w-24 h-14 rounded-lg bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                        <img x-show="b.image" :src="b.image || ''" alt="" class="w-full h-full object-cover">
+                        <span x-show="!b.image" class="text-slate-300" x-html="ABM.icon('image','w-5 h-5')"></span>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <input type="file" class="hidden" accept="image/png,image/jpeg,image/webp" @change="onRowImage($event, f.banners, i)">
+                        <button type="button" class="btn btn-secondary btn-sm" @click="$el.parentElement.querySelector('input[type=file]').click()"><span x-html="ABM.icon('upload')"></span><span x-text="b.image ? 'Replace image' : 'Upload image'"></span></button>
+                        <button type="button" class="btn btn-ghost btn-sm text-rose-600" x-show="b.image" @click="b.image = ''"><span x-html="ABM.icon('trash')"></span>Remove image</button>
+                        <span class="inline-flex items-center gap-2 ml-auto">
+                          <button type="button" class="switch" :class="b.is_active && 'on'" role="switch" :aria-checked="b.is_active ? 'true' : 'false'" aria-label="Banner active" @click="b.is_active = b.is_active ? 0 : 1"></button>
+                          <span class="text-xs font-semibold text-slate-600">Active</span>
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!f.banners.length">
+                <div class="empty !py-8">
+                  <span x-html="ABM.icon('image')"></span>
+                  <div class="empty-title">No banners</div>
+                  <div class="text-sm mt-1">Add a banner to promote a category, a brand or the repair service.</div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- testimonials -->
+          <div class="card">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Testimonials</div>
+                <div class="card-subtitle">Short customer quotes shown near the bottom of the home page.</div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addTestimonial()"><span x-html="ABM.icon('plus')"></span>Add testimonial</button>
+            </div>
+            <div class="card-body space-y-3">
+              <template x-for="(t, i) in f.testimonials" :key="t.id">
+                <div class="cms-row">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label class="label">Customer name <span class="req">*</span></label>
+                      <input type="text" class="input" :class="errors['ts.' + i] && 'is-invalid'" x-model.trim="t.name" maxlength="50" placeholder="Ayesha S.">
+                      <p class="field-error" x-show="errors['ts.' + i]" x-text="errors['ts.' + i]"></p>
+                    </div>
+                    <div>
+                      <div class="label">Rating</div>
+                      <div class="flex items-center gap-1 flex-wrap">
+                        <template x-for="n in 5" :key="n">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" :class="n <= t.rating ? 'star-on text-amber-500' : 'text-slate-300'" :title="n + ' star' + (n === 1 ? '' : 's')" :aria-label="n + ' stars'" @click="t.rating = n" x-html="ABM.icon('star','w-5 h-5')"></button>
+                        </template>
+                        <span class="text-xs text-slate-500 ml-1"><span x-text="t.rating"></span>/5</span>
+                        <span class="inline-flex items-center gap-2 ml-auto">
+                          <button type="button" class="switch" :class="t.is_active && 'on'" role="switch" :aria-checked="t.is_active ? 'true' : 'false'" aria-label="Testimonial active" @click="t.is_active = t.is_active ? 0 : 1"></button>
+                          <span class="text-xs font-semibold text-slate-600">Active</span>
+                        </span>
+                      </div>
+                    </div>
+                    <div class="sm:col-span-2">
+                      <label class="label">Quote <span class="req">*</span></label>
+                      <textarea class="textarea" rows="2" :class="errors['tst.' + i] && 'is-invalid'" x-model.trim="t.text" maxlength="260" placeholder="Got my iPhone screen replaced in two hours…"></textarea>
+                      <p class="field-error" x-show="errors['tst.' + i]" x-text="errors['tst.' + i]"></p>
+                    </div>
+                  </div>
+                  <div class="flex justify-end mt-2 pt-2 border-t border-slate-200">
+                    <button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="removeRow(f.testimonials, i, 'testimonial')"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Remove</button>
+                  </div>
+                </div>
+              </template>
+              <template x-if="!f.testimonials.length">
+                <div class="empty !py-8">
+                  <span x-html="ABM.icon('chat')"></span>
+                  <div class="empty-title">No testimonials</div>
+                  <div class="text-sm mt-1">Add a few happy-customer quotes to build trust.</div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2 !rounded-2xl">
+              <span class="text-xs text-slate-500" x-text="dirty('home') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('home')" @click="discard('home')">Discard</button>
+                <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save home sections</button>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 4. PAGES -->
+        <div x-show="tab === 'pages'" class="grid grid-cols-1 xl:grid-cols-[20rem_minmax(0,1fr)] gap-4 items-start">
+          <!-- list -->
+          <div class="card min-w-0">
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title">Pages</div>
+                <div class="card-subtitle"><span x-text="f.pages.length"></span> page<span x-text="f.pages.length === 1 ? '' : 's'"></span> · <span x-text="publishedCount"></span> published</div>
+              </div>
+              <button type="button" class="btn btn-primary btn-sm" @click="newPage()"><span x-html="ABM.icon('plus')"></span>New page</button>
+            </div>
+            <div class="px-4 pt-4" x-show="errors['pg.other']" x-cloak>
+              <div class="alert alert-warning"><span x-html="ABM.icon('warning')"></span><div x-text="errors['pg.other']"></div></div>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Page</th>
+                    <th class="hidden md:table-cell xl:hidden">Slug</th>
+                    <th class="hidden sm:table-cell xl:hidden">Status</th>
+                    <th class="hidden lg:table-cell xl:hidden">Updated</th>
+                    <th class="actions">Order</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(p, i) in f.pages" :key="p.id">
+                    <tr :class="p.id === pageSel && 'bg-navy-50'">
+                      <td>
+                        <button type="button" class="text-left min-w-0 w-full" @click="selectPage(p.id)">
+                          <span class="block font-semibold text-navy-700 truncate" x-text="p.title || 'Untitled'"></span>
+                          <span class="block text-xs text-slate-500 mono truncate xl:hidden" x-text="'/' + (p.slug || '…')"></span>
+                        </button>
+                        <div class="flex flex-wrap gap-1 mt-1 sm:hidden xl:flex">
+                          <span class="badge" :class="p.is_published ? 'badge-green' : 'badge-slate'" x-text="p.is_published ? 'Published' : 'Draft'"></span>
+                          <span class="badge badge-blue" x-show="p.show_in_menu">In menu</span>
+                        </div>
+                      </td>
+                      <td class="hidden md:table-cell xl:hidden mono text-slate-600 text-xs" x-text="p.slug || '—'"></td>
+                      <td class="hidden sm:table-cell xl:hidden">
+                        <div class="flex flex-wrap gap-1">
+                          <span class="badge" :class="p.is_published ? 'badge-green' : 'badge-slate'" x-text="p.is_published ? 'Published' : 'Draft'"></span>
+                          <span class="badge badge-blue" x-show="p.show_in_menu">In menu</span>
+                        </div>
+                      </td>
+                      <td class="hidden lg:table-cell xl:hidden text-xs text-slate-500" x-text="p.updated_at ? $date(p.updated_at) : '—'"></td>
+                      <td class="actions">
+                        <div class="inline-flex items-center gap-0.5">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.pages, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === f.pages.length - 1" @click="move(f.pages, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon xl:hidden" title="Edit page" @click="selectPage(p.id)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                  <template x-if="!f.pages.length">
+                    <tr><td colspan="5">
+                      <div class="empty !py-8">
+                        <span x-html="ABM.icon('document')"></span>
+                        <div class="empty-title">No pages yet</div>
+                        <div class="text-sm mt-1">Create pages like About, Warranty policy or FAQs.</div>
+                        <button type="button" class="btn btn-primary btn-sm mt-4" @click="newPage()"><span x-html="ABM.icon('plus')"></span>New page</button>
+                      </div>
+                    </td></tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs text-slate-500" x-text="dirty('pages') ? 'Unsaved changes' : 'All changes saved'"></span>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('pages')" @click="discard('pages')">Discard</button>
+                <button type="button" class="btn btn-primary btn-sm" x-show="canEdit" :disabled="busy" @click="save('pages')"><span x-html="ABM.icon('check')"></span>Save pages</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- editor -->
+          <div class="card min-w-0" x-show="cur" x-cloak>
+            <div class="card-header">
+              <div class="min-w-0">
+                <div class="card-title truncate" x-text="cur ? (cur.title || 'Untitled page') : ''"></div>
+                <div class="card-subtitle">Last saved <span x-text="cur && cur.updated_at ? ABM.utils.timeAgo(cur.updated_at) : 'never'"></span></div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <a class="btn btn-secondary btn-sm" :href="'shop/page.html?slug=' + encodeURIComponent(cur ? cur.slug : '')" target="_blank" rel="noopener" :class="(!cur || !cur.slug) && 'pointer-events-none opacity-50'"><span x-html="ABM.icon('eye')"></span>Preview</a>
+                <button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="deletePage()"><span x-html="ABM.icon('trash')"></span>Delete</button>
+              </div>
+            </div>
+            <div class="card-body space-y-4" x-show="cur">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label" for="w-pg-title">Title <span class="req">*</span></label>
+                  <input id="w-pg-title" type="text" class="input" :class="errors['pg.title'] && 'is-invalid'" :value="cur ? cur.title : ''" @input="onPageTitle($event.target.value)" maxlength="80" placeholder="About Us">
+                  <p class="field-error" x-show="errors['pg.title']" x-text="errors['pg.title']"></p>
+                </div>
+                <div>
+                  <label class="label" for="w-pg-slug">Slug <span class="req">*</span></label>
+                  <div class="input-group">
+                    <span class="addon addon-left">/page/</span>
+                    <input id="w-pg-slug" type="text" class="input mono" :class="errors['pg.slug'] && 'is-invalid'" :value="cur ? cur.slug : ''" @input="onPageSlug($event.target.value)" maxlength="60" placeholder="about-us">
+                  </div>
+                  <p class="field-error" x-show="errors['pg.slug']" x-text="errors['pg.slug']"></p>
+                  <p class="help" x-show="!errors['pg.slug']">Lower-case letters, numbers and dashes. Used in the address bar.</p>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap gap-5">
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <button type="button" class="switch" :class="cur && cur.is_published && 'on'" role="switch" :aria-checked="cur && cur.is_published ? 'true' : 'false'" aria-label="Published" @click="cur.is_published = cur.is_published ? 0 : 1"></button>
+                  <span class="text-sm font-semibold text-slate-700">Published</span>
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <button type="button" class="switch" :class="cur && cur.show_in_menu && 'on'" role="switch" :aria-checked="cur && cur.show_in_menu ? 'true' : 'false'" aria-label="Show in menu" @click="cur.show_in_menu = cur.show_in_menu ? 0 : 1"></button>
+                  <span class="text-sm font-semibold text-slate-700">Suggest for the menu</span>
+                </label>
+              </div>
+
+              <!-- rich text editor -->
+              <div class="min-w-0">
+                <div class="label">Content</div>
+                <div class="rte-toolbar">
+                  <button type="button" class="rte-btn" title="Paragraph" @click="exec('formatBlock', '<p>')">P</button>
+                  <button type="button" class="rte-btn" title="Heading 2" @click="exec('formatBlock', '<h2>')">H2</button>
+                  <button type="button" class="rte-btn" title="Heading 3" @click="exec('formatBlock', '<h3>')">H3</button>
+                  <span class="rte-sep"></span>
+                  <button type="button" class="rte-btn font-black" title="Bold (Ctrl+B)" @click="exec('bold')">B</button>
+                  <button type="button" class="rte-btn italic" title="Italic (Ctrl+I)" @click="exec('italic')">I</button>
+                  <button type="button" class="rte-btn underline" title="Underline (Ctrl+U)" @click="exec('underline')">U</button>
+                  <span class="rte-sep"></span>
+                  <button type="button" class="rte-btn" title="Bullet list" @click="exec('insertUnorderedList')" x-html="ABM.icon('menu','w-4 h-4')"></button>
+                  <button type="button" class="rte-btn" title="Numbered list" @click="exec('insertOrderedList')">1.</button>
+                  <button type="button" class="rte-btn" title="Quote" @click="exec('formatBlock', '<blockquote>')">&ldquo;</button>
+                  <span class="rte-sep"></span>
+                  <button type="button" class="rte-btn" title="Insert link" @click="openRtePrompt('link')" x-html="ABM.icon('arrow-up-right','w-4 h-4')"></button>
+                  <button type="button" class="rte-btn" title="Insert image by URL" @click="openRtePrompt('image')" x-html="ABM.icon('image','w-4 h-4')"></button>
+                  <span class="rte-sep"></span>
+                  <button type="button" class="rte-btn" title="Clear formatting" @click="clearFormat()" x-html="ABM.icon('x','w-4 h-4')"></button>
+                  <button type="button" class="rte-btn" title="Undo" @click="exec('undo')" x-html="ABM.icon('arrow-left','w-4 h-4')"></button>
+                  <button type="button" class="rte-btn" title="Redo" @click="exec('redo')" x-html="ABM.icon('arrow-right','w-4 h-4')"></button>
+                  <span class="rte-sep"></span>
+                  <button type="button" class="rte-btn" :class="ed.raw && 'is-on'" title="Edit the raw HTML" @click="toggleRaw()">HTML</button>
+                </div>
+
+                <!-- link / image prompt -->
+                <div x-show="ed.prompt" x-cloak class="flex flex-wrap items-center gap-2 p-2 border border-t-0 border-slate-300 bg-navy-50">
+                  <span class="text-xs font-bold text-slate-600" x-text="ed.prompt === 'link' ? 'Link address' : 'Image URL'"></span>
+                  <input type="text" class="input input-sm flex-1 min-w-0" x-ref="rteUrl" x-model.trim="ed.url" placeholder="https://…" @keydown.enter.prevent="applyRtePrompt()">
+                  <button type="button" class="btn btn-primary btn-sm" @click="applyRtePrompt()">Insert</button>
+                  <button type="button" class="btn btn-ghost btn-sm" @click="ed.prompt = null">Cancel</button>
+                </div>
+
+                <div x-show="!ed.raw" class="rte" contenteditable="true" spellcheck="true" role="textbox" aria-multiline="true" aria-label="Page content"
+                     x-ref="editor" @input="syncEditor()" @blur="syncEditor()"></div>
+                <textarea x-show="ed.raw" x-cloak class="textarea mono !rounded-t-none" rows="14" :value="cur ? cur.content_html : ''" @input="cur.content_html = $event.target.value" aria-label="Page HTML"></textarea>
+                <p class="help"><b>HTML</b> lets you paste markup. <code>&lt;script&gt;</code> tags and event attributes are always stripped when the page is saved.</p>
+              </div>
+
+              <!-- ============================ SECTIONS (widgets) ============================ -->
+              <div class="mt-6">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="min-w-0">
+                    <label class="label !mb-0">Sections</label>
+                    <p class="help !mt-0">Blocks shown under the content — product grids, banners and call-to-action strips.</p>
+                  </div>
+                  <div class="flex flex-wrap gap-1.5">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addBlock('products')"><span x-html="ABM.icon('grid','w-4 h-4')"></span>Product grid</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addBlock('banner')"><span x-html="ABM.icon('image','w-4 h-4')"></span>Banner</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addBlock('cta')"><span x-html="ABM.icon('sparkles','w-4 h-4')"></span>Call to action</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="addBlock('richtext')"><span x-html="ABM.icon('document','w-4 h-4')"></span>Text</button>
+                  </div>
+                </div>
+
+                <div class="mt-3 space-y-3" x-show="((cur && cur.blocks) || []).length" x-cloak>
+                  <template x-for="(b, bi) in ((cur && cur.blocks) || [])" :key="b.id">
+                    <div class="card">
+                      <div class="card-header !py-2.5">
+                        <div class="flex items-center gap-2 min-w-0">
+                          <span class="chip chip-navy !w-8 !h-8" x-html="ABM.icon(blockIcon(b.type),'w-4 h-4')"></span>
+                          <div class="min-w-0">
+                            <div class="card-title !text-sm" x-text="blockLabel(b.type)"></div>
+                            <div class="text-xs text-slate-500 truncate" x-text="blockSummary(b)"></div>
+                          </div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <button type="button" class="btn btn-ghost btn-icon btn-sm" :disabled="bi === 0" @click="moveBlock(bi,-1)" title="Move up"><span x-html="ABM.icon('chevron-up','w-4 h-4')"></span></button>
+                          <button type="button" class="btn btn-ghost btn-icon btn-sm" :disabled="bi === ((cur && cur.blocks) || []).length - 1" @click="moveBlock(bi,1)" title="Move down"><span x-html="ABM.icon('chevron-down','w-4 h-4')"></span></button>
+                          <button type="button" class="btn btn-ghost btn-icon btn-sm text-rose-600" @click="removeBlock(bi)" title="Remove section"><span x-html="ABM.icon('trash','w-4 h-4')"></span></button>
+                        </div>
+                      </div>
+                      <div class="card-body !py-3 space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div><label class="label">Heading</label><input type="text" class="input input-sm" x-model="b.title" placeholder="e.g. Hot deals this week"></div>
+                          <div><label class="label">Sub-heading</label><input type="text" class="input input-sm" x-model="b.subtitle" placeholder="Optional line under the heading"></div>
+                        </div>
+
+                        <!-- product grid -->
+                        <template x-if="b.type === 'products'">
+                          <div class="space-y-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                              <div>
+                                <label class="label">Which products</label>
+                                <select class="select input-sm" x-model="b.mode" x-sync="b.mode">
+                                  <option value="pick">Products I pick</option>
+                                  <option value="category">A whole category</option>
+                                  <option value="tag">Everything with a tag</option>
+                                  <option value="newest">Newest arrivals</option>
+                                </select>
+                              </div>
+                              <div x-show="b.mode === 'category'" x-cloak>
+                                <label class="label">Category</label>
+                                <select class="select input-sm" x-model="b.category_id" x-sync="b.category_id">
+                                  <template x-for="c in allCategories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+                                </select>
+                              </div>
+                              <div x-show="b.mode === 'tag'" x-cloak>
+                                <label class="label">Tag</label>
+                                <input type="text" class="input input-sm" x-model="b.tag" placeholder="e.g. clearance">
+                              </div>
+                              <div>
+                                <label class="label">Show at most</label>
+                                <input type="number" class="input input-sm" min="1" max="24" x-model.number="b.limit">
+                              </div>
+                            </div>
+
+                            <!-- product picker -->
+                            <div x-show="b.mode === 'pick'" x-cloak>
+                              <label class="label">Products in this section</label>
+                              <div class="flex flex-wrap gap-1.5 mb-2" x-show="(b.product_ids || []).length" x-cloak>
+                                <template x-for="(pid, pi) in b.product_ids" :key="pid">
+                                  <span class="badge badge-navy !py-1 !px-2 gap-1.5">
+                                    <span x-text="ABM.db.productLabel(pid)"></span>
+                                    <button type="button" class="hover:text-rose-600" @click="b.product_ids.splice(pi,1)" aria-label="Remove">&times;</button>
+                                  </span>
+                                </template>
+                              </div>
+                              <div class="relative" x-data="{ q: '' }">
+                                <input type="text" class="input input-sm" x-model="q" placeholder="Search a product to add…">
+                                <div class="mt-1 max-h-44 overflow-y-auto rounded-lg border border-slate-200" x-show="q.length > 1" x-cloak>
+                                  <template x-for="p in searchProducts(q)" :key="p.id">
+                                    <button type="button" class="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center justify-between gap-2"
+                                            @click="addPickedProduct(b, p.id); q = ''">
+                                      <span class="truncate" x-text="ABM.db.productLabel(p.id)"></span>
+                                      <span class="text-xs text-slate-500 flex-none" x-text="$money(p.retail_price,{decimals:0})"></span>
+                                    </button>
+                                  </template>
+                                  <div class="px-3 py-2 text-xs text-slate-500" x-show="!searchProducts(q).length" x-cloak>No match.</div>
+                                </div>
+                              </div>
+                            </div>
+                            <p class="help" x-text="blockPreviewCount(b) + ' product(s) will appear on the page.'"></p>
+                          </div>
+                        </template>
+
+                        <!-- banner -->
+                        <template x-if="b.type === 'banner'">
+                          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div><label class="label">Button text</label><input type="text" class="input input-sm" x-model="b.cta_text" placeholder="Shop the sale"></div>
+                            <div><label class="label">Links to</label><input type="text" class="input input-sm" x-model="b.link" placeholder="products.html?tag=clearance"></div>
+                            <div><label class="label">Colour</label>
+                              <div class="flex gap-2">
+                                <input type="color" class="color-input" x-model="b.color">
+                                <input type="text" class="input input-sm mono flex-1 min-w-0" x-model="b.color">
+                              </div>
+                            </div>
+                          </div>
+                        </template>
+
+                        <!-- cta -->
+                        <template x-if="b.type === 'cta'">
+                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div><label class="label">Button text</label><input type="text" class="input input-sm" x-model="b.cta_text" placeholder="Book a repair"></div>
+                            <div><label class="label">Links to</label><input type="text" class="input input-sm" x-model="b.link" placeholder="repair.html"></div>
+                          </div>
+                        </template>
+
+                        <!-- extra text -->
+                        <template x-if="b.type === 'richtext'">
+                          <div>
+                            <label class="label">Text</label>
+                            <textarea class="textarea !min-h-[5rem]" x-model="b.html" placeholder="Plain text or simple HTML shown in this section"></textarea>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="empty !py-6" x-show="!((cur && cur.blocks) || []).length" x-cloak>
+                  <span x-html="ABM.icon('grid')"></span>
+                  <div class="empty-title">No sections yet</div>
+                  <p class="text-sm">Add a product grid to turn this into a sale or clearance page.</p>
+                </div>
+              </div>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+              <span class="text-xs text-slate-500" x-text="dirty('pages') ? 'Unsaved changes' : 'All changes saved'"></span>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="btn btn-secondary" @click="pageSel = null">Close editor</button>
+                <button type="button" class="btn btn-primary" x-show="canEdit" :disabled="busy" @click="save('pages')"><span x-html="ABM.icon('check')"></span>Save page</button>
+              </div>
+            </div>
+          </div>
+          <div class="card min-w-0" x-show="!cur">
+            <div class="card-body">
+              <div class="empty !py-10">
+                <span x-html="ABM.icon('edit')"></span>
+                <div class="empty-title">Pick a page to edit</div>
+                <div class="text-sm mt-1">Choose a page from the list, or create a new one.</div>
+                <button type="button" class="btn btn-primary btn-sm mt-4" @click="newPage()"><span x-html="ABM.icon('plus')"></span>New page</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================================================= 5. MENU -->
+        <form x-show="tab === 'menu'" class="card" @submit.prevent="save('menu')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Storefront menu</div>
+              <div class="card-subtitle">Links in the website header and mobile drawer, in this order.</div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" @click="addMenuItem()"><span x-html="ABM.icon('plus')"></span>Add link</button>
+          </div>
+          <div class="card-body space-y-3">
+            <template x-for="(m, i) in f.menu" :key="m.id">
+              <div class="cms-row">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="label">Label <span class="req">*</span></label>
+                    <input type="text" class="input" :class="errors['mn.' + i] && 'is-invalid'" x-model.trim="m.label" maxlength="30" placeholder="Laptops">
+                    <p class="field-error" x-show="errors['mn.' + i]" x-text="errors['mn.' + i]"></p>
+                  </div>
+                  <div>
+                    <label class="label">Link <span class="req">*</span></label>
+                    <div class="flex gap-2 min-w-0">
+                      <input type="text" class="input min-w-0 mono" :class="errors['mnu.' + i] && 'is-invalid'" x-model.trim="m.url" placeholder="products.html?category=4">
+                      <button type="button" class="btn btn-secondary btn-icon flex-none" title="Pick a link" @click="openLink('menu:' + i, m.url)" x-html="ABM.icon('search','w-4 h-4')"></button>
+                    </div>
+                    <p class="field-error" x-show="errors['mnu.' + i]" x-text="errors['mnu.' + i]"></p>
+                  </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-slate-200">
+                  <span class="inline-flex items-center gap-2">
+                    <button type="button" class="switch" :class="m.is_active && 'on'" role="switch" :aria-checked="m.is_active ? 'true' : 'false'" aria-label="Menu link active" @click="m.is_active = m.is_active ? 0 : 1"></button>
+                    <span class="text-xs font-semibold text-slate-600">Show in menu</span>
+                  </span>
+                  <span class="flex items-center gap-0.5 ml-auto">
+                    <a class="btn btn-ghost btn-sm btn-icon" :href="'shop/' + (m.url || 'index.html')" target="_blank" rel="noopener" title="Open link" x-html="ABM.icon('arrow-up-right','w-4 h-4')"></a>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move up" :disabled="i === 0" @click="move(f.menu, i, -1)" x-html="ABM.icon('chevron-up','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Move down" :disabled="i === f.menu.length - 1" @click="move(f.menu, i, 1)" x-html="ABM.icon('chevron-down','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove link" @click="removeRow(f.menu, i, 'menu link')" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                  </span>
+                </div>
+              </div>
+            </template>
+            <template x-if="!f.menu.length">
+              <div class="empty !py-8">
+                <span x-html="ABM.icon('menu')"></span>
+                <div class="empty-title">The menu is empty</div>
+                <div class="text-sm mt-1">Visitors will only see the logo. Add Home, Shop and Contact at least.</div>
+              </div>
+            </template>
+            <div class="alert alert-info" x-show="menuSuggestions.length" x-cloak>
+              <span x-html="ABM.icon('info')"></span>
+              <div class="min-w-0">
+                <b>Pages marked “suggest for the menu” that are not linked yet:</b>
+                <div class="flex flex-wrap gap-2 mt-2">
+                  <template x-for="s in menuSuggestions" :key="s.slug">
+                    <button type="button" class="btn btn-soft btn-sm" @click="addMenuItem(s.title, 'page.html?slug=' + s.slug)"><span x-html="ABM.icon('plus','w-4 h-4')"></span><span x-text="s.title"></span></button>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('menu') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('menu')" @click="discard('menu')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save menu</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 6. CONTACT & SOCIAL -->
+        <form x-show="tab === 'contact'" class="card" @submit.prevent="save('contact')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Contact &amp; social</div>
+              <div class="card-subtitle">Shown on the contact page, in the footer and on the WhatsApp button.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-6">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="w-phone">Phone</label>
+                <input id="w-phone" type="tel" class="input" x-model.trim="f.site.contact.phone" maxlength="30" placeholder="042-37311234">
+              </div>
+              <div>
+                <label class="label" for="w-wa">WhatsApp number</label>
+                <input id="w-wa" type="tel" class="input" x-model.trim="f.site.contact.whatsapp" maxlength="30" placeholder="0300-1234567">
+              </div>
+              <div>
+                <label class="label" for="w-email">Email</label>
+                <input id="w-email" type="email" class="input" :class="errors.email && 'is-invalid'" x-model.trim="f.site.contact.email" maxlength="80" placeholder="hello@abbottmobile.pk">
+                <p class="field-error" x-show="errors.email" x-text="errors.email"></p>
+              </div>
+              <div>
+                <label class="label" for="w-hours">Opening hours</label>
+                <input id="w-hours" type="text" class="input" x-model.trim="f.site.contact.hours" maxlength="80" placeholder="Mon–Sat 10:00 – 21:00">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="w-addr">Address</label>
+                <textarea id="w-addr" class="textarea" rows="2" x-model.trim="f.site.contact.address" maxlength="180" placeholder="Shop 12, Hall Road, Lahore"></textarea>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="w-map">Map link</label>
+                <input id="w-map" type="url" class="input" :class="errors.map_url && 'is-invalid'" x-model.trim="f.site.contact.map_url" placeholder="https://maps.google.com/…">
+                <p class="field-error" x-show="errors.map_url" x-text="errors.map_url"></p>
+                <p class="help" x-show="!errors.map_url">Opens when a visitor taps the map placeholder on the contact page.</p>
+              </div>
+            </div>
+
+            <div>
+              <div class="label">Social profiles</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <template x-for="s in socialFields" :key="s.key">
+                  <div class="min-w-0">
+                    <label class="label" :for="'w-s-' + s.key" x-text="s.label"></label>
+                    <input :id="'w-s-' + s.key" type="url" class="input" :class="errors['social.' + s.key] && 'is-invalid'" :value="f.site.social[s.key] || ''" @input="f.site.social[s.key] = $event.target.value.trim()" :placeholder="s.placeholder">
+                    <p class="field-error" x-show="errors['social.' + s.key]" x-text="errors['social.' + s.key]"></p>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div>
+              <label class="label" for="w-footer">Footer text</label>
+              <textarea id="w-footer" class="textarea" rows="2" x-model.trim="f.site.footer_text" maxlength="220" placeholder="Abbott Mobile — Smartphones · Laptops · Accessories · Repairs."></textarea>
+            </div>
+
+            <div class="alert alert-info">
+              <span x-html="ABM.icon('info')"></span>
+              <div>Branch addresses and phone numbers on the contact page come from <a href="branches.html" class="font-semibold underline">Branches</a> — this section is the head-office contact.</div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('contact') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('contact')" @click="discard('contact')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save contact</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 7. COMMERCE -->
+        <form x-show="tab === 'commerce'" class="card" @submit.prevent="save('commerce')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Commerce</div>
+              <div class="card-subtitle">What visitors may do, how they pay and what delivery costs.</div>
+            </div>
+            <a href="online-orders.html" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('bag')"></span>Online orders</a>
+          </div>
+          <div class="card-body space-y-6">
+            <div>
+              <div class="label">Storefront behaviour</div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <template x-for="t in commerceToggles" :key="t.key">
+                  <div class="flex items-start gap-3 cms-row">
+                    <button type="button" class="switch mt-0.5" :class="f.site.commerce[t.key] && 'on'" role="switch" :aria-checked="f.site.commerce[t.key] ? 'true' : 'false'" :aria-label="t.label" @click="f.site.commerce[t.key] = f.site.commerce[t.key] ? 0 : 1"></button>
+                    <div class="min-w-0">
+                      <div class="text-sm font-semibold text-slate-800" x-text="t.label"></div>
+                      <div class="text-xs text-slate-500" x-text="t.help"></div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="w-fee">Delivery fee</label>
+                <div class="input-group">
+                  <span class="addon addon-left" x-text="currency"></span>
+                  <input id="w-fee" type="number" min="0" step="50" class="input" :class="errors.delivery_fee && 'is-invalid'" x-model.number="f.site.commerce.delivery_fee">
+                </div>
+                <p class="field-error" x-show="errors.delivery_fee" x-text="errors.delivery_fee"></p>
+              </div>
+              <div>
+                <label class="label" for="w-free">Free delivery above</label>
+                <div class="input-group">
+                  <span class="addon addon-left" x-text="currency"></span>
+                  <input id="w-free" type="number" min="0" step="500" class="input" :class="errors.free_delivery_above && 'is-invalid'" x-model.number="f.site.commerce.free_delivery_above">
+                </div>
+                <p class="field-error" x-show="errors.free_delivery_above" x-text="errors.free_delivery_above"></p>
+                <p class="help" x-show="!errors.free_delivery_above">0 = never free.</p>
+              </div>
+              <div>
+                <label class="label" for="w-min">Minimum order</label>
+                <div class="input-group">
+                  <span class="addon addon-left" x-text="currency"></span>
+                  <input id="w-min" type="number" min="0" step="100" class="input" :class="errors.min_order && 'is-invalid'" x-model.number="f.site.commerce.min_order">
+                </div>
+                <p class="field-error" x-show="errors.min_order" x-text="errors.min_order"></p>
+              </div>
+              <div>
+                <label class="label" for="w-prefix">Order number prefix</label>
+                <input id="w-prefix" type="text" class="input mono uppercase" :class="errors.order_prefix && 'is-invalid'" x-model.trim="f.site.commerce.order_prefix" maxlength="5" placeholder="WEB">
+                <p class="field-error" x-show="errors.order_prefix" x-text="errors.order_prefix"></p>
+                <p class="help" x-show="!errors.order_prefix">Next order looks like <b class="mono" x-text="(f.site.commerce.order_prefix || 'WEB').toUpperCase() + '-000042'"></b></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="w-branch">Fulfilment branch <span class="req">*</span></label>
+                <select id="w-branch" class="select" :class="errors.fulfil_branch_id && 'is-invalid'" x-model="f.site.commerce.fulfil_branch_id">
+                  <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                </select>
+                <p class="field-error" x-show="errors.fulfil_branch_id" x-text="errors.fulfil_branch_id"></p>
+                <p class="help" x-show="!errors.fulfil_branch_id">Website stock levels and online invoices use this branch.</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="w-bank">Bank transfer details</label>
+                <textarea id="w-bank" class="textarea" rows="3" :class="errors.bank_details && 'is-invalid'" x-model.trim="f.site.commerce.bank_details" maxlength="300" placeholder="Meezan Bank · Abbott Mobile · PK36MEZN0001234567890123"></textarea>
+                <p class="field-error" x-show="errors.bank_details" x-text="errors.bank_details"></p>
+                <p class="help" x-show="!errors.bank_details">Shown at checkout when the customer chooses bank transfer.</p>
+              </div>
+              <!-- wallet accounts: checkout tells the customer exactly where to send the money -->
+              <div>
+                <label class="label" for="w-jazz">JazzCash account number</label>
+                <input id="w-jazz" type="text" class="input mono" :class="errors.jazzcash_number && 'is-invalid'" x-model.trim="f.site.commerce.jazzcash_number" maxlength="20" placeholder="0300-1234567" :disabled="!f.site.commerce.wallet_enabled">
+                <p class="field-error" x-show="errors.jazzcash_number" x-text="errors.jazzcash_number"></p>
+                <p class="help" x-show="!errors.jazzcash_number">Shown at checkout when the customer picks JazzCash.</p>
+              </div>
+              <div>
+                <label class="label" for="w-easy">EasyPaisa account number</label>
+                <input id="w-easy" type="text" class="input mono" :class="errors.easypaisa_number && 'is-invalid'" x-model.trim="f.site.commerce.easypaisa_number" maxlength="20" placeholder="0345-7654321" :disabled="!f.site.commerce.wallet_enabled">
+                <p class="field-error" x-show="errors.easypaisa_number" x-text="errors.easypaisa_number"></p>
+                <p class="help" x-show="!errors.easypaisa_number">Shown at checkout when the customer picks EasyPaisa.</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="w-wallet-name">Wallet account title</label>
+                <input id="w-wallet-name" type="text" class="input" x-model.trim="f.site.commerce.wallet_account_name" maxlength="60" placeholder="Abbott Mobile" :disabled="!f.site.commerce.wallet_enabled">
+                <p class="help">The name the customer should see on their wallet app before confirming the transfer.</p>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('commerce') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('commerce')" @click="discard('commerce')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save commerce</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 8. REPAIR BOOKING -->
+        <form x-show="tab === 'repair'" class="card" @submit.prevent="save('repair')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Repair booking</div>
+              <div class="card-subtitle">The online booking form that creates website repair requests.</div>
+            </div>
+            <a href="repairs.html" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('wrench')"></span>Repair jobs</a>
+          </div>
+          <div class="card-body space-y-5">
+            <div class="flex items-start gap-3">
+              <button type="button" class="switch mt-0.5" :class="f.site.repair_booking.enabled && 'on'" role="switch" :aria-checked="f.site.repair_booking.enabled ? 'true' : 'false'" aria-label="Enable repair booking" @click="f.site.repair_booking.enabled = f.site.repair_booking.enabled ? 0 : 1"></button>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-slate-800">Accept repair bookings online</div>
+                <div class="text-xs text-slate-500">Requests land in <a href="repairs.html" class="underline font-semibold">Repair Jobs → Website requests</a> to be converted into job cards.</div>
+              </div>
+            </div>
+            <div>
+              <label class="label" for="w-rep-intro">Intro text</label>
+              <textarea id="w-rep-intro" class="textarea" rows="3" x-model.trim="f.site.repair_booking.intro" maxlength="300" placeholder="Tell us what is wrong with your device and we will call you back with a quote."></textarea>
+            </div>
+            <div>
+              <div class="label">Device types customers can book <span class="req">*</span></div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <template x-for="d in deviceTypes" :key="d.key">
+                  <label class="flex items-center gap-3 cms-row cursor-pointer">
+                    <input type="checkbox" class="checkbox flex-none" :checked="f.site.repair_booking.device_types.includes(d.key)" @change="toggleDeviceType(d.key)">
+                    <span class="flex-none w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-navy-700" x-html="ABM.icon(d.icon,'w-4 h-4')"></span>
+                    <span class="text-sm font-semibold text-slate-800 min-w-0 truncate" x-text="d.label"></span>
+                  </label>
+                </template>
+              </div>
+              <p class="field-error" x-show="errors.device_types" x-text="errors.device_types"></p>
+            </div>
+            <div class="flex items-start gap-3">
+              <button type="button" class="switch mt-0.5" :class="f.site.repair_booking.show_prices && 'on'" role="switch" :aria-checked="f.site.repair_booking.show_prices ? 'true' : 'false'" aria-label="Show repair price list" @click="f.site.repair_booking.show_prices = f.site.repair_booking.show_prices ? 0 : 1"></button>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-slate-800">Show the indicative price list</div>
+                <div class="text-xs text-slate-500">Lists your service products (<span x-text="serviceCount"></span> found) with their retail price.</div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('repair') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('repair')" @click="discard('repair')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save repair booking</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 9. SEO -->
+        <form x-show="tab === 'seo'" class="card" @submit.prevent="save('seo')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Search engine listing</div>
+              <div class="card-subtitle">How the home page looks in Google results.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-5">
+            <div>
+              <label class="label" for="w-seo-t">Meta title</label>
+              <input id="w-seo-t" type="text" class="input" :class="errors.seo_title && 'is-invalid'" x-model.trim="f.site.seo.title" maxlength="90" placeholder="Abbott Mobile — Phones, Laptops &amp; Repairs in Lahore">
+              <p class="field-error" x-show="errors.seo_title" x-text="errors.seo_title"></p>
+              <p class="help" x-show="!errors.seo_title"><span x-text="(f.site.seo.title || '').length"></span>/60 recommended characters.</p>
+            </div>
+            <div>
+              <label class="label" for="w-seo-d">Meta description</label>
+              <textarea id="w-seo-d" class="textarea" rows="3" x-model.trim="f.site.seo.description" maxlength="200" placeholder="Buy genuine smartphones, laptops and accessories online or book a repair."></textarea>
+              <p class="help"><span x-text="(f.site.seo.description || '').length"></span>/160 recommended characters.</p>
+            </div>
+            <div>
+              <label class="label" for="w-seo-k">Keywords</label>
+              <input id="w-seo-k" type="text" class="input" x-model.trim="f.site.seo.keywords" maxlength="200" placeholder="mobile shop lahore, laptop shop, mobile repair">
+              <p class="help">Comma separated. Minor effect these days, but harmless.</p>
+            </div>
+            <div>
+              <div class="label">Google preview</div>
+              <div class="rounded-xl border border-slate-200 bg-white p-4 max-w-2xl">
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class="w-6 h-6 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden flex-none">
+                    <img x-show="f.site.favicon || f.site.logo" :src="f.site.favicon || f.site.logo || ''" alt="" class="max-w-full max-h-full object-contain">
+                    <span x-show="!(f.site.favicon || f.site.logo)" class="text-[10px] font-black text-slate-500" x-text="siteInitial"></span>
+                  </span>
+                  <div class="min-w-0">
+                    <div class="text-xs font-semibold text-slate-700 truncate" x-text="f.site.name || 'Your site'"></div>
+                    <div class="seo-preview-url truncate">https://abbottmobile.pk</div>
+                  </div>
+                </div>
+                <div class="seo-preview-title font-medium truncate" x-text="f.site.seo.title || f.site.name || 'Your page title'"></div>
+                <div class="text-sm text-slate-600 mt-1" x-text="seoDescriptionPreview"></div>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('seo') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('seo')" @click="discard('seo')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save SEO</button>
+            </div>
+          </div>
+        </form>
+
+        <!-- ================================================= 10. THEME & COLOURS -->
+        <form x-show="tab === 'theme'" class="card" @submit.prevent="save('theme')" novalidate>
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Theme &amp; colours</div>
+              <div class="card-subtitle">The look of the public storefront. The admin software has its own theme in the topbar.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-6">
+            <!-- presets -->
+            <div>
+              <div class="label">One-click presets</div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <template x-for="p in presets" :key="p.key">
+                  <button type="button" class="flex items-center gap-2 p-2 rounded-xl border text-left transition-colors min-w-0"
+                          :class="isPreset(p) ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 hover:border-slate-300'"
+                          :data-preset="p.key" @click="applyPreset(p)">
+                    <span class="flex-none flex">
+                      <span class="w-5 h-8 rounded-l-md" :style="'background:' + p.primary"></span>
+                      <span class="w-5 h-8 rounded-r-md" :style="'background:' + p.accent"></span>
+                    </span>
+                    <span class="min-w-0">
+                      <span class="block text-xs font-bold text-slate-800 truncate" x-text="p.label"></span>
+                      <span class="block text-[11px] text-slate-500" x-text="p.mode === 'dark' ? 'Dark' : 'Light'"></span>
+                    </span>
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <!-- controls -->
+              <div class="space-y-4 min-w-0">
+                <template x-for="c in colorFields" :key="c.key">
+                  <div class="min-w-0">
+                    <label class="label" :for="'w-c-' + c.key" x-text="c.label"></label>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <input :id="'w-c-' + c.key" type="color" class="color-input flex-none" :value="f.site.theme[c.key]" @input="f.site.theme[c.key] = $event.target.value" :aria-label="c.label">
+                      <input type="text" class="input mono min-w-0" :class="errors['theme.' + c.key] && 'is-invalid'" :value="f.site.theme[c.key]" @input="f.site.theme[c.key] = $event.target.value.trim()" maxlength="7" placeholder="#1a336a">
+                    </div>
+                    <p class="field-error" x-show="errors['theme.' + c.key]" x-text="errors['theme.' + c.key]"></p>
+                    <p class="help" x-show="!errors['theme.' + c.key]" x-text="c.help"></p>
+                  </div>
+                </template>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="w-mode">Mode</label>
+                    <select id="w-mode" class="select" x-model="f.site.theme.mode">
+                      <option value="light">Light</option>
+                      <option value="dark">Dark</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label" for="w-font">Font</label>
+                    <select id="w-font" class="select" x-model="f.site.theme.font">
+                      <option value="Inter">Inter</option>
+                      <option value="Poppins">Poppins</option>
+                      <option value="Roboto">Roboto</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label" for="w-radius">Corner radius</label>
+                    <select id="w-radius" class="select" x-model="f.site.theme.radius">
+                      <option value="sharp">Sharp</option>
+                      <option value="rounded">Rounded</option>
+                      <option value="pill">Pill</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="label" for="w-hstyle">Header style</label>
+                    <select id="w-hstyle" class="select" x-model="f.site.theme.header_style">
+                      <option value="solid">Solid colour</option>
+                      <option value="gradient">Gradient</option>
+                      <option value="light">Light / bordered</option>
+                    </select>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="w-bstyle">Button style</label>
+                    <select id="w-bstyle" class="select" x-model="f.site.theme.button_style">
+                      <option value="rounded">Rounded</option>
+                      <option value="pill">Pill</option>
+                      <option value="sharp">Sharp</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="cms-row">
+                  <div class="text-sm font-semibold text-slate-800">Use the same colour in the admin software</div>
+                  <div class="text-xs text-slate-500 mt-1">Applies <b class="mono" x-text="f.site.theme.primary"></b> as the accent of this admin panel on this device only.</div>
+                  <button type="button" class="btn btn-secondary btn-sm mt-3" @click="applyToSoftware()"><span x-html="ABM.icon('palette')"></span>Also apply this colour to the software</button>
+                </div>
+              </div>
+
+              <!-- live preview -->
+              <div class="min-w-0">
+                <div class="label">Live storefront preview</div>
+                <div class="rounded-2xl border border-slate-200 overflow-hidden shadow-sm" :style="'background:' + previewBg + ';font-family:' + previewFont">
+                  <!-- announcement -->
+                  <div class="px-3 py-1.5 text-center text-[10px] font-semibold truncate" x-show="f.site.announcement.enabled" :style="'background:' + accentColor + ';color:#fff'" x-text="f.site.announcement.text || 'Announcement bar'"></div>
+                  <!-- header -->
+                  <div class="flex items-center gap-2 px-3 py-2.5 min-w-0" :style="headerStyleCss">
+                    <span class="w-7 h-7 flex items-center justify-center text-xs font-black flex-none overflow-hidden" :style="'border-radius:' + chipRadius + ';background:' + logoChipBg">
+                      <img x-show="f.site.logo" :src="f.site.logo || ''" alt="" class="max-w-full max-h-full object-contain">
+                      <span x-show="!f.site.logo" x-text="siteInitial"></span>
+                    </span>
+                    <span class="text-sm font-extrabold truncate min-w-0 flex-1" x-text="f.site.name || 'Your store'"></span>
+                    <span class="hidden sm:flex items-center gap-2.5 text-[10px] font-semibold opacity-80 flex-none">
+                      <span>Shop</span><span>Repairs</span><span>Contact</span>
+                    </span>
+                    <span class="w-6 h-6 rounded-full flex items-center justify-center flex-none" :style="'background:' + logoChipBg" x-html="ABM.icon('bag','w-3.5 h-3.5')"></span>
+                  </div>
+                  <!-- hero -->
+                  <div class="px-4 py-5 min-w-0" :style="heroStyleCss">
+                    <div class="text-[10px] font-bold uppercase tracking-wider opacity-75 truncate" x-text="f.site.hero.badge || 'New arrivals'"></div>
+                    <div class="text-base font-extrabold leading-snug mt-1" x-text="f.site.hero.title || 'Your headline goes here'"></div>
+                    <div class="text-[11px] opacity-80 mt-1 truncate" x-text="f.site.hero.subtitle || 'A short sentence about what you sell.'"></div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                      <span class="px-3 py-1.5 text-[11px] font-bold text-white" :style="'border-radius:' + btnRadius + ';background:' + accentColor" x-text="f.site.hero.cta_text || 'Shop now'"></span>
+                      <span class="px-3 py-1.5 text-[11px] font-bold border border-current opacity-90" :style="'border-radius:' + btnRadius" x-text="f.site.hero.cta2_text || 'Book a repair'"></span>
+                    </div>
+                  </div>
+                  <!-- products -->
+                  <div class="p-3 grid grid-cols-2 gap-3 min-w-0">
+                    <template x-for="p in previewProducts" :key="p.id">
+                      <div class="p-2.5 border min-w-0" :style="'border-radius:' + previewRadius + ';background:' + previewSurface + ';border-color:' + previewBorder">
+                        <div class="aspect-[4/3] mb-2 flex items-center justify-center" :style="'border-radius:' + chipRadius + ';background:' + previewTint">
+                          <span :style="'color:' + accentColor" x-html="ABM.icon('cube','w-6 h-6')"></span>
+                        </div>
+                        <div class="text-[11px] font-bold truncate" :style="'color:' + previewText" x-text="p.name"></div>
+                        <div class="text-[11px] font-extrabold mt-0.5" :style="'color:' + accentColor" x-text="$money(p.price, {decimals:0})"></div>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="px-3 pb-3">
+                    <div class="w-full text-center py-2 text-[11px] font-bold text-white" :style="'border-radius:' + btnRadius + ';background:' + primaryColor">Add to cart</div>
+                  </div>
+                </div>
+                <p class="help mt-2">A miniature of the storefront using the colours, font, radius and header style above.</p>
+              </div>
+            </div>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs text-slate-500" x-text="dirty('theme') ? 'Unsaved changes on this tab' : 'All changes saved'"></span>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="dirty('theme')" @click="discard('theme')">Discard</button>
+              <button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save theme</button>
+            </div>
+          </div>
+        </form>
+
+      </div>
+    </div>
+
+    <!-- ===================================================== link picker modal -->
+    <div x-show="linkPicker.open" x-cloak class="modal-backdrop" @click.self="linkPicker.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="linkTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title" id="linkTitle">Choose a link</div>
+            <div class="text-xs text-slate-500">Storefront addresses are relative to the <span class="mono">shop/</span> folder.</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="linkPicker.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Filter links…" x-model.debounce.150ms="linkPicker.q" x-ref="linkQ" aria-label="Filter links">
+          </div>
+          <div class="cms-scroll rounded-xl border border-slate-200 divide-y divide-slate-200">
+            <template x-for="g in linkGroups" :key="g.group">
+              <div>
+                <div class="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 bg-slate-50" x-text="g.group"></div>
+                <template x-for="o in g.items" :key="o.url">
+                  <button type="button" class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50 min-w-0"
+                          :class="linkPicker.value === o.url && 'bg-navy-50'" @click="linkPicker.value = o.url">
+                    <span class="flex-none text-slate-400" x-html="ABM.icon(o.icon || 'arrow-right','w-4 h-4')"></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block text-sm font-medium text-slate-800 truncate" x-text="o.label"></span>
+                      <span class="block text-xs text-slate-500 mono truncate" x-text="o.url"></span>
+                    </span>
+                    <span class="flex-none text-emerald-600" x-show="linkPicker.value === o.url" x-html="ABM.icon('check','w-4 h-4')"></span>
+                  </button>
+                </template>
+              </div>
+            </template>
+            <template x-if="!linkGroups.length"><div class="p-3 text-sm text-slate-500">No link matches that search.</div></template>
+          </div>
+          <div>
+            <label class="label" for="w-link-custom">Or type any address</label>
+            <input id="w-link-custom" type="text" class="input mono" x-model.trim="linkPicker.value" placeholder="products.html?category=4">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="linkPicker.open = false">Cancel</button>
+          <button type="button" class="btn btn-primary" @click="applyLink()"><span x-html="ABM.icon('check')"></span>Use this link</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function websitePage() {
+      const { db, utils, ui, session } = ABM;
+      const clone = (o) => JSON.parse(JSON.stringify(o === undefined ? null : o));
+      const bySort = (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0);
+
+      const TABS = [
+        { key: 'branding', label: 'Branding & Hero', short: 'Branding', icon: 'sparkles' },
+        { key: 'announcement', label: 'Announcement bar', short: 'Announcement', icon: 'bell' },
+        { key: 'home', label: 'Home sections', short: 'Home', icon: 'grid' },
+        { key: 'pages', label: 'Pages', short: 'Pages', icon: 'document' },
+        { key: 'menu', label: 'Menu', short: 'Menu', icon: 'menu' },
+        { key: 'contact', label: 'Contact & Social', short: 'Contact', icon: 'phone-call' },
+        { key: 'commerce', label: 'Commerce', short: 'Commerce', icon: 'cart' },
+        { key: 'repair', label: 'Repair booking', short: 'Repairs', icon: 'wrench' },
+        { key: 'seo', label: 'SEO', short: 'SEO', icon: 'search' },
+        { key: 'theme', label: 'Theme & Colours', short: 'Theme', icon: 'palette' },
+      ];
+      const TAB_LABEL = (k) => (TABS.find((t) => t.key === k) || {}).label || k;
+
+      const ICON_NAMES = [
+        'shield-check', 'truck', 'wrench', 'banknotes', 'card', 'wallet', 'cart', 'bag', 'store', 'building',
+        'phone', 'phone-call', 'laptop', 'desktop', 'cpu', 'cube', 'tag', 'sparkles', 'star', 'heart',
+        'clock', 'check-circle', 'key', 'shield', 'scan', 'qr', 'barcode', 'users', 'user-group', 'map-pin',
+        'mail', 'globe', 'chat', 'ticket', 'document', 'image', 'refresh', 'calendar', 'trend-up', 'download',
+        'printer', 'scale', 'calculator', 'lock', 'brush', 'palette', 'archive', 'transfer', 'receipt', 'eye',
+      ];
+      const SOCIAL_FIELDS = [
+        { key: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/yourshop' },
+        { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/yourshop' },
+        { key: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@yourshop' },
+        { key: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@yourshop' },
+        { key: 'whatsapp', label: 'WhatsApp link', placeholder: 'https://wa.me/923001234567' },
+      ];
+      const COMMERCE_TOGGLES = [
+        { key: 'show_prices', label: 'Show prices', help: 'Hide to run the site as a catalogue only.' },
+        { key: 'allow_orders', label: 'Accept online orders', help: 'Turn off to disable the cart and checkout.' },
+        { key: 'cod_enabled', label: 'Cash on delivery', help: 'Customer pays the rider on delivery.' },
+        { key: 'bank_transfer_enabled', label: 'Bank transfer', help: 'Shows your account details at checkout.' },
+        { key: 'wallet_enabled', label: 'JazzCash / EasyPaisa', help: 'Mobile wallet payments at checkout.' },
+        { key: 'show_stock', label: 'Show stock levels', help: 'Displays “In stock / Out of stock” per product.' },
+        { key: 'allow_backorder', label: 'Allow ordering out-of-stock items', help: 'Customers can order what you have to source.' },
+        { key: 'whatsapp_orders', label: 'WhatsApp order button', help: 'Adds “Order on WhatsApp” next to the cart.' },
+      ];
+      const DEVICE_TYPES = [
+        { key: 'mobile', label: 'Mobile phone', icon: 'phone' },
+        { key: 'tablet', label: 'Tablet', icon: 'desktop' },
+        { key: 'laptop', label: 'Laptop', icon: 'laptop' },
+        { key: 'desktop', label: 'Desktop / AIO', icon: 'cpu' },
+        { key: 'smartwatch', label: 'Smartwatch', icon: 'clock' },
+      ];
+      const COLOR_FIELDS = [
+        { key: 'primary', label: 'Primary colour', help: 'Header, hero and main buttons.' },
+        { key: 'accent', label: 'Accent colour', help: 'Prices, badges and call-to-action buttons.' },
+        { key: 'background', label: 'Page background', help: 'Used in light mode only.' },
+      ];
+      const PRESETS = [
+        { key: 'navy', label: 'Abbott Navy', primary: '#1a336a', accent: '#10b981', background: '#f8fafc', mode: 'light' },
+        { key: 'midnight', label: 'Midnight', primary: '#111c34', accent: '#38bdf8', background: '#0b1220', mode: 'dark' },
+        { key: 'emerald', label: 'Emerald', primary: '#065f46', accent: '#f59e0b', background: '#f4fbf7', mode: 'light' },
+        { key: 'violet', label: 'Violet', primary: '#5b21b6', accent: '#f43f5e', background: '#faf7ff', mode: 'light' },
+        { key: 'sunset', label: 'Sunset', primary: '#9a3412', accent: '#0ea5e9', background: '#fff8f3', mode: 'light' },
+        { key: 'ocean', label: 'Ocean', primary: '#075985', accent: '#14b8a6', background: '#f1fafd', mode: 'light' },
+      ];
+      const SHOP_LINKS = [
+        { label: 'Home', url: 'index.html', icon: 'home' },
+        { label: 'All products', url: 'products.html', icon: 'cube' },
+        { label: 'Book a repair', url: 'repair.html', icon: 'wrench' },
+        { label: 'Contact us', url: 'contact.html', icon: 'phone-call' },
+        { label: 'Cart', url: 'cart.html', icon: 'cart' },
+        { label: 'Track an order', url: 'order.html', icon: 'truck' },
+      ];
+      const RADIUS = { sharp: '.375rem', square: '.375rem', soft: '1.25rem', rounded: '1rem', pill: '1.75rem' };
+      const BTN_RADIUS = { sharp: '.3rem', rounded: '.7rem', pill: '999px' };
+      const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+      const URL_RE = /^https?:\/\/\S+$/i;
+
+      const DEFAULTS = {
+        site: {
+          name: 'Abbott Mobile', tagline: '', logo: '', favicon: '', footer_text: '',
+          featured_category_ids: [], featured_product_ids: [], highlights: [],
+          hero: { badge: '', title: '', subtitle: '', cta_text: 'Shop now', cta_link: 'products.html', cta2_text: '', cta2_link: 'repair.html', image: '', style: 'gradient' },
+          announcement: { enabled: 1, text: '' },
+          contact: { phone: '', whatsapp: '', email: '', address: '', hours: '', map_url: '' },
+          social: { facebook: '', instagram: '', tiktok: '', youtube: '', whatsapp: '' },
+          theme: { primary: '#1a336a', accent: '#10b981', background: '#f8fafc', mode: 'light', font: 'Inter', radius: 'rounded', header_style: 'solid', button_style: 'rounded' },
+          seo: { title: '', description: '', keywords: '' },
+          commerce: { show_prices: 1, allow_orders: 1, cod_enabled: 1, bank_transfer_enabled: 1, wallet_enabled: 1, delivery_fee: 0, free_delivery_above: 0, fulfil_branch_id: 1, order_prefix: 'WEB', show_stock: 1, allow_backorder: 0, whatsapp_orders: 1, bank_details: '', min_order: 0, jazzcash_number: '', easypaisa_number: '', wallet_account_name: '' },
+          repair_booking: { enabled: 1, intro: '', device_types: [], show_prices: 1 },
+        },
+      };
+      const SUB_OBJECTS = ['hero', 'announcement', 'contact', 'social', 'theme', 'seo', 'commerce', 'repair_booking'];
+
+      const slugify = (s) => String(s || '').toLowerCase().trim().replace(/['"]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+      const nextId = (arr) => arr.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) + 1;
+      const str = (v) => (v === null || v === undefined ? '' : String(v));
+
+      /** Strip everything that could execute when the storefront renders this HTML. */
+      function sanitizeHtml(html) {
+        const box = document.createElement('div');
+        box.innerHTML = str(html);
+        box.querySelectorAll('script,style,iframe,object,embed,form,link,meta,base,noscript').forEach((n) => n.remove());
+        box.querySelectorAll('*').forEach((el) => {
+          Array.prototype.slice.call(el.attributes).forEach((a) => {
+            const n = a.name.toLowerCase(), v = str(a.value);
+            if (n.indexOf('on') === 0) el.removeAttribute(a.name);
+            else if ((n === 'href' || n === 'src' || n === 'xlink:href') && /^\s*(javascript|vbscript|data:text\/html)/i.test(v)) el.removeAttribute(a.name);
+            else if (n === 'style' && /expression\s*\(|javascript:/i.test(v)) el.removeAttribute(a.name);
+          });
+        });
+        return box.innerHTML;
+      }
+
+      function readCms() {
+        const raw = clone(db.cms()) || {};
+        const rs = raw.site || {};
+        const site = Object.assign({}, DEFAULTS.site, rs);
+        SUB_OBJECTS.forEach((k) => { site[k] = Object.assign({}, DEFAULTS.site[k], rs[k] || {}); });
+        site.name = str(site.name); site.tagline = str(site.tagline);
+        site.logo = str(site.logo); site.favicon = str(site.favicon); site.footer_text = str(site.footer_text);
+        site.hero.image = str(site.hero.image);
+        site.hero.style = site.hero.style === 'image' ? 'image' : 'gradient';
+        site.announcement.enabled = site.announcement.enabled ? 1 : 0;
+        site.announcement.text = str(site.announcement.text);
+        site.featured_category_ids = (Array.isArray(rs.featured_category_ids) ? rs.featured_category_ids : []).map(Number).filter((n) => !isNaN(n));
+        site.featured_product_ids = (Array.isArray(rs.featured_product_ids) ? rs.featured_product_ids : []).map(Number).filter((n) => !isNaN(n));
+        site.highlights = (Array.isArray(rs.highlights) ? rs.highlights : []).map((h) => ({ icon: str(h.icon) || 'sparkles', title: str(h.title), text: str(h.text) }));
+        site.repair_booking.device_types = (Array.isArray(site.repair_booking.device_types) ? site.repair_booking.device_types : []).map(String);
+        site.commerce.fulfil_branch_id = String(Number(site.commerce.fulfil_branch_id) || 1);
+        ['show_prices', 'allow_orders', 'cod_enabled', 'bank_transfer_enabled', 'wallet_enabled', 'show_stock', 'allow_backorder', 'whatsapp_orders'].forEach((k) => { site.commerce[k] = site.commerce[k] ? 1 : 0; });
+        ['delivery_fee', 'free_delivery_above', 'min_order'].forEach((k) => { site.commerce[k] = Number(site.commerce[k]) || 0; });
+        site.commerce.order_prefix = str(site.commerce.order_prefix).toUpperCase() || 'WEB';
+        site.commerce.bank_details = str(site.commerce.bank_details);
+        ['jazzcash_number', 'easypaisa_number', 'wallet_account_name'].forEach((k) => { site.commerce[k] = str(site.commerce[k]); });
+        site.repair_booking.enabled = site.repair_booking.enabled ? 1 : 0;
+        site.repair_booking.show_prices = site.repair_booking.show_prices ? 1 : 0;
+        site.repair_booking.intro = str(site.repair_booking.intro);
+        COLOR_FIELDS.forEach((c) => { if (!HEX_RE.test(str(site.theme[c.key]))) site.theme[c.key] = DEFAULTS.site.theme[c.key]; });
+        site.theme.mode = site.theme.mode === 'dark' ? 'dark' : 'light';
+        if (!['Inter', 'Poppins', 'Roboto'].includes(site.theme.font)) site.theme.font = 'Inter';
+        if (!['sharp', 'rounded', 'pill'].includes(site.theme.radius)) site.theme.radius = 'rounded';
+        if (!['solid', 'gradient', 'light'].includes(site.theme.header_style)) site.theme.header_style = 'solid';
+        if (!['rounded', 'pill', 'sharp'].includes(site.theme.button_style)) site.theme.button_style = 'rounded';
+        ['title', 'description', 'keywords'].forEach((k) => { site.seo[k] = str(site.seo[k]); });
+        Object.keys(site.contact).forEach((k) => { site.contact[k] = str(site.contact[k]); });
+        Object.keys(site.social).forEach((k) => { site.social[k] = str(site.social[k]); });
+
+        const pages = (Array.isArray(raw.pages) ? raw.pages : []).map((p, i) => ({
+          id: Number(p.id) || i + 1, slug: str(p.slug), title: str(p.title), content_html: str(p.content_html),
+          blocks: Array.isArray(p.blocks) ? JSON.parse(JSON.stringify(p.blocks)) : [],
+          is_published: p.is_published ? 1 : 0, show_in_menu: p.show_in_menu ? 1 : 0,
+          sort_order: Number(p.sort_order) || i + 1, updated_at: p.updated_at || null,
+        })).sort(bySort);
+        const menu = (Array.isArray(raw.menu) ? raw.menu : []).map((m, i) => ({
+          id: Number(m.id) || i + 1, label: str(m.label), url: str(m.url), sort_order: Number(m.sort_order) || i + 1, is_active: m.is_active ? 1 : 0,
+        })).sort(bySort);
+        const banners = (Array.isArray(raw.banners) ? raw.banners : []).map((b, i) => ({
+          id: Number(b.id) || i + 1, title: str(b.title), subtitle: str(b.subtitle), image: str(b.image), link: str(b.link),
+          color: HEX_RE.test(str(b.color)) ? str(b.color) : '#1a336a', is_active: b.is_active ? 1 : 0, sort_order: Number(b.sort_order) || i + 1,
+        })).sort(bySort);
+        const testimonials = (Array.isArray(raw.testimonials) ? raw.testimonials : []).map((t, i) => ({
+          id: Number(t.id) || i + 1, name: str(t.name), text: str(t.text),
+          rating: Math.min(5, Math.max(1, Number(t.rating) || 5)), is_active: t.is_active ? 1 : 0,
+        }));
+        return { site, pages, menu, banners, testimonials };
+      }
+
+      /** Each tab owns exactly the slice of the CMS document it saves. */
+      const SLICE = {
+        branding: (f) => ({ site: { name: f.site.name.trim(), tagline: f.site.tagline.trim(), logo: f.site.logo || null, favicon: f.site.favicon || null, hero: clone(f.site.hero) } }),
+        announcement: (f) => ({ site: { announcement: { enabled: f.site.announcement.enabled ? 1 : 0, text: f.site.announcement.text.trim() } } }),
+        home: (f) => ({
+          site: {
+            highlights: f.site.highlights.map((h) => ({ icon: h.icon, title: h.title.trim(), text: h.text.trim() })),
+            featured_category_ids: f.site.featured_category_ids.map(Number),
+            featured_product_ids: f.site.featured_product_ids.map(Number),
+          },
+          banners: f.banners.map((b, i) => ({ id: b.id, title: b.title.trim(), subtitle: b.subtitle.trim(), image: b.image || null, link: b.link.trim(), color: b.color, is_active: b.is_active ? 1 : 0, sort_order: i + 1 })),
+          testimonials: f.testimonials.map((t) => ({ id: t.id, name: t.name.trim(), text: t.text.trim(), rating: Number(t.rating) || 5, is_active: t.is_active ? 1 : 0 })),
+        }),
+        pages: (f) => ({
+          pages: f.pages.map((p, i) => ({
+            id: p.id, slug: slugify(p.slug), title: p.title.trim(), content_html: p.content_html,
+            blocks: Array.isArray(p.blocks) ? p.blocks.map((b, bi) => Object.assign({}, b, { id: b.id || bi + 1, sort_order: bi + 1 })) : [],
+            is_published: p.is_published ? 1 : 0, show_in_menu: p.show_in_menu ? 1 : 0, sort_order: i + 1, updated_at: p.updated_at || null,
+          })),
+        }),
+        menu: (f) => ({ menu: f.menu.map((m, i) => ({ id: m.id, label: m.label.trim(), url: m.url.trim(), sort_order: i + 1, is_active: m.is_active ? 1 : 0 })) }),
+        contact: (f) => ({ site: { contact: clone(f.site.contact), social: clone(f.site.social), footer_text: f.site.footer_text.trim() } }),
+        commerce: (f) => {
+          const c = clone(f.site.commerce);
+          ['show_prices', 'allow_orders', 'cod_enabled', 'bank_transfer_enabled', 'wallet_enabled', 'show_stock', 'allow_backorder', 'whatsapp_orders'].forEach((k) => { c[k] = c[k] ? 1 : 0; });
+          ['delivery_fee', 'free_delivery_above', 'min_order'].forEach((k) => { c[k] = Math.max(0, Number(c[k]) || 0); });
+          c.fulfil_branch_id = Number(c.fulfil_branch_id) || 1;
+          c.order_prefix = String(c.order_prefix || 'WEB').toUpperCase().trim();
+          c.bank_details = String(c.bank_details || '').trim();
+          ['jazzcash_number', 'easypaisa_number', 'wallet_account_name'].forEach((k) => { c[k] = String(c[k] || '').trim(); });
+          return { site: { commerce: c } };
+        },
+        repair: (f) => ({ site: { repair_booking: { enabled: f.site.repair_booking.enabled ? 1 : 0, intro: f.site.repair_booking.intro.trim(), device_types: f.site.repair_booking.device_types.slice(), show_prices: f.site.repair_booking.show_prices ? 1 : 0 } } }),
+        seo: (f) => ({ site: { seo: { title: f.site.seo.title.trim(), description: f.site.seo.description.trim(), keywords: f.site.seo.keywords.trim() } } }),
+        theme: (f) => ({ site: { theme: clone(f.site.theme) } }),
+      };
+
+      return {
+        canEdit: session.can('website.edit'),
+        tabs: TABS, tab: 'branding', busy: false, leaving: false,
+        iconNames: ICON_NAMES, socialFields: SOCIAL_FIELDS, commerceToggles: COMMERCE_TOGGLES,
+        deviceTypes: DEVICE_TYPES, colorFields: COLOR_FIELDS, presets: PRESETS,
+        branches: db.all('branches').filter((b) => b.is_active),
+        currency: db.setting('currency_symbol', 'Rs.'),
+        f: readCms(), snap: {}, errors: {},
+        prodQ: '',
+        pageSel: null, slugLocked: false,
+        ed: { raw: false, prompt: null, url: '', range: null },
+        linkPicker: { open: false, q: '', value: '', target: null },
+
+        /* ------------------------------------------------------------- init */
+        init() {
+          this.snapshotAll();
+          const t = (utils.qs('tab', '') || (location.hash || '').replace('#', '')).toLowerCase();
+          if (TABS.some((x) => x.key === t)) this.tab = t;
+          this.centreTabPill();
+          if (this.tab === 'pages') this.$nextTick(() => this.selectPage(Number(utils.qs('page', 0)) || (this.f.pages[0] ? this.f.pages[0].id : null)));
+          // the branch <select> gets its <option>s from an x-for, which Alpine creates AFTER x-model has
+          // already tried to apply the value — re-apply it once the options are really in the DOM
+          this.$nextTick(() => { const el = document.getElementById('w-branch'); if (el) el.value = String(this.f.site.commerce.fulfil_branch_id); });
+          window.addEventListener('beforeunload', (e) => { if (this.canEdit && this.anyDirty && !this.leaving) { e.preventDefault(); e.returnValue = ''; } });
+        },
+        setTab(key) {
+          this.tab = key; this.errors = {};
+          try { const u = new URL(location.href); u.searchParams.set('tab', key); history.replaceState(null, '', u.toString()); } catch (e) { /* ignore */ }
+          this.centreTabPill();
+          if (key === 'pages' && !this.cur && this.f.pages.length) this.$nextTick(() => this.selectPage(this.f.pages[0].id));
+        },
+        /** Keep the active pill visible in the mobile rail without scrolling the page itself. */
+        centreTabPill() {
+          this.$nextTick(() => {
+            const wrap = this.$el.querySelector('.tabs-pill');
+            const el = wrap && wrap.querySelector('[data-tab="' + this.tab + '"]');
+            if (wrap && el) wrap.scrollLeft = Math.max(0, el.offsetLeft - (wrap.clientWidth - el.offsetWidth) / 2);
+          });
+        },
+
+        /* --------------------------------------------------- dirty tracking */
+        snapshotAll() { Object.keys(SLICE).forEach((k) => { this.snap[k] = JSON.stringify(SLICE[k](this.f)); }); },
+        dirty(tab) { try { return JSON.stringify(SLICE[tab](this.f)) !== this.snap[tab]; } catch (e) { return false; } },
+        get anyDirty() { return Object.keys(SLICE).some((k) => this.dirty(k)); },
+        discard(tab) {
+          const fresh = readCms();
+          if (tab === 'home') { this.f.site.highlights = fresh.site.highlights; this.f.site.featured_category_ids = fresh.site.featured_category_ids; this.f.site.featured_product_ids = fresh.site.featured_product_ids; this.f.banners = fresh.banners; this.f.testimonials = fresh.testimonials; }
+          else if (tab === 'pages') { this.f.pages = fresh.pages; this.pageSel = this.f.pages[0] ? this.f.pages[0].id : null; this.$nextTick(() => this.loadEditor()); }
+          else if (tab === 'menu') this.f.menu = fresh.menu;
+          else if (tab === 'branding') { ['name', 'tagline', 'logo', 'favicon'].forEach((k) => { this.f.site[k] = fresh.site[k]; }); this.f.site.hero = fresh.site.hero; }
+          else if (tab === 'contact') { this.f.site.contact = fresh.site.contact; this.f.site.social = fresh.site.social; this.f.site.footer_text = fresh.site.footer_text; }
+          else if (tab === 'announcement') this.f.site.announcement = fresh.site.announcement;
+          else if (tab === 'commerce') this.f.site.commerce = fresh.site.commerce;
+          else if (tab === 'repair') this.f.site.repair_booking = fresh.site.repair_booking;
+          else if (tab === 'seo') this.f.site.seo = fresh.site.seo;
+          else if (tab === 'theme') this.f.site.theme = fresh.site.theme;
+          this.errors = {};
+          ui.toast('Changes discarded.', 'info');
+        },
+
+        /* ------------------------------------------------------- derived ui */
+        get siteInitial() { return String(this.f.site.name || 'A').trim().charAt(0).toUpperCase() || 'A'; },
+        get publishedCount() { return this.f.pages.filter((p) => p.is_published).length; },
+        get activeBanners() { return this.f.banners.filter((b) => b.is_active).length; },
+        get pendingOrders() { return db.all('online_orders').filter((o) => o.status === 'pending').length; },
+        get fulfilBranchName() { return db.branchName(Number(this.f.site.commerce.fulfil_branch_id) || 1); },
+        get serviceCount() { return db.all('products').filter((p) => p.is_active && db.productType(p) === 'service').length; },
+        get categories() {
+          const counts = {};
+          db.all('products').forEach((p) => { if (p.is_active) counts[p.category_id] = (counts[p.category_id] || 0) + 1; });
+          return db.all('categories').filter((c) => c.is_active).map((c) => ({ id: Number(c.id), name: c.name, count: counts[c.id] || 0 }));
+        },
+        get featuredCategories() {
+          return this.f.site.featured_category_ids.map((id) => {
+            const c = db.find('categories', id);
+            return { id: Number(id), name: c ? c.name : 'Deleted category #' + id };
+          });
+        },
+        get seoDescriptionPreview() {
+          const d = (this.f.site.seo.description || '').trim();
+          return d ? (d.length > 165 ? d.slice(0, 165) + '…' : d) : 'Your meta description appears here — one or two sentences about the shop.';
+        },
+
+        /* ------------------------------------------------- generic helpers */
+        move(arr, i, dir) {
+          const j = i + dir;
+          if (j < 0 || j >= arr.length) return;
+          const item = arr[i]; arr.splice(i, 1); arr.splice(j, 0, item);
+        },
+        async removeRow(arr, i, what) {
+          const ok = await ui.confirm({ title: 'Remove this ' + what + '?', message: 'It disappears from the website as soon as you save this tab.', confirmText: 'Remove', danger: true });
+          if (ok) arr.splice(i, 1);
+        },
+        onImageFile(ev, target, maxKb) {
+          const file = ev.target.files && ev.target.files[0];
+          ev.target.value = '';
+          this.readImage(file, maxKb || 400, (dataUrl) => {
+            if (target === 'hero.image') this.f.site.hero.image = dataUrl;
+            else this.f.site[target] = dataUrl;
+          });
+        },
+        onRowImage(ev, arr, i) {
+          const file = ev.target.files && ev.target.files[0];
+          ev.target.value = '';
+          this.readImage(file, 400, (dataUrl) => { arr[i].image = dataUrl; });
+        },
+        readImage(file, maxKb, done) {
+          if (!file) return;
+          if (!/^image\/(png|jpeg|webp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/.test(file.type)) { ui.error('Use a PNG, JPG, WEBP or SVG image.'); return; }
+          if (file.size > maxKb * 1024) { ui.error('The image must be under ' + maxKb + ' KB (this one is ' + Math.round(file.size / 1024) + ' KB).'); return; }
+          const reader = new FileReader();
+          reader.onerror = () => ui.error('The image could not be read.');
+          reader.onload = () => { done(String(reader.result || '')); ui.toast('Image loaded — save this tab to keep it.', 'info'); };
+          reader.readAsDataURL(file);
+        },
+
+        /* ------------------------------------------------------ home: lists */
+        addHighlight() { this.f.site.highlights.push({ icon: 'sparkles', title: '', text: '' }); },
+        toggleCategory(id) {
+          id = Number(id);
+          const i = this.f.site.featured_category_ids.indexOf(id);
+          if (i >= 0) this.f.site.featured_category_ids.splice(i, 1); else this.f.site.featured_category_ids.push(id);
+        },
+        prodInfo(id) {
+          const p = db.find('products', id);
+          if (!p) return { exists: false, label: 'Deleted product #' + id, price: 0, image: '', stockText: 'no longer in the catalogue' };
+          const tracked = db.isStockTracked(p);
+          const qty = tracked ? ABM.stock.qty(Number(this.f.site.commerce.fulfil_branch_id) || 1, p.id) : 0;
+          return {
+            exists: true, label: db.productLabel(p.id), price: Number(p.retail_price) || 0, image: p.image || '',
+            stockText: !p.is_active ? 'inactive product' : (!tracked ? 'service — no stock' : (qty > 0 ? qty + ' in stock' : 'out of stock')),
+          };
+        },
+        get featuredProducts() { return this.f.site.featured_product_ids.map((id) => Object.assign({ id: Number(id) }, this.prodInfo(id))); },
+        get productResults() {
+          const q = this.prodQ.trim().toLowerCase();
+          if (!q) return [];
+          const chosen = this.f.site.featured_product_ids.map(Number);
+          return db.all('products')
+            .filter((p) => p.is_active && chosen.indexOf(Number(p.id)) < 0)
+            .filter((p) => [p.name, p.model, p.sku, p.variant, p.barcode, db.brandName(p.brand_id), db.categoryName(p.category_id)].some((v) => String(v || '').toLowerCase().includes(q)))
+            .slice(0, 10)
+            .map((p) => Object.assign({ id: Number(p.id) }, this.prodInfo(p.id)));
+        },
+        addFeatured(id) {
+          id = Number(id);
+          if (this.f.site.featured_product_ids.indexOf(id) >= 0) return;
+          this.f.site.featured_product_ids.push(id);
+          this.prodQ = '';
+          ui.toast(db.productLabel(id) + ' added to featured products.', 'success');
+        },
+        addBanner() { this.f.banners.push({ id: nextId(this.f.banners), title: '', subtitle: '', image: '', link: 'products.html', color: this.f.site.theme.primary, is_active: 1, sort_order: this.f.banners.length + 1 }); },
+        addTestimonial() { this.f.testimonials.push({ id: nextId(this.f.testimonials), name: '', text: '', rating: 5, is_active: 1 }); },
+
+        /* ------------------------------------------------------------ pages */
+        get cur() { return this.f.pages.find((p) => p.id === this.pageSel) || null; },
+        selectPage(id) {
+          if (!id) { this.pageSel = null; return; }
+          this.pageSel = Number(id); this.slugLocked = !!(this.cur && this.cur.slug); this.ed.raw = false; this.ed.prompt = null;
+          this.$nextTick(() => this.loadEditor());
+        },
+        loadEditor() {
+          const el = this.$refs.editor;
+          if (el) el.innerHTML = sanitizeHtml(this.cur ? this.cur.content_html : '');
+        },
+        /* ------------------------------------------- page sections (widgets) ---- */
+        get allCategories() { return ABM.db.all('categories').filter((c) => c.is_active); },
+        searchProducts(q) {
+          const s = String(q || '').trim().toLowerCase();
+          if (s.length < 2) return [];
+          return ABM.db.all('products')
+            .filter((p) => p.is_active && [p.name, p.model, p.variant, p.sku, ABM.db.brandName(p.brand_id)].join(' ').toLowerCase().includes(s))
+            .slice(0, 12);
+        },
+        addPickedProduct(block, id) {
+          block.product_ids = block.product_ids || [];
+          if (!block.product_ids.includes(id)) block.product_ids.push(id);
+        },
+        blockIcon(type) { return ({ products: 'grid', banner: 'image', cta: 'sparkles', richtext: 'document' })[type] || 'grid'; },
+        blockLabel(type) { return ({ products: 'Product grid', banner: 'Banner', cta: 'Call to action', richtext: 'Text section' })[type] || 'Section'; },
+        blockSummary(b) {
+          if (b.type === 'products') {
+            const n = this.blockPreviewCount(b);
+            const src = b.mode === 'category' ? ABM.db.categoryName(b.category_id) : b.mode === 'tag' ? ('#' + (b.tag || '')) : b.mode === 'newest' ? 'newest arrivals' : 'hand-picked';
+            return `${n} product(s) · ${src}`;
+          }
+          if (b.type === 'banner') return b.link ? 'links to ' + b.link : 'no link set';
+          if (b.type === 'cta') return (b.cta_text || 'Button') + ' → ' + (b.link || 'no link');
+          return (b.html || '').replace(/<[^>]*>/g, '').slice(0, 60) || 'empty';
+        },
+        /** Resolve a product block the same way the storefront does, so the count matches. */
+        blockProducts(b) {
+          const active = ABM.db.all('products').filter((p) => p.is_active && ABM.db.productType(p) !== 'service');
+          let list = [];
+          if (b.mode === 'category') list = active.filter((p) => String(p.category_id) === String(b.category_id));
+          else if (b.mode === 'tag') list = active.filter((p) => (p.tags || []).includes(String(b.tag || '').toLowerCase()));
+          else if (b.mode === 'newest') list = [...active].sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
+          else list = (b.product_ids || []).map((id) => active.find((p) => p.id === id)).filter(Boolean);
+          return list.slice(0, Math.max(1, Number(b.limit) || 8));
+        },
+        blockPreviewCount(b) { return this.blockProducts(b).length; },
+        addBlock(type) {
+          if (!this.cur) return;
+          if (!Array.isArray(this.cur.blocks)) this.cur.blocks = [];
+          const id = this.cur.blocks.reduce((m, b) => Math.max(m, Number(b.id) || 0), 0) + 1;
+          const base = { id, type, title: '', subtitle: '' };
+          const extra = type === 'products' ? { mode: 'pick', product_ids: [], category_id: String((this.allCategories[0] || {}).id || ''), tag: '', limit: 8 }
+            : type === 'banner' ? { link: 'products.html', cta_text: 'Shop now', color: '#1a336a', image: '' }
+              : type === 'cta' ? { link: 'contact.html', cta_text: 'Contact us' }
+                : { html: '' };
+          this.cur.blocks.push(Object.assign(base, extra));
+        },
+        moveBlock(i, dir) {
+          const list = this.cur.blocks; const j = i + dir;
+          if (j < 0 || j >= list.length) return;
+          const [b] = list.splice(i, 1); list.splice(j, 0, b);
+        },
+        removeBlock(i) { this.cur.blocks.splice(i, 1); },
+
+        newPage() {
+          const p = { id: nextId(this.f.pages), slug: '', title: 'New page', content_html: '<p></p>', blocks: [], is_published: 0, show_in_menu: 0, sort_order: this.f.pages.length + 1, updated_at: null };
+          this.f.pages.push(p);
+          this.tab = 'pages';
+          this.pageSel = p.id; this.slugLocked = false; this.ed.raw = false;
+          this.$nextTick(() => { this.loadEditor(); const el = document.getElementById('w-pg-title'); if (el) { el.focus(); el.select(); } });
+        },
+        onPageTitle(v) {
+          if (!this.cur) return;
+          this.cur.title = v;
+          if (!this.slugLocked) this.cur.slug = slugify(v);
+        },
+        onPageSlug(v) { if (!this.cur) return; this.slugLocked = true; this.cur.slug = slugify(v); },
+        async deletePage() {
+          if (!this.cur) return;
+          const p = this.cur;
+          const ok = await ui.confirm({ title: 'Delete “' + (p.title || 'Untitled') + '”?', message: 'The page is removed from the website immediately. Menu links pointing at it will stop working.', confirmText: 'Delete page', danger: true });
+          if (!ok) return;
+          const i = this.f.pages.findIndex((x) => x.id === p.id);
+          if (i >= 0) this.f.pages.splice(i, 1);
+          this.pageSel = this.f.pages[0] ? this.f.pages[0].id : null;
+          this.persist('pages');
+          this.snap.pages = JSON.stringify(SLICE.pages(this.f));
+          db.audit('website.update', 'cms', null, 'Page deleted: ' + (p.title || p.slug));
+          ui.success('Page deleted.');
+          this.$nextTick(() => this.loadEditor());
+        },
+
+        /* --------------------------------------------- rich text editor */
+        exec(cmd, val) {
+          const el = this.$refs.editor;
+          if (!el || this.ed.raw) return;
+          el.focus();
+          try { document.execCommand('styleWithCSS', false, false); } catch (e) { /* not supported */ }
+          try { document.execCommand(cmd, false, val === undefined ? null : val); } catch (e) { ui.error('That formatting command is not available in this browser.'); }
+          this.syncEditor();
+        },
+        clearFormat() { this.exec('removeFormat'); this.exec('formatBlock', '<p>'); },
+        syncEditor() { const el = this.$refs.editor; if (el && this.cur) this.cur.content_html = el.innerHTML; },
+        toggleRaw() {
+          if (!this.ed.raw) { this.syncEditor(); this.ed.raw = true; }
+          else { this.ed.raw = false; this.$nextTick(() => this.loadEditor()); }
+          this.ed.prompt = null;
+        },
+        openRtePrompt(kind) {
+          if (this.ed.raw) { ui.warn('Switch off the HTML view first.'); return; }
+          const sel = window.getSelection();
+          this.ed.range = sel && sel.rangeCount && this.$refs.editor && this.$refs.editor.contains(sel.anchorNode) ? sel.getRangeAt(0).cloneRange() : null;
+          this.ed.prompt = kind; this.ed.url = kind === 'link' ? 'https://' : 'https://';
+          this.$nextTick(() => this.$refs.rteUrl && this.$refs.rteUrl.focus());
+        },
+        applyRtePrompt() {
+          const url = String(this.ed.url || '').trim();
+          const kind = this.ed.prompt;
+          if (!url || url === 'https://') { ui.error('Enter an address first.'); return; }
+          if (/^\s*javascript:/i.test(url)) { ui.error('That address is not allowed.'); return; }
+          const el = this.$refs.editor;
+          if (!el) return;
+          el.focus();
+          if (this.ed.range) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(this.ed.range); }
+          if (kind === 'image') this.exec('insertImage', url);
+          else {
+            const sel = window.getSelection();
+            if (sel && sel.isCollapsed) this.exec('insertHTML', '<a href="' + utils.escape(url) + '">' + utils.escape(url) + '</a>');
+            else this.exec('createLink', url);
+          }
+          this.ed.prompt = null; this.ed.url = ''; this.ed.range = null;
+        },
+
+        /* -------------------------------------------------------- menu tab */
+        addMenuItem(label, url) {
+          this.f.menu.push({ id: nextId(this.f.menu), label: typeof label === 'string' ? label : '', url: typeof url === 'string' ? url : 'index.html', sort_order: this.f.menu.length + 1, is_active: 1 });
+        },
+        get menuSuggestions() {
+          const urls = this.f.menu.map((m) => m.url);
+          return this.f.pages.filter((p) => p.show_in_menu && p.slug && urls.indexOf('page.html?slug=' + p.slug) < 0).map((p) => ({ slug: p.slug, title: p.title || p.slug }));
+        },
+
+        /* ------------------------------------------------- link picker modal */
+        openLink(target, current) {
+          this.linkPicker = { open: true, q: '', value: String(current || ''), target };
+          this.$nextTick(() => this.$refs.linkQ && this.$refs.linkQ.focus());
+        },
+        get linkGroups() {
+          const q = this.linkPicker.q.trim().toLowerCase();
+          const groups = [
+            { group: 'Shop pages', items: SHOP_LINKS.slice() },
+            { group: 'CMS pages', items: this.f.pages.filter((p) => p.slug).map((p) => ({ label: p.title || p.slug, url: 'page.html?slug=' + p.slug, icon: 'document' })) },
+            { group: 'Categories', items: this.categories.map((c) => ({ label: c.name, url: 'products.html?category=' + c.id, icon: 'tag' })) },
+          ];
+          return groups
+            .map((g) => ({ group: g.group, items: q ? g.items.filter((o) => (o.label + ' ' + o.url).toLowerCase().includes(q)) : g.items }))
+            .filter((g) => g.items.length);
+        },
+        applyLink() {
+          const v = String(this.linkPicker.value || '').trim();
+          const t = this.linkPicker.target;
+          if (!v) { ui.error('Pick a link or type an address.'); return; }
+          if (t === 'hero.cta_link') this.f.site.hero.cta_link = v;
+          else if (t === 'hero.cta2_link') this.f.site.hero.cta2_link = v;
+          else if (String(t).startsWith('banner:')) { const i = Number(String(t).split(':')[1]); if (this.f.banners[i]) this.f.banners[i].link = v; }
+          else if (String(t).startsWith('menu:')) {
+            const i = Number(String(t).split(':')[1]);
+            if (this.f.menu[i]) { this.f.menu[i].url = v; if (!this.f.menu[i].label) { const opt = this.linkGroups.flatMap((g) => g.items).find((o) => o.url === v); if (opt) this.f.menu[i].label = opt.label; } }
+          }
+          this.linkPicker.open = false;
+        },
+
+        /* ------------------------------------------------------- theme tab */
+        isPreset(p) { const t = this.f.site.theme; return t.primary.toLowerCase() === p.primary && t.accent.toLowerCase() === p.accent && t.mode === p.mode; },
+        applyPreset(p) {
+          this.f.site.theme.primary = p.primary; this.f.site.theme.accent = p.accent;
+          this.f.site.theme.background = p.background; this.f.site.theme.mode = p.mode;
+          ui.toast('“' + p.label + '” applied to the preview — save to publish it.', 'info');
+        },
+        applyToSoftware() {
+          const hex = this.f.site.theme.primary;
+          if (!HEX_RE.test(hex)) { ui.error('Enter a valid 6-digit hex colour first, e.g. #1a336a.'); return; }
+          ABM.theme.setCustom(hex);
+          db.audit('theme.custom', 'settings', null, 'Admin accent set from website theme (' + hex + ')');
+          ui.success('The admin software now uses ' + hex + ' on this device.');
+        },
+        scaleOf(hex, fallback) { return ABM.theme.shadeScale(HEX_RE.test(String(hex)) ? hex : fallback) || ABM.theme.shadeScale(fallback); },
+        get pScale() { return this.scaleOf(this.f.site.theme.primary, '#1a336a'); },
+        get aScale() { return this.scaleOf(this.f.site.theme.accent, '#10b981'); },
+        get previewDark() { return this.f.site.theme.mode === 'dark'; },
+        get primaryColor() { return 'rgb(' + this.pScale[this.previewDark ? 600 : 700] + ')'; },
+        get accentColor() { return 'rgb(' + this.aScale[this.previewDark ? 400 : 600] + ')'; },
+        get previewFont() { return "'" + (this.f.site.theme.font || 'Inter') + "', Inter, ui-sans-serif, system-ui, sans-serif"; },
+        get previewBg() { return this.previewDark ? '#0b1220' : (HEX_RE.test(this.f.site.theme.background) ? this.f.site.theme.background : '#f8fafc'); },
+        get previewSurface() { return this.previewDark ? '#151d30' : '#ffffff'; },
+        get previewText() { return this.previewDark ? '#e2e8f0' : '#0f172a'; },
+        get previewBorder() { return this.previewDark ? 'rgba(255,255,255,.10)' : 'rgba(15,23,42,.10)'; },
+        get previewTint() { return 'rgb(' + this.aScale[500] + ' / .14)'; },
+        get previewRadius() { return RADIUS[this.f.site.theme.radius] || '1rem'; },
+        get chipRadius() { return this.f.site.theme.radius === 'sharp' ? '.3rem' : '.6rem'; },
+        get btnRadius() { return BTN_RADIUS[this.f.site.theme.button_style] || '.7rem'; },
+        get headerBg() { return 'rgb(' + this.pScale[900] + ')'; },
+        get logoChipBg() { return this.f.site.theme.header_style === 'light' ? 'rgb(' + this.pScale[100] + ')' : 'rgba(255,255,255,.18)'; },
+        get headerStyleCss() {
+          const s = this.f.site.theme.header_style;
+          if (s === 'light') return 'background:' + this.previewSurface + ';color:' + this.previewText + ';border-bottom:1px solid ' + this.previewBorder;
+          if (s === 'gradient') return 'background:linear-gradient(90deg, rgb(' + this.pScale[900] + '), rgb(' + this.pScale[700] + '));color:#fff';
+          return 'background:rgb(' + this.pScale[900] + ');color:#fff';
+        },
+        get heroStyleCss() {
+          const base = 'color:#fff;';
+          if (this.f.site.hero.style === 'image' && this.f.site.hero.image) {
+            return base + 'background-image:linear-gradient(90deg, rgb(' + this.pScale[950] + ' / .85), rgb(' + this.pScale[800] + ' / .55)), url(' + JSON.stringify(this.f.site.hero.image) + ');background-size:cover;background-position:center';
+          }
+          return base + 'background:linear-gradient(135deg, rgb(' + this.pScale[800] + '), rgb(' + this.pScale[600] + '))';
+        },
+        get previewProducts() {
+          const ids = this.f.site.featured_product_ids.map(Number);
+          let list = ids.map((id) => db.find('products', id)).filter(Boolean);
+          if (list.length < 2) list = list.concat(db.all('products').filter((p) => p.is_active && ids.indexOf(Number(p.id)) < 0));
+          if (!list.length) return [{ id: 'a', name: 'Sample product', price: 24999 }, { id: 'b', name: 'Another product', price: 3499 }];
+          return list.slice(0, 2).map((p) => ({ id: p.id, name: p.name, price: Number(p.retail_price) || 0 }));
+        },
+        toggleDeviceType(key) {
+          const arr = this.f.site.repair_booking.device_types;
+          const i = arr.indexOf(key);
+          if (i >= 0) arr.splice(i, 1); else arr.push(key);
+        },
+
+        /* ------------------------------------------------ validate & save */
+        errorsFor(tab) {
+          const e = {}; const s = this.f.site;
+          if (tab === 'branding') {
+            if (!s.name.trim()) e.name = 'The site name is required.';
+            if (!s.hero.title.trim()) e['hero.title'] = 'A hero headline is required.';
+            if (s.hero.style === 'image' && !s.hero.image) e['hero.image'] = 'Upload a hero image or switch the style back to gradient.';
+          }
+          if (tab === 'announcement' && s.announcement.enabled && !s.announcement.text.trim()) e.announcement = 'Enter the text, or switch the bar off.';
+          if (tab === 'home') {
+            s.highlights.forEach((h, i) => { if (!h.title.trim()) e['hl.' + i] = 'A title is required.'; });
+            this.f.banners.forEach((b, i) => { if (!b.title.trim()) e['bn.' + i] = 'A banner title is required.'; });
+            this.f.testimonials.forEach((t, i) => { if (!t.name.trim()) e['ts.' + i] = 'A name is required.'; if (!t.text.trim()) e['tst.' + i] = 'A quote is required.'; });
+          }
+          if (tab === 'pages') {
+            const p = this.cur;
+            if (p) {
+              if (!p.title.trim()) e['pg.title'] = 'A page title is required.';
+              if (!p.slug) e['pg.slug'] = 'A slug is required.';
+              else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(p.slug)) e['pg.slug'] = 'Use lower-case letters, numbers and single dashes.';
+              else if (this.f.pages.some((x) => x.id !== p.id && x.slug === p.slug)) e['pg.slug'] = 'Another page already uses this slug.';
+            }
+            const bad = this.f.pages.find((x) => !x.title.trim() || !x.slug);
+            if (bad && (!p || bad.id !== p.id)) { e['pg.other'] = 'The page “' + (bad.title || 'Untitled') + '” still needs a title and a slug.'; }
+          }
+          if (tab === 'menu') {
+            this.f.menu.forEach((m, i) => {
+              if (!m.label.trim()) e['mn.' + i] = 'A label is required.';
+              if (!m.url.trim()) e['mnu.' + i] = 'A link is required.';
+              else if (/^\s*javascript:/i.test(m.url)) e['mnu.' + i] = 'That address is not allowed.';
+            });
+          }
+          if (tab === 'contact') {
+            if (s.contact.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s.contact.email)) e.email = 'Enter a valid email address.';
+            if (s.contact.map_url && !URL_RE.test(s.contact.map_url)) e.map_url = 'Enter a full https:// address.';
+            SOCIAL_FIELDS.forEach((x) => { const v = s.social[x.key]; if (v && !URL_RE.test(v)) e['social.' + x.key] = 'Enter a full https:// address.'; });
+          }
+          if (tab === 'commerce') {
+            const c = s.commerce;
+            if (!(Number(c.delivery_fee) >= 0)) e.delivery_fee = 'Must be zero or more.';
+            if (!(Number(c.free_delivery_above) >= 0)) e.free_delivery_above = 'Must be zero or more.';
+            if (!(Number(c.min_order) >= 0)) e.min_order = 'Must be zero or more.';
+            if (!/^[A-Za-z]{2,5}$/.test(String(c.order_prefix || ''))) e.order_prefix = '2–5 letters, e.g. WEB.';
+            if (!Number(c.fulfil_branch_id)) e.fulfil_branch_id = 'Choose the branch that fulfils online orders.';
+            if (c.bank_transfer_enabled && !String(c.bank_details || '').trim()) e.bank_details = 'Bank transfer is on — add the account details customers should pay into.';
+            if (c.wallet_enabled) {
+              if (!String(c.jazzcash_number || '').trim()) e.jazzcash_number = 'Wallet payments are on — add the JazzCash number customers should send to.';
+              if (!String(c.easypaisa_number || '').trim()) e.easypaisa_number = 'Wallet payments are on — add the EasyPaisa number customers should send to.';
+            }
+          }
+          if (tab === 'repair' && s.repair_booking.enabled && !s.repair_booking.device_types.length) e.device_types = 'Pick at least one device type customers can book.';
+          if (tab === 'seo' && s.seo.title.length > 70) e.seo_title = 'Keep the title under 70 characters so Google does not cut it off.';
+          if (tab === 'theme') COLOR_FIELDS.forEach((c) => { if (!HEX_RE.test(String(s.theme[c.key]))) e['theme.' + c.key] = 'Enter a 6-digit hex colour, e.g. #1a336a.'; });
+          return e;
+        },
+        validate(tab) { this.errors = this.errorsFor(tab); return !Object.keys(this.errors).length; },
+        persist(tab) {
+          if (!this.canEdit) throw new Error('Your role can view the website settings but not change them.');
+          const patch = SLICE[tab](this.f);
+          const cur = db.cms() || {};
+          if (patch.site) patch.site = Object.assign({}, cur.site || {}, patch.site);
+          db.saveCms(patch);
+        },
+        /** Commit the live contenteditable and scrub every page's HTML before it is stored. */
+        prepPages() {
+          if (this.cur) { this.syncEditor(); this.cur.updated_at = utils.now(); }
+          this.f.pages.forEach((p) => { p.content_html = sanitizeHtml(p.content_html); });
+        },
+        save(tab) {
+          if (tab === 'pages' && this.cur) this.syncEditor();
+          if (!this.validate(tab)) { ui.error('Please fix the highlighted fields.'); return; }
+          this.busy = true;
+          try {
+            if (tab === 'pages') this.prepPages();
+            this.persist(tab);
+            this.snap[tab] = JSON.stringify(SLICE[tab](this.f));
+            db.audit('website.update', 'cms', null, TAB_LABEL(tab) + ' updated');
+            ui.success(TAB_LABEL(tab) + ' saved — the storefront is live with these changes.');
+            if (tab === 'pages') this.$nextTick(() => this.loadEditor());
+          } catch (err) {
+            ui.error(err.message || 'Could not save the website content.');
+          } finally { this.busy = false; }
+        },
+        saveAll() {
+          const dirtyTabs = TABS.filter((t) => this.dirty(t.key));
+          if (!dirtyTabs.length) { ui.toast('Nothing to save.', 'info'); return; }
+          for (const t of dirtyTabs) {
+            const errs = this.errorsFor(t.key);
+            if (Object.keys(errs).length) { this.tab = t.key; this.errors = errs; ui.error('Fix the highlighted fields on “' + t.label + '” first.'); return; }
+          }
+          this.busy = true;
+          try {
+            dirtyTabs.forEach((t) => {
+              if (t.key === 'pages') this.prepPages();
+              this.persist(t.key);
+              this.snap[t.key] = JSON.stringify(SLICE[t.key](this.f));
+            });
+            db.audit('website.update', 'cms', null, 'Saved: ' + dirtyTabs.map((t) => t.label).join(', '));
+            ui.success('Saved ' + dirtyTabs.length + ' section' + (dirtyTabs.length === 1 ? '' : 's') + ' — the storefront is up to date.');
+            if (dirtyTabs.some((t) => t.key === 'pages')) this.$nextTick(() => this.loadEditor());
+          } catch (err) {
+            ui.error(err.message || 'Could not save the website content.');
+          } finally { this.busy = false; }
+        },
+        async resetDemo() {
+          if (!this.canEdit) { ui.error('Your role can view the website settings but not change them.'); return; }
+          const ok = await ui.confirm({
+            title: 'Reset website content to demo?',
+            message: 'Branding, hero, home sections, pages, menu, contact details, commerce settings and colours all go back to the original demo content. Products, orders, sales and repairs are not touched.',
+            confirmText: 'Reset website', danger: true,
+          });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const seed = typeof window.ABM_SEED === 'function' ? window.ABM_SEED() : null;
+            if (!seed || !seed.cms) throw new Error('The demo content is not available in this browser.');
+            db.saveCms(clone(seed.cms));
+            db.audit('website.update', 'cms', null, 'Website content reset to the demo version');
+            this.f = readCms();
+            this.snapshotAll();
+            this.errors = {};
+            this.pageSel = this.f.pages[0] ? this.f.pages[0].id : null;
+            this.$nextTick(() => this.loadEditor());
+            ui.success('Website content restored to the demo version.');
+          } catch (err) {
+            ui.error(err.message || 'Could not reset the website content.');
+          } finally { this.busy = false; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

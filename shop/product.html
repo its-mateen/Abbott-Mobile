@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Product · Abbott Mobiles</title>
+  <meta name="description" content="Product details, specifications, price and availability at Abbott Mobile, Lahore.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-product">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopProduct()">
+
+    <!-- ======================================================= NOT FOUND -->
+    <template x-if="notFound">
+      <div class="shop-container py-16">
+        <div class="shop-card shop-card-pad max-w-lg mx-auto text-center">
+          <div class="shop-empty">
+            <span x-html="SHOP.icon('search','')"></span>
+            <div class="shop-empty-title">We couldn't find that product</div>
+            <p class="text-sm mt-2">It may have been sold out and removed from the website. Browse the catalog or ask us on WhatsApp — we can usually order it in.</p>
+            <div class="flex flex-wrap justify-center gap-2 mt-5">
+              <a href="products.html" class="shop-btn">
+                <span x-html="SHOP.icon('bag','')"></span>Browse all products
+              </a>
+              <a :href="SHOP.waLink('Hello, do you have this product in stock?')" target="_blank" rel="noopener" class="shop-btn shop-btn-outline">
+                <span x-html="SHOP.socialIcon('whatsapp','')"></span>Ask on WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ========================================================= PRODUCT -->
+    <template x-if="p">
+      <div>
+        <div class="shop-container pt-5 pb-3">
+          <nav class="shop-crumbs" aria-label="Breadcrumb">
+            <a href="index.html">Home</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <a href="products.html">Shop</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <a :href="'products.html?category=' + p.category_id" x-text="ABM.db.categoryName(p.category_id)"></a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <span class="font-semibold text-slate-700 truncate max-w-[12rem] sm:max-w-none" x-text="SHOP.title(p)"></span>
+          </nav>
+        </div>
+
+        <div class="shop-container pb-8">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10">
+
+            <!-- ------------------------------------------------- gallery -->
+            <div class="min-w-0">
+              <div class="shop-card overflow-hidden">
+                <div class="relative">
+                  <!-- photo: hover to zoom, click to open full size -->
+                  <template x-if="current.kind === 'image'">
+                    <div class="shop-zoom shop-media !aspect-[4/3] sm:!aspect-square"
+                         :class="zooming && 'is-zooming'"
+                         @mousemove="onZoomMove($event)" @mouseenter="zooming = true" @mouseleave="zooming = false"
+                         @click="lightbox = true" role="button" tabindex="0" @keydown.enter="lightbox = true"
+                         :aria-label="'Zoom ' + SHOP.title(p)">
+                      <img :src="current.url" :alt="SHOP.title(p)" class="shop-zoom-img"
+                           :style="zooming ? ('transform-origin:' + zoomX + '% ' + zoomY + '%') : ''">
+                      <span class="shop-zoom-hint" x-show="!zooming" x-cloak>
+                        <span x-html="SHOP.icon('search','')"></span>Hover to zoom
+                      </span>
+                    </div>
+                  </template>
+
+                  <!-- generated placeholder when the product has no photo yet -->
+                  <template x-if="current.kind === 'placeholder'">
+                    <div class="shop-media !aspect-[4/3] sm:!aspect-square" x-html="current.html"></div>
+                  </template>
+
+                  <!-- video: uploaded file plays inline, YouTube / Vimeo embeds -->
+                  <template x-if="current.kind === 'video'">
+                    <div class="shop-media !aspect-[4/3] sm:!aspect-square !bg-slate-900">
+                      <template x-if="current.embed">
+                        <iframe class="w-full h-full" :src="current.embed" title="Product video" allowfullscreen
+                                referrerpolicy="strict-origin-when-cross-origin"></iframe>
+                      </template>
+                      <template x-if="!current.embed">
+                        <video class="w-full h-full object-contain bg-black" :src="current.url" controls playsinline preload="metadata"></video>
+                      </template>
+                    </div>
+                  </template>
+
+                  <div class="shop-media-tags">
+                    <template x-if="p.condition && p.condition !== 'new'">
+                      <span class="shop-tag shop-tag-warn" x-text="ABM.utils.titleCase(p.condition)"></span>
+                    </template>
+                    <template x-if="isService">
+                      <span class="shop-tag shop-tag-info">Service / labour</span>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <!-- thumbnails -->
+              <div class="flex gap-2 mt-3 overflow-x-auto pb-1" x-show="views.length > 1" x-cloak>
+                <template x-for="(v, i) in views" :key="i">
+                  <button type="button" class="shop-thumb relative" :class="view === i && 'is-active'" @click="view = i"
+                          :aria-label="v.kind === 'video' ? 'Play video' : 'View ' + (i + 1)">
+                    <template x-if="v.kind === 'image'"><img :src="v.url" alt="" class="w-full h-full object-cover"></template>
+                    <template x-if="v.kind === 'placeholder'"><span class="block w-full h-full" x-html="v.html"></span></template>
+                    <template x-if="v.kind === 'video'">
+                      <span class="w-full h-full flex items-center justify-center bg-slate-900 text-white">
+                        <span x-html="SHOP.icon('play','')"></span>
+                      </span>
+                    </template>
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <!-- full-size viewer -->
+            <template x-if="lightbox && current.kind === 'image'">
+              <div class="shop-lightbox" @click="lightbox = false" @keydown.escape.window="lightbox = false">
+                <button type="button" class="shop-lightbox-close" @click.stop="lightbox = false" aria-label="Close">
+                  <span x-html="SHOP.icon('x','')"></span>
+                </button>
+                <img :src="current.url" :alt="SHOP.title(p)" @click.stop>
+                <div class="shop-lightbox-strip" @click.stop x-show="views.filter(v => v.kind === 'image').length > 1">
+                  <template x-for="(v, i) in views" :key="'lb'+i">
+                    <button type="button" class="shop-thumb" :class="view === i && 'is-active'" @click="view = i" x-show="v.kind === 'image'">
+                      <img :src="v.url" alt="" class="w-full h-full object-cover">
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
+
+            <!-- ------------------------------------------------- details -->
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <a :href="'products.html?brand=' + p.brand_id" class="shop-badge shop-badge-primary" x-text="ABM.db.brandName(p.brand_id)"></a>
+                <span class="text-xs text-slate-400 font-semibold" x-text="'SKU ' + p.sku"></span>
+              </div>
+              <h1 class="shop-h2 mt-2" x-text="SHOP.title(p)"></h1>
+              <p class="text-sm text-slate-500 mt-1" x-text="SHOP.subtitle(p)" x-show="SHOP.subtitle(p)"></p>
+
+              <!-- badges -->
+              <div class="flex flex-wrap gap-1.5 mt-3">
+                <span class="shop-badge shop-badge-accent" x-show="p.warranty_months" x-cloak
+                      x-text="p.warranty_months + '-month warranty'"></span>
+                <span class="shop-badge" x-show="p.condition && !isService" x-cloak x-text="ABM.utils.titleCase(p.condition || 'new')"></span>
+                <span class="shop-badge shop-badge-primary" x-show="isPta" x-cloak>PTA approved</span>
+                <span class="shop-badge" x-show="isSerialized" x-cloak x-text="serialLabel + ' recorded on your invoice'"></span>
+                <span class="shop-badge" x-show="isService" x-cloak>No stock needed · booked as a job</span>
+              </div>
+
+              <!-- price -->
+              <div class="mt-5" x-show="commerce.show_prices" x-cloak>
+                <div class="flex items-end gap-3 flex-wrap">
+                  <span class="shop-price shop-price-lg" x-text="$money(p.retail_price, {decimals:0})"></span>
+                  <span class="text-xs text-slate-500 pb-1.5" x-show="p.tax_rate > 0" x-cloak>incl. tax</span>
+                </div>
+                <p class="text-xs text-slate-500 mt-1" x-show="showWholesale" x-cloak>
+                  Buying 5 or more? Wholesale price
+                  <b class="text-slate-700" x-text="$money(p.wholesale_price, {decimals:0})"></b> —
+                  <a :href="SHOP.waLink('Hello, I need a bulk price for ' + SHOP.title(p))" target="_blank" rel="noopener" class="shop-link">ask on WhatsApp</a>.
+                </p>
+              </div>
+
+              <!-- stock -->
+              <div class="flex items-center gap-2 mt-3" x-show="commerce.show_stock" x-cloak>
+                <span class="w-2 h-2 rounded-full flex-none" :class="dotClass"></span>
+                <span class="text-sm font-bold" :class="stockClass" x-text="SHOP.stockLabel(p)"></span>
+                <span class="text-xs text-slate-500 truncate" x-text="'at ' + branchName"></span>
+              </div>
+
+              <!-- buy box -->
+              <div class="shop-card shop-card-pad mt-5">
+                <!-- service -->
+                <template x-if="isService">
+                  <div>
+                    <p class="text-sm text-slate-600">This is a workshop service. Book it online and bring your device in — we confirm the final price after a free diagnosis.</p>
+                    <a :href="'repair.html?service=' + p.id" class="shop-btn shop-btn-lg shop-btn-block mt-4">
+                      <span x-html="SHOP.icon('wrench','')"></span>Book this service
+                    </a>
+                    <a :href="SHOP.waLink('Hello, I would like to book: ' + SHOP.title(p))" target="_blank" rel="noopener"
+                       class="shop-btn shop-btn-outline shop-btn-block mt-2" x-show="commerce.whatsapp_orders && SHOP.waNumber()" x-cloak>
+                      <span x-html="SHOP.socialIcon('whatsapp','')"></span>Ask about this service
+                    </a>
+                  </div>
+                </template>
+
+                <!-- goods -->
+                <template x-if="!isService">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-3">
+                      <div class="shop-qty" x-show="max > 1" x-cloak>
+                        <button type="button" @click="qty = Math.max(1, qty - 1)" :disabled="qty <= 1" aria-label="Decrease quantity">
+                          <span x-html="SHOP.icon('minus','')"></span>
+                        </button>
+                        <label class="sr-only" for="qty">Quantity</label>
+                        <input id="qty" type="number" min="1" :max="max" x-model.number="qty" @change="clampQty()">
+                        <button type="button" @click="qty = Math.min(max, qty + 1)" :disabled="qty >= max" aria-label="Increase quantity">
+                          <span x-html="SHOP.icon('plus','')"></span>
+                        </button>
+                      </div>
+                      <p class="text-xs text-slate-500 min-w-0" x-show="isSerialized" x-cloak
+                         x-text="'Sold per unit — every device has its own ' + serialLabel.replace(/\.$/, '') + ', printed on your invoice.'"></p>
+                      <p class="text-xs text-slate-500 min-w-0" x-show="!isSerialized && max > 1" x-cloak
+                         x-text="'Up to ' + max + ' per order'"></p>
+                    </div>
+
+                    <button type="button" class="shop-btn shop-btn-lg shop-btn-block mt-4"
+                            :disabled="!max || busy" @click="addToCart()">
+                      <span x-html="SHOP.icon(added ? 'check-circle' : 'cart','')"></span>
+                      <span x-text="!max ? 'Out of stock' : (added ? 'Added to cart' : 'Add to cart')"></span>
+                    </button>
+                    <a href="cart.html" class="shop-btn shop-btn-outline shop-btn-block mt-2" x-show="added" x-cloak>
+                      <span x-html="SHOP.icon('bag','')"></span>Go to cart &amp; checkout
+                    </a>
+                    <a :href="waOrderLink" target="_blank" rel="noopener" class="shop-btn shop-btn-accent shop-btn-block mt-2"
+                       x-show="commerce.whatsapp_orders && SHOP.waNumber()" x-cloak>
+                      <span x-html="SHOP.socialIcon('whatsapp','')"></span>Order on WhatsApp
+                    </a>
+                    <p class="text-xs text-rose-600 font-semibold mt-2" x-show="!max" x-cloak>
+                      Out of stock right now — message us and we will tell you when it lands.
+                    </p>
+                  </div>
+                </template>
+
+                <!-- trust row -->
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-5 pt-4 border-t border-slate-200/70">
+                  <template x-for="t in trust" :key="t.text">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-emerald-600 flex-none" x-html="SHOP.icon(t.icon,'w-4 h-4')"></span>
+                      <span class="text-[11px] text-slate-600 leading-tight min-w-0" x-text="t.text"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <!-- share -->
+              <div class="flex items-center gap-2 mt-4 flex-wrap">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Share</span>
+                <a :href="SHOP.waLink('Check this out: ' + SHOP.title(p) + ' — ' + pageUrl)" target="_blank" rel="noopener"
+                   class="shop-icon-btn bg-slate-900/5" aria-label="Share on WhatsApp"><span x-html="SHOP.socialIcon('whatsapp','')"></span></a>
+                <a :href="'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(pageUrl)" target="_blank" rel="noopener"
+                   class="shop-icon-btn bg-slate-900/5" aria-label="Share on Facebook"><span x-html="SHOP.socialIcon('facebook','')"></span></a>
+                <button type="button" class="shop-icon-btn bg-slate-900/5" @click="copyLink()" aria-label="Copy link" title="Copy link">
+                  <span x-html="SHOP.icon(copied ? 'check' : 'document','')"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------------------------------------- specs / description -->
+        <div class="shop-container pb-10">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="shop-card min-w-0" x-show="specRows.length" x-cloak>
+              <div class="px-5 pt-5 pb-1"><h2 class="shop-h3">Specifications</h2></div>
+              <div class="px-2 pb-3">
+                <table class="shop-specs">
+                  <tbody>
+                    <template x-for="r in specRows" :key="r.label">
+                      <tr>
+                        <th scope="row" x-text="r.label"></th>
+                        <td class="break-words" x-text="r.value"></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="min-w-0">
+              <div class="shop-card shop-card-pad">
+                <h2 class="shop-h3">About this <span x-text="isService ? 'service' : 'product'"></span></h2>
+                <p class="shop-rich mt-2" x-text="description"></p>
+
+                <div class="mt-5">
+                  <template x-for="(a, i) in accordions" :key="i">
+                    <div class="shop-acc">
+                      <button type="button" class="shop-acc-btn" :aria-expanded="open === i" @click="open = (open === i ? -1 : i)">
+                        <span x-text="a.title"></span>
+                        <span x-html="SHOP.icon('chevron-down','')"></span>
+                      </button>
+                      <div class="shop-acc-body" x-show="open === i" x-cloak x-transition.opacity.duration.200ms>
+                        <p x-text="a.body"></p>
+                        <a :href="a.link" class="shop-link text-sm inline-block mt-2" x-show="a.link" x-cloak x-text="a.linkText"></a>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------------ related -->
+        <div class="shop-section-alt" x-show="related.length" x-cloak>
+          <div class="shop-container py-10">
+            <div class="shop-section-head">
+              <div>
+                <span class="shop-eyebrow">You may also like</span>
+                <h2 class="shop-h2 mt-1">More from <span x-text="ABM.db.categoryName(p.category_id)"></span></h2>
+              </div>
+              <a :href="'products.html?category=' + p.category_id" class="shop-btn shop-btn-outline shop-btn-sm">
+                View all<span x-html="SHOP.icon('arrow-right','')"></span>
+              </a>
+            </div>
+            <div class="shop-grid-products">
+              <template x-for="r in related" :key="r.id">
+                <a :href="'product.html?id=' + r.id" class="shop-card shop-card-hover shop-product">
+                  <div class="relative">
+                    <div class="shop-media" x-html="SHOP.image(r)"></div>
+                    <div class="shop-media-tags">
+                      <template x-if="commerce.show_stock && !SHOP.inStock(r)">
+                        <span class="shop-tag shop-tag-danger">Out of stock</span>
+                      </template>
+                    </div>
+                  </div>
+                  <div class="shop-product-body">
+                    <div class="shop-product-brand truncate" x-text="ABM.db.brandName(r.brand_id)"></div>
+                    <div class="shop-product-title" x-text="SHOP.title(r)"></div>
+                    <div class="mt-auto pt-2 flex items-end justify-between gap-2 min-w-0">
+                      <div class="shop-price truncate min-w-0" x-show="commerce.show_prices" x-text="$money(r.retail_price, {decimals:0})"></div>
+                      <span class="shop-icon-btn !w-8 !h-8 flex-none bg-slate-900/5" x-html="SHOP.icon('arrow-right','')"></span>
+                    </div>
+                  </div>
+                </a>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------------------ mobile sticky action bar -->
+        <div class="shop-sticky-bar lg:hidden" x-show="!isService" x-cloak>
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] text-slate-500 truncate" x-text="SHOP.title(p)"></div>
+            <div class="font-extrabold text-slate-900 truncate" x-show="commerce.show_prices" x-text="$money(p.retail_price * qty, {decimals:0})"></div>
+          </div>
+          <button type="button" class="shop-btn flex-none" :disabled="!max || busy" @click="addToCart()">
+            <span x-html="SHOP.icon(added ? 'check-circle' : 'cart','')"></span>
+            <span x-text="!max ? 'Unavailable' : (added ? 'Added' : 'Add')"></span>
+          </button>
+        </div>
+        <div class="shop-sticky-bar lg:hidden" x-show="isService" x-cloak>
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] text-slate-500 truncate">Workshop service</div>
+            <div class="font-extrabold text-slate-900 truncate" x-show="commerce.show_prices" x-text="'from ' + $money(p.retail_price, {decimals:0})"></div>
+          </div>
+          <a :href="'repair.html?service=' + p.id" class="shop-btn flex-none">
+            <span x-html="SHOP.icon('wrench','')"></span>Book
+          </a>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopProduct() {
+      const { db, utils } = ABM;
+      return {
+        p: null, notFound: false, commerce: {}, branchName: '', trust: [],
+        qty: 1, max: 0, busy: false, added: false, copied: false,
+        view: 0, views: [], open: 0, related: [], specRows: [], accordions: [],
+        zooming: false, zoomX: 50, zoomY: 50, lightbox: false,
+        isService: false, isSerialized: false, isPta: false, serialLabel: 'IMEI',
+        pageUrl: '', description: '', deliveryNote: '', paymentNote: '', showWholesale: false,
+
+        init() {
+          this.commerce = SHOP.commerce();
+          this.branchName = (SHOP.branch() || {}).name || 'our store';
+          this.pageUrl = location.href;
+
+          const p = SHOP.product(utils.qs('id'));
+          if (!p) { this.notFound = true; document.title = 'Product not found · Abbott Mobile'; return; }
+          if (SHOP.recent) SHOP.recent.push(p.id);   // feeds the "Recently viewed" row on cart.html
+          this.p = p;
+          document.title = SHOP.title(p) + ' · ' + (SHOP.site().name || 'Abbott Mobile');
+
+          this.isService = db.productType(p) === 'service';
+          this.isSerialized = db.isSerialized(p);
+          this.serialLabel = db.serialLabel(p);
+          this.isPta = !this.isService && ['mobile', 'tablet', 'smartwatch'].includes(p.device_type);
+          this.max = SHOP.maxQty(p);
+          this.qty = 1;
+          this.showWholesale = !this.isService && p.wholesale_price > 0 && p.wholesale_price < p.retail_price;
+
+          // gallery: the photos and videos uploaded in the admin, else generated placeholder "views"
+          const gallery = ABM.media.list(p);
+          if (gallery.length) {
+            this.views = gallery.map((m) => m.type === 'video'
+              ? { kind: 'video', url: m.url, embed: ABM.media.videoEmbed(m.url) }
+              : { kind: 'image', url: m.url });
+          } else {
+            this.views = [{ kind: 'placeholder', html: SHOP.image(p) }];
+            if (!this.isService) {
+              this.views.push({ kind: 'placeholder', html: SHOP.placeholder(p, '', 'cube') });
+              if (p.warranty_months) this.views.push({ kind: 'placeholder', html: SHOP.placeholder(p, '', 'shield-check') });
+              if (this.isSerialized) this.views.push({ kind: 'placeholder', html: SHOP.placeholder(p, '', 'barcode') });
+            }
+          }
+          this.view = 0;
+
+          this.$watch('view', () => { this.zooming = false; });
+          this.specRows = this.buildSpecs(p);
+          this.description = p.description || this.autoDescription(p);
+          this.related = SHOP.products()
+            .filter((r) => r.id !== p.id && r.category_id === p.category_id)
+            .slice(0, 4);
+          if (this.related.length < 4) {
+            const more = SHOP.products().filter((r) => r.id !== p.id && r.brand_id === p.brand_id && !this.related.includes(r));
+            this.related = this.related.concat(more).slice(0, 4);
+          }
+
+          const free = Number(this.commerce.free_delivery_above) || 0;
+          const fee = Number(this.commerce.delivery_fee) || 0;
+          this.deliveryNote = free
+            ? 'Free delivery above ' + utils.money(free, { decimals: 0 })
+            : (fee ? 'Delivery ' + utils.money(fee, { decimals: 0 }) : 'Free delivery in Lahore');
+          this.paymentNote = SHOP.paymentMethods().map((m) => m.label.replace('Cash on Delivery', 'COD')).join(' · ') || 'Pay in store';
+          this.trust = this.isService
+            ? [
+                { icon: 'search', text: 'Free diagnosis before any work starts' },
+                { icon: 'shield-check', text: 'Genuine parts · warranty on the repaired fault' },
+                { icon: 'banknotes', text: 'Pay when you collect the device' },
+              ]
+            : [
+                { icon: 'truck', text: this.deliveryNote },
+                { icon: 'shield-check', text: 'Genuine product, written warranty' },
+                { icon: 'banknotes', text: this.paymentNote },
+              ];
+
+          this.accordions = this.buildAccordions(p);
+        },
+
+        get stockClass() {
+          if (!this.p) return '';
+          if (!SHOP.inStock(this.p)) return this.commerce.allow_backorder ? 'text-amber-600' : 'text-rose-600';
+          const q = SHOP.stockOf(this.p);
+          return q > 0 && q <= 3 ? 'text-amber-600' : 'text-emerald-600';
+        },
+        get dotClass() {
+          if (!this.p) return 'bg-slate-300';
+          if (!SHOP.inStock(this.p)) return this.commerce.allow_backorder ? 'bg-amber-500' : 'bg-rose-500';
+          return 'bg-emerald-500';
+        },
+        get waOrderLink() {
+          if (!this.p) return '#';
+          return SHOP.waLink('Hello! I would like to order:\n' + SHOP.title(this.p)
+            + '\nQty: ' + this.qty
+            + (this.commerce.show_prices ? '\nPrice: ' + utils.money(SHOP.priceOf(this.p), { decimals: 0 }) : '')
+            + '\n' + this.pageUrl);
+        },
+
+        /** The gallery item currently on the stage. */
+        get current() { return this.views[this.view] || { kind: 'placeholder', html: '' }; },
+        /** Track the pointer so the zoomed photo follows the cursor. */
+        onZoomMove(ev) {
+          const r = ev.currentTarget.getBoundingClientRect();
+          this.zoomX = Math.min(100, Math.max(0, ((ev.clientX - r.left) / r.width) * 100));
+          this.zoomY = Math.min(100, Math.max(0, ((ev.clientY - r.top) / r.height) * 100));
+          this.zooming = true;
+        },
+        buildSpecs(p) {
+          const rows = [];
+          const keys = db.SPEC_KEYS[p.device_type] || Object.keys(p.specs || {});
+          keys.forEach((k) => {
+            const v = (p.specs || {})[k];
+            if (v) rows.push({ label: db.specLabel(k), value: String(v) });
+          });
+          Object.keys(p.specs || {}).forEach((k) => {
+            if (keys.includes(k) || !p.specs[k]) return;
+            rows.push({ label: db.specLabel(k), value: String(p.specs[k]) });
+          });
+          const isService = db.productType(p) === 'service';
+          rows.push({ label: 'Brand', value: db.brandName(p.brand_id) });
+          if (p.model) rows.push({ label: isService ? 'Service code' : 'Model', value: p.model });
+          if (p.color) rows.push({ label: 'Colour', value: p.color });
+          rows.push({ label: 'Category', value: db.categoryName(p.category_id) });
+          if (isService) {
+            rows.push({ label: 'Charged as', value: 'Labour per job (parts quoted separately)' });
+            rows.push({ label: 'Typical turnaround', value: 'Same day for mobiles · 1–2 days for laptops' });
+          } else {
+            rows.push({ label: 'Condition', value: utils.titleCase(p.condition || 'new') });
+          }
+          if (p.warranty_months) rows.push({ label: 'Warranty', value: p.warranty_months + ' months' });
+          if (db.isSerialized(p)) rows.push({ label: 'Tracked by', value: db.serialLabel(p) });
+          rows.push({ label: 'SKU', value: p.sku });
+          return rows;
+        },
+        autoDescription(p) {
+          const brand = db.brandName(p.brand_id);
+          const type = db.productTypeLabel(db.productType(p)).toLowerCase();
+          const s = p.specs || {};
+          const bits = [s.processor, s.ram, s.storage, s.screen].filter(Boolean).join(', ');
+          if (db.productType(p) === 'service') {
+            return 'Carried out in our Lahore workshop by certified technicians using genuine parts. The price shown is the labour charge — any parts needed are quoted separately after a free diagnosis.';
+          }
+          return [
+            'Genuine ' + brand + ' ' + type + (p.variant ? ' (' + p.variant + ')' : '') + ', checked by our technicians before it leaves the shop.',
+            bits ? 'Key hardware: ' + bits + '.' : '',
+            p.warranty_months ? 'Covered by a ' + p.warranty_months + '-month warranty with your Abbott Mobile invoice.' : '',
+            'Buy online with cash on delivery, or visit us at ' + (SHOP.contact().address || 'our store') + '.',
+          ].filter(Boolean).join(' ');
+        },
+        buildAccordions(p) {
+          const c = this.commerce;
+          const free = Number(c.free_delivery_above) || 0;
+          const fee = Number(c.delivery_fee) || 0;
+          if (this.isService) {
+            return [
+              {
+                title: 'What is included',
+                body: 'The price shown is the labour charge for this job. Spare parts (screens, batteries, flex cables…) are quoted separately after a free diagnosis and you approve the quote before any work starts.',
+                link: 'repair.html?service=' + p.id, linkText: 'Book this service',
+              },
+              {
+                title: 'Repair warranty',
+                body: 'Mobile repairs carry a 7-day warranty and laptop repairs a 15-day warranty on the repaired fault only. Physical or liquid damage after collection is not covered. Please back up your data — we cannot guarantee it during a repair.',
+                link: 'page.html?slug=warranty-policy', linkText: 'Read the full warranty policy',
+              },
+              {
+                title: 'Turnaround & payment',
+                body: 'Most mobile jobs are completed the same day; laptop jobs take 1–2 working days depending on part availability. Pay when you collect — cash or any mobile wallet. You can track your job online with the job number we give you.',
+                link: 'contact.html', linkText: 'Find your nearest branch',
+              },
+            ];
+          }
+          return [
+            {
+              title: 'Warranty & returns',
+              body: (p.warranty_months
+                ? 'This item carries a ' + p.warranty_months + '-month warranty covering manufacturing faults. '
+                : 'Warranty is as per the manufacturer policy. ')
+                + 'Keep your invoice — the ' + db.serialLabel(p).replace(/\.$/, '') + ' printed on it must match the device. Physical and liquid damage is not covered.',
+              link: 'page.html?slug=warranty-policy', linkText: 'Read the full warranty policy',
+            },
+            {
+              title: 'Delivery & payment',
+              body: (free ? 'Delivery is free on orders above ' + utils.money(free, { decimals: 0 }) + '; below that a flat ' + utils.money(fee, { decimals: 0 }) + ' applies. '
+                : (fee ? 'A flat delivery charge of ' + utils.money(fee, { decimals: 0 }) + ' applies. ' : 'Delivery is free inside Lahore. '))
+                + 'Same-day inside Lahore, 2–3 working days nationwide. Pay by ' + this.paymentNote + '.',
+              link: 'contact.html', linkText: 'Contact us about delivery',
+            },
+            {
+              title: 'Returns & exchange',
+              body: 'Accessories can be returned unused within 7 days with the original packing. Devices are exchanged only for manufacturing defects reported within 7 days of purchase.',
+              link: 'page.html?slug=return-policy', linkText: 'Read the return policy',
+            },
+          ];
+        },
+
+        clampQty() {
+          let q = Number(this.qty) || 1;
+          if (q < 1) q = 1;
+          if (this.max && q > this.max) { q = this.max; SHOP.toast('Only ' + this.max + ' available for this item.', 'warning'); }
+          this.qty = q;
+        },
+        addToCart() {
+          if (this.busy || !this.p) return;
+          this.busy = true;
+          try {
+            this.clampQty();
+            SHOP.cart.add(this.p.id, this.qty);
+            this.added = true;
+            SHOP.toast(SHOP.title(this.p) + ' added to your cart.', 'success');
+          } catch (e) {
+            SHOP.toast(e.message, 'error');
+          } finally {
+            this.busy = false;
+          }
+        },
+        copyLink() {
+          try {
+            navigator.clipboard.writeText(this.pageUrl);
+            this.copied = true;
+            SHOP.toast('Link copied to clipboard.', 'success');
+            setTimeout(() => { this.copied = false; }, 1800);
+          } catch (e) {
+            SHOP.toast('Copy this link: ' + this.pageUrl, 'info');
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

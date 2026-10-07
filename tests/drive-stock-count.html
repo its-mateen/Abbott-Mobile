@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: stock take services</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the stock-take side of the stock service: count adjustments, missing units, found units
+    // and units counted at the wrong branch — all through the real ABM services.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || match.test(e.message), e.message); } }
+      var db = ABM.db, stock = ABM.stock, utils = ABM.utils;
+
+      try {
+        db.reset();
+
+        /* ---------------- seed ---------------- */
+        var counts = db.all('stock_counts');
+        ok('seed ships stock takes', counts.length >= 3, counts.length + ' counts');
+        ok('every count has a number', counts.every(function (c) { return /^CNT-[A-Z0-9]+-\d{6}$/.test(c.count_no); }));
+        ['in_progress', 'completed', 'cancelled'].forEach(function (s) {
+          ok('seed covers the ' + s + ' state', counts.some(function (c) { return c.status === s; }));
+        });
+        var items = function (c) { return db.where('stock_count_items', { count_id: c.id }); };
+        ok('every count has lines', counts.every(function (c) { return items(c).length > 0; }));
+        ok('line counts match the header', counts.every(function (c) { return c.items_total === items(c).length; }));
+        ok('counted lines match the header', counts.every(function (c) {
+          return c.counted_items === items(c).filter(function (i) { return i.counted_qty !== null; }).length;
+        }));
+        ok('an in-progress count is only partly done', (function () {
+          var c = counts.filter(function (x) { return x.status === 'in_progress'; })[0];
+          return c.counted_items > 0 && c.counted_items < c.items_total;
+        })());
+
+        var done = counts.filter(function (c) { return c.status === 'completed'; })[0];
+        ok('a completed count is stamped', !!done.completed_at);
+        ok('a completed count counted every line', done.counted_items === done.items_total);
+        ok('its variance value matches its lines', Math.abs(done.variance_value - utils.round2(items(done).reduce(function (a, i) { return a + i.variance_value; }, 0))) < 0.01,
+          done.variance_value + ' vs lines');
+        ok('gain and loss add up to the net variance', Math.abs(done.variance_value - utils.round2(done.gain_value + done.loss_value)) < 0.01);
+        ok('a completed count posted count movements', db.all('stock_movements').some(function (m) {
+          return m.reference_type === 'stock_count' && String(m.reference_id) === String(done.id) && ['count_in', 'count_out'].indexOf(m.movement_type) >= 0;
+        }));
+        ok('an unposted count moved nothing', !db.all('stock_movements').some(function (m) {
+          return m.reference_type === 'stock_count' && counts.filter(function (c) { return c.status !== 'completed'; }).some(function (c) { return String(c.id) === String(m.reference_id); });
+        }));
+        ok('cancelled counts carry no completion stamp', counts.filter(function (c) { return c.status === 'cancelled'; }).every(function (c) { return !c.completed_at && !!c.cancelled_at; }));
+        var nextNo = db.nextNumber('CNT', db.branchCode(1));
+        ok('a new count number never collides with a seeded one', !counts.some(function (c) { return c.count_no === nextNo; }), nextNo);
+
+        /* ---------------- quantity adjustments ---------------- */
+        var branchId = 1;
+        var bulk = db.all('products').filter(function (p) { return !db.isSerialized(p) && db.isStockTracked(p) && db.stockQty(branchId, p.id) > 5; })[0];
+        var before = db.stockQty(branchId, bulk.id);
+        var ref = { type: 'stock_count', id: done.id };
+
+        var up = stock.countAdjust(branchId, bulk.id, before + 3, ref, 'Found three behind the counter');
+        ok('counting more than the system adds the difference', up === 3 && db.stockQty(branchId, bulk.id) === before + 3, 'qty=' + db.stockQty(branchId, bulk.id));
+        var lastIn = db.all('stock_movements').slice(-1)[0];
+        ok('a gain is written as a count_in movement', lastIn.movement_type === 'count_in' && lastIn.quantity === 3);
+        ok('the movement points back at the count', lastIn.reference_type === 'stock_count' && String(lastIn.reference_id) === String(done.id));
+
+        var down = stock.countAdjust(branchId, bulk.id, before - 2, ref, 'Two short');
+        ok('counting fewer removes the difference', down === -5 && db.stockQty(branchId, bulk.id) === before - 2, 'qty=' + db.stockQty(branchId, bulk.id));
+        var lastOut = db.all('stock_movements').slice(-1)[0];
+        ok('a shortage is written as a count_out movement', lastOut.movement_type === 'count_out' && lastOut.quantity === -5);
+        ok('counting exactly what the system holds posts nothing', stock.countAdjust(branchId, bulk.id, db.stockQty(branchId, bulk.id), ref, '') === 0);
+        throws('a negative count is refused', function () { stock.countAdjust(branchId, bulk.id, -1, ref, ''); }, /zero or more/);
+        throws('a non-numeric count is refused', function () { stock.countAdjust(branchId, bulk.id, 'abc', ref, ''); }, /zero or more/);
+        ok('counting down to zero is allowed', stock.countAdjust(branchId, bulk.id, 0, ref, 'Shelf empty') !== 0 && db.stockQty(branchId, bulk.id) === 0);
+
+        /* ---------------- serialized: missing and found ---------------- */
+        var unit = db.all('product_imeis').filter(function (i) { return i.branch_id === branchId && i.status === 'available'; })[0];
+        var prodQty = db.stockQty(branchId, unit.product_id);
+        stock.markMissing(unit.id, ref, 'Not on the shelf');
+        ok('a missing unit leaves stock', db.stockQty(branchId, unit.product_id) === prodQty - 1);
+        ok('the unit is marked missing', db.find('product_imeis', unit.id).status === 'missing');
+        ok('a missing unit is not sellable', !stock.SELLABLE.includes('missing') && !stock.findSellable(unit.imei, branchId));
+        ok('the write-off is a count_out movement', db.all('stock_movements').slice(-1)[0].movement_type === 'count_out');
+        throws('the same unit cannot go missing twice', function () { stock.markMissing(unit.id, ref, ''); }, /already marked missing/);
+
+        stock.markFound(unit.id, ref, 'Found in the drawer');
+        ok('a found unit comes back into stock', db.stockQty(branchId, unit.product_id) === prodQty);
+        ok('the found unit is available again', db.find('product_imeis', unit.id).status === 'available');
+        ok('it can be sold again', !!stock.findSellable(unit.imei, branchId));
+        ok('the recovery is a count_in movement', db.all('stock_movements').slice(-1)[0].movement_type === 'count_in');
+        throws('an available unit cannot be "found"', function () { stock.markFound(unit.id, ref, ''); }, /missing unit/);
+
+        var sold = db.all('product_imeis').filter(function (i) { return i.status === 'sold'; })[0];
+        throws('a sold unit cannot be marked missing', function () { stock.markMissing(sold.id, ref, ''); }, /Sold/);
+        throws('an unknown unit id is refused', function () { stock.markMissing(999999, ref, ''); }, /not found/);
+
+        /* ---------------- serialized: counted at the wrong branch ---------------- */
+        var other = db.all('product_imeis').filter(function (i) { return i.branch_id === 2 && i.status === 'available'; })[0];
+        var fromQty = db.stockQty(2, other.product_id);
+        var toQty = db.stockQty(1, other.product_id);
+        stock.moveCountedUnit(other.id, 1, ref, 'Counted at the main branch');
+        ok('the unit now belongs to the counting branch', db.find('product_imeis', other.id).branch_id === 1);
+        ok('the old branch lost a unit', db.stockQty(2, other.product_id) === fromQty - 1, fromQty + ' -> ' + db.stockQty(2, other.product_id));
+        ok('the counting branch gained a unit', db.stockQty(1, other.product_id) === toQty + 1, toQty + ' -> ' + db.stockQty(1, other.product_id));
+        ok('both sides are recorded as count movements', db.all('stock_movements').slice(-2).every(function (m) { return ['count_in', 'count_out'].indexOf(m.movement_type) >= 0; }));
+        ok('moving a unit to the branch it is already at does nothing', (function () {
+          var q = db.stockQty(1, other.product_id);
+          stock.moveCountedUnit(other.id, 1, ref, '');
+          return db.stockQty(1, other.product_id) === q;
+        })());
+        var missingUnit = db.all('product_imeis').filter(function (i) { return i.branch_id === 1 && i.status === 'available' && i.id !== other.id; })[0];
+        stock.markMissing(missingUnit.id, ref, 'gone');
+        var mFrom = db.stockQty(1, missingUnit.product_id), mTo = db.stockQty(2, missingUnit.product_id);
+        stock.moveCountedUnit(missingUnit.id, 2, ref, 'Turned up at branch 2');
+        ok('a missing unit found at another branch is not double counted', db.stockQty(1, missingUnit.product_id) === mFrom, 'source qty unchanged');
+        ok('and it is added where it was found', db.stockQty(2, missingUnit.product_id) === mTo + 1);
+        ok('and it is available again', db.find('product_imeis', missingUnit.id).status === 'available');
+
+        /* ---------------- registering a serial nobody knew about ---------------- */
+        var serialProduct = db.find('products', db.all('product_imeis')[0].product_id);
+        var fresh = db.serialType(serialProduct) === 'serial' ? 'CNTTEST001' : '350000000000014';
+        var beforeQty = db.stockQty(branchId, serialProduct.id);
+        var rows = stock.addImeis(branchId, serialProduct.id, [fresh], serialProduct.cost_price, 'count_in', ref, { notes: 'Found during count' });
+        ok('an unknown serial can be registered by a count', rows.length === 1 && rows[0].status === 'available');
+        ok('registering it adds one to stock', db.stockQty(branchId, serialProduct.id) === beforeQty + 1);
+        ok('the new unit is sellable', !!stock.findSellable(fresh, branchId));
+        throws('the same serial cannot be registered twice', function () { stock.addImeis(branchId, serialProduct.id, [fresh], 0, 'count_in', ref, {}); }, /already registered/);
+
+        /* ---------------- reporting consistency ---------------- */
+        ok('count movements always carry their count reference', db.all('stock_movements')
+          .filter(function (m) { return ['count_in', 'count_out'].indexOf(m.movement_type) >= 0; })
+          .every(function (m) { return m.reference_type === 'stock_count' || m.reference_id === null; }));
+        ok('branch stock never goes negative', db.all('branch_stock').every(function (s) { return s.quantity >= 0; }));
+        ok('missing units are never counted as sellable stock', db.all('product_imeis')
+          .filter(function (i) { return i.status === 'missing'; })
+          .every(function (i) { return !stock.findSellable(i.imei, i.branch_id); }));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

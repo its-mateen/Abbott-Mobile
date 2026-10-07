@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Supplier Returns · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="supplier-returns" data-title="Supplier Returns" data-perm="supplier_returns.view">
+  <main x-data="supplierReturnsPage()">
+
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Supplier returns</h2>
+        <p class="page-subtitle">Send faulty stock back, claim a credit note or a replacement, and write off what cannot be recovered.</p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a href="supplier-return-create.html" class="btn btn-primary" x-show="canAdd"><span x-html="ABM.icon('plus')"></span>New return</a>
+      </div>
+    </div>
+
+    <!-- range -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <button type="button" class="stat stat-warning text-left" @click="status = 'draft'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Drafts</div><div class="stat-value" x-text="counts.draft"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('edit')"></span>
+        </div>
+        <div class="stat-meta">Not sent to the supplier yet</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <button type="button" class="stat stat-accent text-left" @click="status = 'sent'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">With supplier</div><div class="stat-value" x-text="counts.sent"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('truck')"></span>
+        </div>
+        <div class="stat-meta" x-text="$money(counts.sentValue, {decimals:0}) + ' awaiting a decision'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <button type="button" class="stat stat-money text-left" @click="status = 'completed'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Credit received</div><div class="stat-value" x-text="$money(counts.credit, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta" x-text="counts.completed + ' completed in this period'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <a href="imeis.html?status=defective" class="stat stat-danger">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Faulty units in stock</div><div class="stat-value" x-text="counts.defective"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta" x-text="$money(counts.defectiveValue, {decimals:0}) + ' tied up — send these back'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- list -->
+    <div class="card mt-4">
+      <div class="card-header !pb-0 !border-b-0">
+        <div class="tabs w-full">
+          <template x-for="t in tabs" :key="t.key">
+            <button type="button" class="tab" :class="status === t.key && 'active'" @click="status = t.key">
+              <span x-text="t.label"></span> <span class="count" x-text="t.count"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <div class="card-body !pt-4 flex flex-wrap items-center gap-2">
+        <div class="input-icon flex-1 min-w-[12rem]">
+          <span x-html="ABM.icon('search')"></span>
+          <input type="search" class="input" x-model="q" placeholder="Search return no, supplier, product…">
+        </div>
+        <select class="select !w-auto" x-model="supplierId" x-sync="supplierId">
+          <option value="all">All suppliers</option>
+          <template x-for="s in suppliers" :key="s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+        </select>
+        <select class="select !w-auto" x-model="branchFilter" x-sync="branchFilter" x-show="isAdmin" x-cloak>
+          <option value="all">All branches</option>
+          <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+        </select>
+        <span class="text-sm text-slate-500" x-text="pager.total + ' return' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Return</th>
+              <th>Supplier</th>
+              <th class="hidden lg:table-cell">Branch</th>
+              <th class="hidden md:table-cell">Date</th>
+              <th class="num">Units</th>
+              <th class="num">Value</th>
+              <th class="hidden sm:table-cell">Outcome</th>
+              <th>Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr>
+                <td><a :href="'supplier-return-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono" x-text="r.return_no"></a></td>
+                <td>
+                  <a :href="'supplier-view.html?id=' + r.supplier_id" class="font-medium text-slate-800 hover:text-navy-700" x-text="ABM.db.supplierName(r.supplier_id)"></a>
+                  <div class="text-xs text-slate-400 truncate max-w-[16rem]" x-text="r.reason"></div>
+                </td>
+                <td class="hidden lg:table-cell"><span class="badge badge-slate" x-text="ABM.db.branchCode(r.branch_id)"></span></td>
+                <td class="hidden md:table-cell text-slate-500" x-text="$date(r.return_date)"></td>
+                <td class="num" x-text="unitsOf(r)"></td>
+                <td class="num font-semibold" x-text="$money(r.subtotal, {decimals:0})"></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.resolution, resolutionLabel(r.resolution))"></span></td>
+                <td><span x-html="$badge(r.status)"></span></td>
+                <td class="actions">
+                  <a :href="'supplier-return-view.html?id=' + r.id" class="btn btn-ghost btn-icon btn-sm" title="Open"><span x-html="ABM.icon('eye','w-4 h-4')"></span></a>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('return')"></span>
+                  <div class="empty-title">No returns here</div>
+                  <p class="text-sm">When a unit arrives faulty or fails in warranty, raise a return so the cost goes back to the supplier.</p>
+                  <a href="supplier-return-create.html" class="btn btn-primary mt-4" x-show="canAdd">New return</a>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination" x-show="pager.pages > 1" x-cloak>
+        <span x-text="'Showing ' + pager.from + '–' + pager.to + ' of ' + pager.total"></span>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pager.page <= 1" @click="page--">Previous</button>
+          <span class="text-xs px-2" x-text="pager.page + ' / ' + pager.pages"></span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pager.page >= pager.pages" @click="page++">Next</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function supplierReturnsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        range: null, status: 'all', q: '', supplierId: 'all', branchFilter: 'all', page: 1,
+        canAdd: session.can('supplier_returns.add'),
+        isAdmin: session.isSuperAdmin(),
+
+        init() {
+          this.range = ABM.range('this_month', () => { this.page = 1; }, 'supplier-returns');
+          if (utils.qs('status')) this.status = utils.qs('status');
+          if (utils.qs('supplier')) this.supplierId = utils.qs('supplier');
+          ['status', 'q', 'supplierId', 'branchFilter'].forEach((k) => this.$watch(k, () => { this.page = 1; }));
+        },
+
+        get suppliers() { return db.all('suppliers').filter((s) => s.is_active); },
+        get branches() { return db.all('branches').filter((b) => b.is_active); },
+
+        /** Branch scoping: a manager only ever sees their own branch. */
+        get scoped() {
+          const all = db.all('supplier_returns');
+          if (!this.isAdmin) return all.filter((r) => r.branch_id === session.branchId());
+          if (this.branchFilter === 'all') return all;
+          return all.filter((r) => String(r.branch_id) === this.branchFilter);
+        },
+        get inRange() { return this.scoped.filter((r) => this.range.contains(r.return_date)); },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return utils.sortBy(this.inRange.filter((r) => {
+            if (this.status !== 'all' && r.status !== this.status) return false;
+            if (this.supplierId !== 'all' && String(r.supplier_id) !== this.supplierId) return false;
+            if (!q) return true;
+            const products = this.itemsOf(r).map((i) => db.productLabel(i.product_id)).join(' ');
+            return [r.return_no, db.supplierName(r.supplier_id), r.reason, products].join(' ').toLowerCase().includes(q);
+          }), 'return_date', 'desc');
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+
+        itemsOf(r) { return db.where('supplier_return_items', (i) => i.return_id === r.id); },
+        unitsOf(r) { return this.itemsOf(r).reduce((n, i) => n + (Number(i.quantity) || 0), 0); },
+        resolutionLabel(x) { return ({ credit_note: 'Credit note', replacement: 'Replacement', refund: 'Refund', scrap: 'Write off' })[x] || utils.titleCase(x || '—'); },
+
+        get tabs() {
+          const c = (k) => this.inRange.filter((r) => k === 'all' || r.status === k).length;
+          return [
+            { key: 'all', label: 'All', count: c('all') },
+            { key: 'draft', label: 'Draft', count: c('draft') },
+            { key: 'sent', label: 'With supplier', count: c('sent') },
+            { key: 'completed', label: 'Completed', count: c('completed') },
+            { key: 'cancelled', label: 'Cancelled', count: c('cancelled') },
+          ];
+        },
+        get counts() {
+          const rows = this.inRange;
+          const branchIds = this.isAdmin
+            ? (this.branchFilter === 'all' ? db.all('branches').map((b) => b.id) : [Number(this.branchFilter)])
+            : [session.branchId()];
+          const faulty = db.all('product_imeis').filter((i) => i.status === 'defective' && branchIds.includes(i.branch_id));
+          return {
+            draft: rows.filter((r) => r.status === 'draft').length,
+            sent: rows.filter((r) => r.status === 'sent').length,
+            sentValue: utils.sum(rows.filter((r) => r.status === 'sent'), 'subtotal'),
+            completed: rows.filter((r) => r.status === 'completed').length,
+            credit: utils.sum(rows.filter((r) => r.status === 'completed'), 'credit_amount'),
+            defective: faulty.length,
+            defectiveValue: utils.sum(faulty, 'cost_price'),
+          };
+        },
+
+        exportCsv() {
+          const rows = this.filtered;
+          if (!rows.length) { ui.warn('Nothing to export for this filter.'); return; }
+          const cols = [
+            { key: 'return_no', label: 'Return no' },
+            { label: 'Date', value: (r) => utils.date(r.return_date) },
+            { label: 'Supplier', value: (r) => db.supplierName(r.supplier_id) },
+            { label: 'Branch', value: (r) => db.branchName(r.branch_id) },
+            { label: 'Units', value: (r) => this.unitsOf(r) },
+            { label: 'Value', value: (r) => r.subtotal },
+            { label: 'Credit received', value: (r) => r.credit_amount },
+            { label: 'Outcome', value: (r) => this.resolutionLabel(r.resolution) },
+            { label: 'Status', value: (r) => utils.titleCase(r.status) },
+            { key: 'reason', label: 'Reason' },
+          ];
+          if (!utils.download('supplier-returns-' + utils.today() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' return' + (rows.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

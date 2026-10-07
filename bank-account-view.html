@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Bank Statement · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block; }
+      .no-print { display: none !important; }
+      .stmt table { border-collapse: collapse; width: 100%; }
+      .stmt th, .stmt td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; }
+      .stmt th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="bank-account-view" data-title="Bank Statement" data-perm="banking.view">
+  <main x-data="bankAccountPage()" @keydown.escape.window="move.open = false">
+    <!-- Not found -->
+    <template x-if="!account">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('building','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900" x-text="denied ? 'That account belongs to another branch' : 'Account not found'"></h2>
+          <p class="text-sm text-slate-600 mt-2"><span x-show="!denied">No bank account matches id <span class="mono" x-text="requestedId || '(none)'"></span>.</span><span x-show="denied">You can only open accounts used by your branch.</span></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap"><a href="banking.html" class="btn btn-primary">All accounts</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="account">
+      <div>
+        <div class="no-print">
+          <!-- Header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="banking.html" class="hover:text-navy-700">Bank accounts</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>Statement</span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title truncate" x-text="account.name"></h2>
+                <span class="badge" :class="account.is_active ? 'badge-green' : 'badge-slate'" x-text="account.is_active ? 'Active' : 'Closed'"></span>
+              </div>
+              <p class="page-subtitle"><span x-text="account.bank_name"></span> · <span class="mono" x-text="account.account_no"></span> · <span x-text="account.branch_id ? ABM.db.branchName(account.branch_id) : 'all branches'"></span></p>
+            </div>
+            <div class="page-actions">
+              <template x-if="canManage && account.is_active"><button type="button" class="btn btn-secondary" @click="openMove('deposit')"><span x-html="ABM.icon('plus')"></span>Deposit</button></template>
+              <template x-if="canManage && account.is_active"><button type="button" class="btn btn-secondary" @click="openMove('withdrawal')"><span x-html="ABM.icon('minus')"></span>Withdraw</button></template>
+              <button type="button" class="btn btn-secondary" @click="print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+              <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!rows.length"><span x-html="ABM.icon('download')"></span>Export</button>
+            </div>
+          </div>
+
+          <!-- Tiles -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="stat stat-accent">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Balance now</div><div class="stat-value" x-text="$money(account.balance, {decimals:0})"></div></div>
+                <span class="chip chip-navy" x-html="ABM.icon('building')"></span>
+              </div>
+              <div class="stat-meta">opened with <span x-text="$money(account.opening_balance, {decimals:0})"></span></div>
+            </div>
+            <div class="stat stat-money">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">In · <span x-text="periodShort"></span></div><div class="stat-value text-emerald-700" x-text="$money(k.in, {decimals:0})"></div></div>
+                <span class="chip chip-money" x-html="ABM.icon('trend-up')"></span>
+              </div>
+              <div class="stat-meta"><span x-text="k.inCount"></span> entr<span x-text="k.inCount === 1 ? 'y' : 'ies'"></span></div>
+            </div>
+            <div class="stat stat-warning">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Out · <span x-text="periodShort"></span></div><div class="stat-value text-amber-700" x-text="$money(k.out, {decimals:0})"></div></div>
+                <span class="chip chip-warning" x-html="ABM.icon('trend-down')"></span>
+              </div>
+              <div class="stat-meta"><span x-text="k.outCount"></span> entr<span x-text="k.outCount === 1 ? 'y' : 'ies'"></span></div>
+            </div>
+            <div class="stat" :class="k.unreconciled ? 'stat-danger' : 'stat-money'">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Not reconciled</div><div class="stat-value" :class="k.unreconciled ? 'text-rose-600' : 'text-emerald-700'" x-text="ABM.utils.num(k.unreconciled)"></div></div>
+                <span class="chip" :class="k.unreconciled ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('scale')"></span>
+              </div>
+              <div class="stat-meta" x-text="k.unreconciled ? $money(k.unreconciledValue, {decimals:0}) + ' still to tick off' : 'Everything matches the bank'"></div>
+            </div>
+          </div>
+
+          <!-- Period filter -->
+          <div class="card mt-4">
+            <div class="card-body !py-3">
+              <div class="range-bar">
+                <div class="tabs-pill">
+                  <template x-for="p in range.presets" :key="p.key">
+                    <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+                  </template>
+                </div>
+                <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+                  <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+                  <span class="text-xs text-slate-500">to</span>
+                  <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+                </div>
+                <label class="flex items-center gap-2 text-sm cursor-pointer select-none ml-auto">
+                  <input type="checkbox" class="checkbox" x-model="onlyOpen"> Only what is not reconciled
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Statement -->
+          <div class="card mt-4">
+            <div class="card-header">
+              <div><div class="card-title">Statement</div><div class="card-subtitle">Oldest first, with the running balance — tick an entry once you have seen it on the bank's own statement</div></div>
+              <span class="text-xs text-slate-500 hidden sm:block" x-text="rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies')"></span>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th class="w-10" x-show="canManage">✓</th>
+                    <th>Date</th>
+                    <th>What</th>
+                    <th class="hidden md:table-cell">Reference</th>
+                    <th class="num">In</th>
+                    <th class="num">Out</th>
+                    <th class="num hidden sm:table-cell">Balance</th>
+                    <th class="actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="t in rows" :key="t.id">
+                    <tr :class="t.reversed_by ? 'opacity-60' : ''">
+                      <td x-show="canManage">
+                        <input type="checkbox" class="checkbox" :checked="t.reconciled" @change="toggleReconciled(t)" :aria-label="'Reconcile ' + t.reference">
+                      </td>
+                      <td class="whitespace-nowrap text-slate-600"><div x-text="$date(t.txn_date)"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(t.created_at)"></div></td>
+                      <td>
+                        <span x-html="$badge(t.type)"></span>
+                        <div class="text-[11px] text-slate-500 truncate max-w-[12rem]" x-show="t.party" x-text="t.party"></div>
+                        <div class="text-[11px] text-rose-600" x-show="t.reversed_by">Reversed</div>
+                      </td>
+                      <td class="hidden md:table-cell text-slate-600 truncate max-w-[16rem]">
+                        <template x-if="t.cheque_id"><a :href="'cheques.html?id=' + t.cheque_id" class="text-navy-700 hover:underline mono" x-text="'Cheque ' + t.reference"></a></template>
+                        <template x-if="!t.cheque_id"><span x-text="t.reference || '—'"></span></template>
+                        <div class="text-[11px] text-slate-400 truncate" x-show="t.notes" x-text="t.notes"></div>
+                      </td>
+                      <td class="num tabular whitespace-nowrap text-emerald-700 font-semibold" x-text="t.signed > 0 ? $money(t.amount, {decimals:0}) : '—'"></td>
+                      <td class="num tabular whitespace-nowrap text-amber-700 font-semibold" x-text="t.signed < 0 ? $money(t.amount, {decimals:0}) : '—'"></td>
+                      <td class="num tabular whitespace-nowrap hidden sm:table-cell text-slate-700" x-text="$money(t.running, {decimals:0})"></td>
+                      <td class="actions">
+                        <template x-if="canDelete && !t.reversed_by && t.type !== 'opening'">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Reverse this entry" @click="reverse(t)" x-html="ABM.icon('return','w-4 h-4')"></button>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                  <template x-if="!rows.length">
+                    <tr><td colspan="8" class="empty py-8 text-sm" x-text="onlyOpen ? 'Everything in this period is reconciled.' : 'No movement in this period.'"></td></tr>
+                  </template>
+                </tbody>
+                <tfoot x-show="rows.length">
+                  <tr>
+                    <td x-show="canManage"></td>
+                    <td colspan="3">Period totals</td>
+                    <td class="num tabular text-emerald-700 whitespace-nowrap" x-text="$money(k.in, {decimals:0})"></td>
+                    <td class="num tabular text-amber-700 whitespace-nowrap" x-text="$money(k.out, {decimals:0})"></td>
+                    <td class="num tabular hidden sm:table-cell whitespace-nowrap" x-text="$money(k.net, {decimals:0})"></td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Deposit / withdraw -->
+        <div x-show="move.open" x-cloak class="modal-backdrop no-print" @click.self="move.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="mvTitle">
+            <form @submit.prevent="saveMove()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="mvTitle" x-text="move.kind === 'deposit' ? 'Deposit into ' + account.name : 'Withdraw from ' + account.name"></div>
+                  <div class="text-xs text-slate-500">Balance now: <b x-text="$money(account.balance)"></b></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="move.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="bv-amount">Amount <span class="req">*</span></label>
+                    <div class="input-group"><input id="bv-amount" x-ref="mvAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="move.amount" :class="move.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                    <p class="field-error" x-show="move.errors.amount" x-text="move.errors.amount"></p>
+                  </div>
+                  <div>
+                    <label class="label" for="bv-date">Date</label>
+                    <input id="bv-date" type="date" class="input" x-model="move.date" :max="today">
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="bv-ref">Reference</label>
+                    <input id="bv-ref" type="text" class="input" x-model="move.reference" placeholder="Slip or transaction number" maxlength="60">
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="bv-notes">Notes</label>
+                    <input id="bv-notes" type="text" class="input" x-model="move.notes" placeholder="Optional" maxlength="160">
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="move.open = false">Cancel</button>
+                <button type="submit" class="btn btn-primary" :disabled="move.busy"><span x-html="ABM.icon('check')"></span>Record</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- PRINT -->
+        <div class="print-only print-area stmt text-slate-900">
+          <div class="flex justify-between items-start gap-6 border-b-2 border-slate-900 pb-3">
+            <div class="min-w-0">
+              <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[16mm] w-auto" onerror="ABM.brand.onError(this)">
+              <div class="text-2xl font-extrabold" x-text="settings.company_name || 'Abbott Mobiles'"></div>
+              <div class="text-xs mt-1" x-text="account.branch_id ? ABM.db.branchName(account.branch_id) : 'All branches'"></div>
+            </div>
+            <div class="text-right flex-none">
+              <div class="text-lg font-extrabold uppercase tracking-wide">Bank Statement</div>
+              <div class="text-base font-semibold" x-text="account.name"></div>
+              <div class="text-xs" x-text="account.bank_name + ' · ' + account.account_no"></div>
+              <div class="text-xs" x-text="range.label"></div>
+            </div>
+          </div>
+          <table class="mt-4">
+            <thead><tr><th style="width:14%">Date</th><th style="width:16%">Type</th><th>Reference</th><th class="!text-right" style="width:14%">In</th><th class="!text-right" style="width:14%">Out</th><th class="!text-right" style="width:16%">Balance</th></tr></thead>
+            <tbody>
+              <template x-for="t in rows" :key="'p' + t.id">
+                <tr>
+                  <td x-text="$date(t.txn_date)"></td>
+                  <td x-text="ABM.ui.statusLabel(t.type)"></td>
+                  <td><span x-text="t.reference || '—'"></span><span x-show="t.party" x-text="' · ' + t.party"></span></td>
+                  <td class="!text-right" x-text="t.signed > 0 ? $money(t.amount) : ''"></td>
+                  <td class="!text-right" x-text="t.signed < 0 ? $money(t.amount) : ''"></td>
+                  <td class="!text-right" x-text="$money(t.running)"></td>
+                </tr>
+              </template>
+            </tbody>
+            <tfoot>
+              <tr><td colspan="3" class="!text-right font-bold">Period totals</td><td class="!text-right font-bold" x-text="$money(k.in)"></td><td class="!text-right font-bold" x-text="$money(k.out)"></td><td class="!text-right font-extrabold" x-text="$money(account.balance)"></td></tr>
+            </tfoot>
+          </table>
+          <div class="text-[10px] text-slate-500 mt-6">Printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="ABM.session.user() ? ABM.session.user().name : ''"></span></div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function bankAccountPage() {
+      const { db, utils, ui, session } = ABM;
+      return {
+        requestedId: utils.qs('id'),
+        isSuperAdmin: session.isSuperAdmin(),
+        canManage: session.can('banking.edit'),
+        canDelete: session.can('banking.delete'),
+        settings: db.settings(),
+        today: utils.today(),
+        account: null, denied: false, rows: [], range: null, onlyOpen: false,
+        k: { in: 0, out: 0, net: 0, inCount: 0, outCount: 0, unreconciled: 0, unreconciledValue: 0 },
+        move: { open: false, kind: 'deposit', amount: '', date: utils.today(), reference: '', notes: '', errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+
+        init() {
+          const a = db.find('bank_accounts', this.requestedId);
+          if (!a) { this.account = null; return; }
+          if (!this.isSuperAdmin && a.branch_id != null && String(a.branch_id) !== String(session.branchId())) { this.account = null; this.denied = true; return; }
+          this.account = { ...a };
+          this.range = ABM.range('this_month', () => this.compute(), 'bank-account');
+          this.compute();
+          this.$watch('onlyOpen', () => this.compute());
+          if (utils.qs('print') === '1') setTimeout(() => this.print(), 900);
+        },
+        compute() {
+          const a = db.find('bank_accounts', this.account.id);
+          this.account = { ...a };
+          // the running balance is replayed in date order, so a back-dated entry lands in the right place
+          let run = 0;
+          const all = utils.sortBy(db.where('bank_transactions', { account_id: a.id }),
+            (t) => String(t.txn_date) + '|' + String(t.id).padStart(8, '0'))
+            .map((t) => { run = utils.round2(run + (Number(t.signed) || 0)); return { ...t, running: run }; });
+          const inPeriod = all.filter((t) => this.range.contains(t.txn_date));
+          this.rows = this.onlyOpen ? inPeriod.filter((t) => !t.reconciled) : inPeriod;
+          const ins = inPeriod.filter((t) => t.signed > 0), outs = inPeriod.filter((t) => t.signed < 0);
+          const open = all.filter((t) => !t.reconciled);
+          this.k = {
+            in: utils.round2(ins.reduce((s, t) => s + t.amount, 0)), out: utils.round2(outs.reduce((s, t) => s + t.amount, 0)),
+            net: utils.round2(inPeriod.reduce((s, t) => s + t.signed, 0)),
+            inCount: ins.length, outCount: outs.length,
+            unreconciled: open.length, unreconciledValue: utils.round2(open.reduce((s, t) => s + Math.abs(t.signed), 0)),
+          };
+        },
+        toggleReconciled(t) {
+          if (!this.canManage) { ui.warn('You do not have permission to reconcile.'); return; }
+          const next = t.reconciled ? 0 : 1;
+          db.update('bank_transactions', t.id, { reconciled: next, reconciled_at: next ? utils.now() : null });
+          this.compute();
+        },
+        async reverse(t) {
+          if (!this.canDelete) { ui.warn('Your role is not allowed to reverse bank entries.'); return; }
+          const ok = await ui.confirm({
+            title: 'Reverse this entry?',
+            message: `${ui.statusLabel(t.type)} of ${utils.money(t.amount)} on ${utils.date(t.txn_date)} will be undone with an opposite entry. Both stay on the statement.`,
+            confirmText: 'Reverse it', cancelText: 'Keep it', danger: true,
+          });
+          if (!ok) return;
+          try {
+            ABM.bank.reverse(t.id, 'Reversed from the statement');
+            db.audit('bank.reverse', 'bank_account', this.account.id, `${ui.statusLabel(t.type)} of ${utils.money(t.amount)} reversed on ${this.account.name}`);
+            ui.success('Entry reversed.');
+          } catch (err) { ui.error(err.message || 'Could not reverse that entry.'); }
+          this.compute();
+        },
+        openMove(kind) {
+          if (!this.canManage) { ui.warn('You do not have permission to move money.'); return; }
+          this.move = { open: true, kind, amount: '', date: utils.today(), reference: '', notes: '', errors: {}, busy: false };
+          this.$nextTick(() => { if (this.$refs.mvAmount) this.$refs.mvAmount.focus(); });
+        },
+        saveMove() {
+          const m = this.move, e = {};
+          const amt = Number(m.amount);
+          if (m.amount === '' || m.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          m.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          m.busy = true;
+          try {
+            const fn = m.kind === 'deposit' ? ABM.bank.deposit : ABM.bank.withdraw;
+            fn(this.account.id, amt, { date: m.date, reference: m.reference, notes: m.notes });
+            db.audit('bank.' + m.kind, 'bank_account', this.account.id, `${utils.money(amt)} ${m.kind === 'deposit' ? 'deposited into' : 'withdrawn from'} ${this.account.name}`);
+            ui.success('Recorded.');
+            m.open = false;
+            this.compute();
+          } catch (err) { ui.error(err.message || 'Could not record that.'); }
+          finally { m.busy = false; }
+        },
+        print() { ui.print(); },
+        exportCsv() {
+          const cols = [
+            { label: 'Date', key: 'txn_date' }, { label: 'Type', value: (t) => ui.statusLabel(t.type) }, { label: 'Method', value: (t) => ui.statusLabel(t.method) },
+            { label: 'Reference', key: 'reference' }, { label: 'Party', key: 'party' },
+            { label: 'In', value: (t) => (t.signed > 0 ? t.amount : '') }, { label: 'Out', value: (t) => (t.signed < 0 ? t.amount : '') },
+            { label: 'Balance', key: 'running' }, { label: 'Reconciled', value: (t) => (t.reconciled ? 'Yes' : 'No') }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download(this.account.name.replace(/[^\w]+/g, '-').toLowerCase() + '-statement.csv', utils.toCsv(this.rows, cols))) return;
+          ui.success('Exported ' + this.rows.length + ' entr' + (this.rows.length === 1 ? 'y' : 'ies') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

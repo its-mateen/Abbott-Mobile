@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Inventory Report &middot; Abbott Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="report-inventory" data-title="Inventory Report" data-perm="reports.view">
+  <main x-data="inventoryReportPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Inventory Report</h2>
+        <p class="page-subtitle" x-text="subtitle"></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>Reports</a>
+        <a href="report-stock-valuation.html" class="btn btn-secondary"><span x-html="ABM.icon('scale')"></span>Valuation</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" @click="ABM.ui.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="card mb-4 no-print">
+      <div class="px-2 sm:px-4">
+        <div class="tabs">
+          <template x-for="t in tabs" :key="t.key">
+            <button type="button" class="tab" :id="'tab-' + t.key" :data-tab="t.key" :class="tab === t.key && 'active'" @click="setTab(t.key)">
+              <span x-text="t.label"></span><span class="count" x-text="counts[t.key]"></span>
+            </button>
+          </template>
+        </div>
+      </div>
+      <div class="card-body !py-3 space-y-3">
+        <!-- Standard date range bar (stock movements ledger) -->
+        <div class="range-bar" x-show="tab === 'movements'">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          <div class="relative sm:col-span-2">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input input-sm pl-9" :placeholder="tab === 'movements' ? 'Search product, IMEI / serial, reference, notes...' : 'Search product, SKU, model...'" x-model.debounce.200ms="f.q" aria-label="Search">
+          </div>
+          <select class="select input-sm" x-model="f.product" aria-label="Product">
+            <option value="">All products</option>
+            <template x-for="p in productOptions" :key="p.id"><option :value="String(p.id)" x-text="p.label"></option></template>
+          </select>
+          <select class="select input-sm" x-show="tab === 'movements'" x-model="f.type" aria-label="Movement type">
+            <option value="">All movement types</option>
+            <template x-for="t in movementTypes" :key="t"><option :value="t" x-text="ABM.utils.titleCase(t)"></option></template>
+          </select>
+          <select class="select input-sm" x-show="isSuperAdmin && tab !== 'matrix'" x-model="f.branch" aria-label="Branch">
+            <option value="all">All branches</option>
+            <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' - ' + b.name"></option></template>
+          </select>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="ABM.utils.num(rows.length)"></b> <span x-text="rowNoun"></span></span>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy" x-text="branch.code + ' - ' + branch.name"></span>
+          </template>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Print header -->
+    <div class="hidden print:block mb-4">
+      <div class="text-lg font-bold" x-text="company"></div>
+      <div class="text-sm">Inventory Report &middot; <span x-text="tabLabel"></span> &middot; <span x-text="scopeLabel"></span></div>
+      <div class="text-xs" x-text="'Generated ' + ABM.utils.datetime(new Date())"></div>
+    </div>
+
+    <div class="print-area">
+      <!-- ======================================================= MOVEMENTS -->
+      <template x-if="tab === 'movements'">
+      <div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <a :href="'purchases.html?' + range.query" class="stat stat-money" title="Open purchases for this period">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Units in</div><div class="stat-value" x-text="ABM.utils.num(k.qtyIn)"></div></div>
+              <span class="chip chip-money" x-html="ABM.icon('download')"></span>
+            </div>
+            <div class="stat-meta">value <b x-text="$money(k.valueIn, {decimals:0})"></b> at cost</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+          <a :href="'sales.html?' + range.query" class="stat stat-danger" title="Open sales for this period">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Units out</div><div class="stat-value" x-text="ABM.utils.num(k.qtyOut)"></div></div>
+              <span class="chip chip-danger" x-html="ABM.icon('upload')"></span>
+            </div>
+            <div class="stat-meta">value <b x-text="$money(k.valueOut, {decimals:0})"></b> at cost</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+          <a :href="'stock.html'" class="stat stat-accent" title="Open branch stock">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Net movement</div><div class="stat-value" :class="k.qtyIn - k.qtyOut < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="(k.qtyIn - k.qtyOut > 0 ? '+' : '') + ABM.utils.num(k.qtyIn - k.qtyOut)"></div></div>
+              <span class="chip chip-navy" x-html="ABM.icon('transfer')"></span>
+            </div>
+            <div class="stat-meta"><span x-text="ABM.utils.num(rows.length)"></span> movements logged</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+          <a href="imeis.html" class="stat stat-warning" title="Open the unit registry">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Serialized moves</div><div class="stat-value" x-text="ABM.utils.num(k.serialized)"></div></div>
+              <span class="chip chip-warning" x-html="ABM.icon('qr')"></span>
+            </div>
+            <div class="stat-meta">tracked by IMEI / serial number</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+        </div>
+
+        <div class="card mt-4">
+          <div class="card-header">
+            <div><div class="card-title">Stock movements ledger</div><div class="card-subtitle">Every quantity change, newest first</div></div>
+            <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' movement' + (pager.total === 1 ? '' : 's')"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Product</th>
+                  <th class="hidden lg:table-cell">Unit no.</th>
+                  <th>Type</th>
+                  <th class="num">Qty</th>
+                  <th class="num hidden md:table-cell">Unit cost</th>
+                  <th class="num hidden lg:table-cell">Balance</th>
+                  <th class="hidden sm:table-cell">Reference</th>
+                  <th class="hidden xl:table-cell">User</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in pager.items" :key="m.id">
+                  <tr>
+                    <td class="whitespace-nowrap">
+                      <div class="text-slate-700" x-text="$date(m.created_at)"></div>
+                      <div class="text-[11px] text-slate-400" x-text="ABM.utils.time(m.created_at)"></div>
+                    </td>
+                    <td>
+                      <a :href="'product-view.html?id=' + m.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[10rem] sm:max-w-[16rem]" x-text="m.productLabel"></a>
+                      <div class="text-[11px] text-slate-400" x-show="showBranch" x-text="m.branchCode"></div>
+                      <div class="text-[11px] text-slate-400 mono lg:hidden truncate" x-show="m.serial" x-text="m.serial"></div>
+                    </td>
+                    <td class="hidden lg:table-cell">
+                      <template x-if="m.serial">
+                        <a :href="'report-imei-history.html?imei=' + encodeURIComponent(m.serial)" class="mono text-navy-700 hover:underline" x-text="m.serial"></a>
+                      </template>
+                      <span class="text-slate-300" x-show="!m.serial">&mdash;</span>
+                    </td>
+                    <td><span class="badge" :class="typeClass(m.movement_type)" x-text="ABM.utils.titleCase(m.movement_type)"></span></td>
+                    <td class="num font-semibold" :class="m.quantity > 0 ? 'text-emerald-700' : m.quantity < 0 ? 'text-rose-600' : 'text-slate-400'" x-text="(m.quantity > 0 ? '+' : '') + ABM.utils.num(m.quantity)"></td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(m.unit_cost, {decimals:0})"></td>
+                    <td class="num hidden lg:table-cell text-slate-500" x-text="ABM.utils.num(m.balance_after)"></td>
+                    <td class="hidden sm:table-cell">
+                      <template x-if="m.ref">
+                        <a :href="m.ref.href" class="mono text-navy-700 hover:underline whitespace-nowrap" x-text="m.ref.label"></a>
+                      </template>
+                      <span class="text-slate-300" x-show="!m.ref">&mdash;</span>
+                      <div class="text-[11px] text-slate-400 truncate max-w-[12rem]" x-show="m.notes" x-text="m.notes"></div>
+                    </td>
+                    <td class="hidden xl:table-cell text-slate-500 truncate max-w-[9rem]" x-text="m.userName"></td>
+                  </tr>
+                </template>
+                <template x-if="!pager.items.length">
+                  <tr><td colspan="9">
+                    <div class="empty">
+                      <span x-html="ABM.icon('archive')"></span>
+                      <div class="empty-title">No stock movements</div>
+                      <div class="text-sm mt-1">Nothing moved in or out for this selection.</div>
+                      <div class="mt-4 flex justify-center gap-2 flex-wrap no-print">
+                        <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                        <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                      </div>
+                    </div>
+                  </td></tr>
+                </template>
+              </tbody>
+              <tfoot x-show="rows.length">
+                <tr>
+                  <td colspan="4">Totals in / out</td>
+                  <td class="num"><span class="text-emerald-700" x-text="'+' + ABM.utils.num(k.qtyIn)"></span> / <span class="text-rose-600" x-text="'-' + ABM.utils.num(k.qtyOut)"></span></td>
+                  <td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(k.valueIn - k.valueOut, {decimals:0})"></td>
+                  <td class="hidden lg:table-cell"></td>
+                  <td class="hidden sm:table-cell"></td>
+                  <td class="hidden xl:table-cell"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print">
+            <div>Showing <b class="text-slate-800" x-text="pager.from"></b>&ndash;<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNumbers" :key="n">
+                <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+              </template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- ======================================================== LOW STOCK -->
+      <template x-if="tab === 'low'">
+      <div>
+        <div class="alert alert-warning no-print" x-show="rows.length">
+          <span x-html="ABM.icon('warning')"></span>
+          <div><b x-text="rows.length"></b> product/branch line<span x-text="rows.length === 1 ? '' : 's'"></span> at or below minimum stock &mdash; suggested reorder value <b x-text="$money(k.reorderValue, {decimals:0})"></b>.</div>
+        </div>
+        <div class="card mt-4">
+          <div class="card-header">
+            <div><div class="card-title">Low stock</div><div class="card-subtitle">Reorder suggestion = max(reorder qty, twice the minimum less what is left)</div></div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th class="hidden md:table-cell" x-show="showBranch">Branch</th>
+                  <th class="num">Qty</th>
+                  <th class="num hidden sm:table-cell">Min</th>
+                  <th class="num">Reorder</th>
+                  <th class="num hidden md:table-cell">Last cost</th>
+                  <th class="num hidden lg:table-cell">Est. value</th>
+                  <th class="hidden lg:table-cell">Supplier</th>
+                  <th class="actions no-print">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in pager.items" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="'product-view.html?id=' + r.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[11rem] sm:max-w-[18rem]" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400 mono" x-text="r.sku"></div>
+                      <div class="text-[11px] text-slate-400 md:hidden" x-show="showBranch" x-text="r.branchCode"></div>
+                    </td>
+                    <td class="hidden md:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                    <td class="num"><span class="badge" :class="r.qty === 0 ? 'badge-red' : 'badge-amber'" x-text="r.qty"></span></td>
+                    <td class="num hidden sm:table-cell text-slate-500" x-text="r.min"></td>
+                    <td class="num font-semibold text-navy-700" x-text="r.reorder"></td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.lastCost, {decimals:0})"></td>
+                    <td class="num hidden lg:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.reorderValue, {decimals:0})"></td>
+                    <td class="hidden lg:table-cell">
+                      <template x-if="r.supplierId">
+                        <a :href="'supplier-view.html?id=' + r.supplierId" class="text-navy-700 hover:underline block truncate max-w-[12rem]" x-text="r.supplierName"></a>
+                      </template>
+                      <span class="text-slate-400" x-show="!r.supplierId">&mdash;</span>
+                    </td>
+                    <td class="actions no-print">
+                      <a :href="'purchase-create.html?product=' + r.product_id + (r.supplierId ? '&supplier=' + r.supplierId : '')" class="btn btn-soft btn-sm whitespace-nowrap"><span x-html="ABM.icon('plus','w-4 h-4')"></span><span class="hidden sm:inline">Create purchase</span></a>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="!pager.items.length">
+                  <tr><td colspan="9">
+                    <div class="empty">
+                      <span x-html="ABM.icon('check-circle')"></span>
+                      <div class="empty-title">Every product is above its minimum</div>
+                      <div class="text-sm mt-1">Nothing needs reordering for this selection.</div>
+                    </div>
+                  </td></tr>
+                </template>
+              </tbody>
+              <tfoot x-show="rows.length">
+                <tr>
+                  <td :colspan="showBranch ? 4 : 3">Totals</td>
+                  <td class="num" x-text="ABM.utils.num(k.reorderUnits)"></td>
+                  <td class="hidden md:table-cell"></td>
+                  <td class="num hidden lg:table-cell whitespace-nowrap" x-text="$money(k.reorderValue, {decimals:0})"></td>
+                  <td class="hidden lg:table-cell"></td>
+                  <td class="no-print"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print">
+            <div>Showing <b class="text-slate-800" x-text="pager.from"></b>&ndash;<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNumbers" :key="'lp' + n">
+                <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+              </template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- ======================================================= DEAD STOCK -->
+      <template x-if="tab === 'dead'">
+      <div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <a href="report-stock-valuation.html" class="stat stat-danger" title="Open stock valuation">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Value tied up</div><div class="stat-value" x-text="$money(k.deadValue, {decimals:0})"></div></div>
+              <span class="chip chip-danger" x-html="ABM.icon('clock')"></span>
+            </div>
+            <div class="stat-meta"><span x-text="ABM.utils.num(k.deadUnits)"></span> units with no sale in <span x-text="deadDays"></span> days</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+          <a href="pos.html" class="stat stat-warning" title="Open the POS to clear slow stock">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Never sold</div><div class="stat-value" x-text="ABM.utils.num(k.neverSold)"></div></div>
+              <span class="chip chip-warning" x-html="ABM.icon('warning')"></span>
+            </div>
+            <div class="stat-meta">lines that have never had a sale at this branch</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+          <a href="transfers.html" class="stat" title="Move slow stock to another branch">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0"><div class="stat-label">Oldest line</div><div class="stat-value" x-text="k.oldestDays ? k.oldestDays + ' days' : '-'"></div></div>
+              <span class="chip chip-slate" x-html="ABM.icon('transfer')"></span>
+            </div>
+            <div class="stat-meta">consider a transfer or a clearance price</div>
+            <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+          </a>
+        </div>
+        <div class="card mt-4">
+          <div class="card-header">
+            <div><div class="card-title">Dead stock</div><div class="card-subtitle">Stock on hand with no sale in the last <span x-text="deadDays"></span> days</div></div>
+            <div class="flex items-center gap-2 no-print">
+              <label class="text-xs text-slate-500" for="dead-days">Window</label>
+              <select id="dead-days" class="select input-sm !w-auto" x-model.number="deadDays">
+                <option value="30">30 days</option>
+                <option value="60">60 days</option>
+                <option value="90">90 days</option>
+                <option value="180">180 days</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th class="hidden md:table-cell" x-show="showBranch">Branch</th>
+                  <th class="hidden sm:table-cell">Type</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Days since sale</th>
+                  <th class="num hidden md:table-cell">Unit cost</th>
+                  <th class="num">Value tied up</th>
+                  <th class="actions no-print">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in pager.items" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="'product-view.html?id=' + r.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[11rem] sm:max-w-[18rem]" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400 mono" x-text="r.sku"></div>
+                      <div class="text-[11px] text-slate-400 md:hidden" x-show="showBranch" x-text="r.branchCode"></div>
+                    </td>
+                    <td class="hidden md:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                    <td class="hidden sm:table-cell"><span x-html="$badge(r.type)"></span></td>
+                    <td class="num font-semibold" x-text="ABM.utils.num(r.qty)"></td>
+                    <td class="num">
+                      <span class="badge" :class="r.days === null ? 'badge-red' : r.days > 120 ? 'badge-red' : 'badge-amber'" x-text="r.days === null ? 'Never sold' : r.days + ' d'"></span>
+                      <div class="text-[11px] text-slate-400" x-show="r.lastSale" x-text="$date(r.lastSale)"></div>
+                    </td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.unitCost, {decimals:0})"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(r.value, {decimals:0})"></td>
+                    <td class="actions no-print">
+                      <a href="transfers.html" class="btn btn-ghost btn-sm whitespace-nowrap"><span x-html="ABM.icon('transfer','w-4 h-4')"></span><span class="hidden sm:inline">Transfer</span></a>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="!pager.items.length">
+                  <tr><td colspan="8">
+                    <div class="empty">
+                      <span x-html="ABM.icon('sparkles')"></span>
+                      <div class="empty-title">No dead stock</div>
+                      <div class="text-sm mt-1">Everything on the shelf has sold within the last <span x-text="deadDays"></span> days.</div>
+                    </div>
+                  </td></tr>
+                </template>
+              </tbody>
+              <tfoot x-show="rows.length">
+                <tr>
+                  <td :colspan="showBranch ? 4 : 3" class="hidden sm:table-cell">Totals</td>
+                  <td class="sm:hidden">Totals</td>
+                  <td class="num" x-text="ABM.utils.num(k.deadUnits)"></td>
+                  <td class="num"></td>
+                  <td class="num hidden md:table-cell"></td>
+                  <td class="num whitespace-nowrap" x-text="$money(k.deadValue, {decimals:0})"></td>
+                  <td class="no-print"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print">
+            <div>Showing <b class="text-slate-800" x-text="pager.from"></b>&ndash;<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNumbers" :key="'dp' + n">
+                <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+              </template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- ============================================ STOCK BY BRANCH MATRIX -->
+      <template x-if="tab === 'matrix'">
+      <div>
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Stock by branch</div><div class="card-subtitle">Quantity of every stocked product at each branch</div></div>
+            <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' product' + (pager.total === 1 ? '' : 's')"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th class="hidden sm:table-cell">Type</th>
+                  <template x-for="b in branches" :key="'mh' + b.id"><th class="num" x-text="b.code"></th></template>
+                  <th class="num">Total</th>
+                  <th class="num hidden md:table-cell">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in pager.items" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="'product-view.html?id=' + r.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[11rem] sm:max-w-[20rem]" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400 mono" x-text="r.sku"></div>
+                    </td>
+                    <td class="hidden sm:table-cell"><span x-html="$badge(r.type)"></span></td>
+                    <template x-for="b in branches" :key="'mc' + r.key + b.id">
+                      <td class="num" :class="(r.qtys[b.id] || 0) === 0 ? 'text-slate-300' : (r.qtys[b.id] || 0) <= r.min ? 'text-amber-700 font-semibold' : 'text-slate-700'" x-text="ABM.utils.num(r.qtys[b.id] || 0)"></td>
+                    </template>
+                    <td class="num font-bold text-slate-900" x-text="ABM.utils.num(r.total)"></td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.value, {decimals:0})"></td>
+                  </tr>
+                </template>
+                <template x-if="!pager.items.length">
+                  <tr><td :colspan="branches.length + 4">
+                    <div class="empty">
+                      <span x-html="ABM.icon('grid')"></span>
+                      <div class="empty-title">No stock to show</div>
+                      <div class="text-sm mt-1">No stock-tracked product holds quantity at any branch.</div>
+                    </div>
+                  </td></tr>
+                </template>
+              </tbody>
+              <tfoot x-show="rows.length">
+                <tr>
+                  <td>Totals</td>
+                  <td class="hidden sm:table-cell"></td>
+                  <template x-for="b in branches" :key="'mf' + b.id"><td class="num" x-text="ABM.utils.num(matrixTotal(b.id))"></td></template>
+                  <td class="num" x-text="ABM.utils.num(k.matrixUnits)"></td>
+                  <td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(k.matrixValue, {decimals:0})"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print">
+            <div>Showing <b class="text-slate-800" x-text="pager.from"></b>&ndash;<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNumbers" :key="'mp' + n">
+                <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+              </template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+      </template>
+    </div>
+  </main>
+
+  <script>
+    function inventoryReportPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const MOVEMENT_TYPES = ['purchase', 'sale', 'sale_return', 'transfer_in', 'transfer_out', 'transfer_return', 'adjustment', 'count_in', 'count_out', 'supplier_return', 'supplier_replacement', 'scrap', 'repair', 'defective', 'opening'];
+      const TYPE_CLASS = { purchase: 'badge-green', sale: 'badge-navy', sale_return: 'badge-blue', transfer_in: 'badge-green', transfer_out: 'badge-amber', transfer_return: 'badge-amber', adjustment: 'badge-purple', count_in: 'badge-green', count_out: 'badge-red', supplier_return: 'badge-amber', supplier_replacement: 'badge-green', scrap: 'badge-red', repair: 'badge-amber', defective: 'badge-red', opening: 'badge-slate' };
+      const d10 = (v) => String(v || '').slice(0, 10);
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branch: session.branch() || { code: '', name: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        company: db.setting('company_name', 'Abbott Mobile'),
+        movementTypes: MOVEMENT_TYPES,
+        tab: 'movements',
+        deadDays: 60,
+        range: null, page: 1,
+        f: { branch: 'all', product: '', type: '', q: '' },
+        rows: [], counts: { movements: 0, low: 0, dead: 0, matrix: 0 },
+        k: { qtyIn: 0, qtyOut: 0, valueIn: 0, valueOut: 0, serialized: 0, reorderUnits: 0, reorderValue: 0, deadUnits: 0, deadValue: 0, neverSold: 0, oldestDays: 0, matrixUnits: 0, matrixValue: 0 },
+
+        get tabs() {
+          const t = [{ key: 'movements', label: 'Stock movements' }, { key: 'low', label: 'Low stock' }, { key: 'dead', label: 'Dead stock' }];
+          if (this.isSuperAdmin) t.push({ key: 'matrix', label: 'Stock by branch' });
+          return t;
+        },
+        get tabLabel() { const t = this.tabs.find((x) => x.key === this.tab); return t ? t.label : ''; },
+        get scopeLabel() { return this.f.branch === 'all' ? 'All branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.f.branch === 'all' && this.branches.length > 1; },
+        get subtitle() { return this.tabLabel + ' - ' + this.scopeLabel + (this.tab === 'movements' && this.range ? ' - ' + this.range.label : ''); },
+        get rowNoun() { return this.tab === 'movements' ? 'movements' : this.tab === 'low' ? 'low stock lines' : this.tab === 'dead' ? 'dead stock lines' : 'products'; },
+        get hasFilters() { return !!(this.f.q || this.f.product || (this.tab === 'movements' && this.f.type)); },
+        get productOptions() { return utils.sortBy(db.all('products').filter((p) => db.isStockTracked(p)).map((p) => ({ id: p.id, label: db.productLabel(p.id) })), 'label'); },
+        get pager() { return utils.paginate(this.rows, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+
+        typeClass(t) { return TYPE_CLASS[t] || 'badge-slate'; },
+        matrixTotal(bid) { return this.rows.reduce((a, r) => a + (Number(r.qtys[bid]) || 0), 0); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); this.f.branch = (b === 'all' || this.branches.some((x) => String(x.id) === b)) ? b : 'all'; }
+          const t = utils.qs('tab'); if (this.tabs.some((x) => x.key === t)) this.tab = t;
+          const p = utils.qs('product'); if (p && db.find('products', p)) this.f.product = String(p);
+          const mt = utils.qs('type'); if (MOVEMENT_TYPES.includes(mt)) this.f.type = mt;
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'report-inventory');
+          this.compute();
+          if (this.tab !== 'movements') this.scrollTabIntoView();
+          ['branch', 'product', 'type', 'q'].forEach((key) => this.$watch('f.' + key, () => { this.page = 1; this.compute(); }));
+          this.$watch('deadDays', () => { this.page = 1; this.compute(); });
+        },
+
+        setTab(key) { this.tab = key; this.page = 1; this.compute(); this.scrollTabIntoView(); },
+        scrollTabIntoView() {
+          this.$nextTick(() => {
+            const el = document.getElementById('tab-' + this.tab);
+            if (el && el.scrollIntoView) { try { el.scrollIntoView({ block: 'nearest', inline: 'center' }); } catch (e) { /* older engines */ } }
+          });
+        },
+        clearFilters() { this.f.q = ''; this.f.product = ''; this.f.type = ''; },
+
+        branchIds() { return this.f.branch === 'all' ? this.branches.map((b) => b.id) : [Number(this.f.branch)]; },
+
+        compute() {
+          this.counts = { movements: this.movementRows(true), low: this.lowRows(true), dead: this.deadRows(true), matrix: this.matrixRows(true) };
+          if (this.tab === 'movements') this.rows = this.movementRows();
+          else if (this.tab === 'low') this.rows = this.lowRows();
+          else if (this.tab === 'dead') this.rows = this.deadRows();
+          else this.rows = this.matrixRows();
+        },
+
+        /* ------------------------------------------------- movements ledger */
+        movementRows(countOnly) {
+          const ids = this.branchIds();
+          const q = String(this.f.q || '').trim().toLowerCase();
+          const units = {}; db.all('product_imeis').forEach((u) => { units[u.id] = u; });
+          const nums = { sale: {}, purchase: {}, transfer: {}, repair_job: {}, sale_return: {} };
+          db.all('sales').forEach((s) => { nums.sale[s.id] = s.invoice_no; });
+          db.all('purchases').forEach((s) => { nums.purchase[s.id] = s.purchase_no; });
+          db.all('stock_transfers').forEach((s) => { nums.transfer[s.id] = s.transfer_no; });
+          db.all('repair_jobs').forEach((s) => { nums.repair_job[s.id] = s.job_no; });
+          db.all('sale_returns').forEach((s) => { nums.sale_return[s.id] = s.return_no; });
+          const hrefs = { sale: 'sale-view.html?id=', purchase: 'purchase-view.html?id=', transfer: 'transfer-view.html?id=', repair_job: 'repair-view.html?id=', sale_return: 'returns.html?id=' };
+          let qtyIn = 0, qtyOut = 0, valueIn = 0, valueOut = 0, serialized = 0;
+          const out = [];
+          db.all('stock_movements').forEach((m) => {
+            if (!ids.includes(Number(m.branch_id))) return;
+            if (!this.range.contains(m.created_at)) return;
+            if (this.f.product && String(m.product_id) !== String(this.f.product)) return;
+            if (this.f.type && m.movement_type !== this.f.type) return;
+            const unit = m.imei_id ? units[m.imei_id] : null;
+            const label = db.productLabel(m.product_id);
+            const ref = nums[m.reference_type] && nums[m.reference_type][m.reference_id]
+              ? { href: hrefs[m.reference_type] + m.reference_id, label: nums[m.reference_type][m.reference_id] } : null;
+            if (q && ![label, unit ? unit.imei : '', ref ? ref.label : '', m.notes, m.movement_type].some((v) => String(v || '').toLowerCase().includes(q))) return;
+            const qty = Number(m.quantity) || 0;
+            const cost = Number(m.unit_cost) || 0;
+            if (qty > 0) { qtyIn += qty; valueIn += qty * cost; } else if (qty < 0) { qtyOut += -qty; valueOut += -qty * cost; }
+            if (unit) serialized += 1;
+            if (!countOnly) out.push({ ...m, productLabel: label, serial: unit ? unit.imei : '', branchCode: db.branchCode(m.branch_id), ref, userName: m.user_id ? db.userName(m.user_id) : 'System' });
+            else out.push(1);
+          });
+          if (countOnly) return out.length;
+          this.k = { ...this.k, qtyIn, qtyOut, valueIn: utils.round2(valueIn), valueOut: utils.round2(valueOut), serialized };
+          return utils.sortBy(out, (m) => String(m.created_at || '') + String(m.id).padStart(8, '0'), 'desc');
+        },
+
+        /* ------------------------------------------------------- low stock */
+        lastPurchase(productId) {
+          const items = db.all('purchase_items').filter((i) => String(i.product_id) === String(productId));
+          let best = null;
+          items.forEach((i) => {
+            const p = db.find('purchases', i.purchase_id);
+            if (!p || p.status === 'cancelled') return;
+            if (!best || d10(p.purchase_date) > d10(best.date)) best = { date: p.purchase_date, cost: Number(i.unit_cost) || 0, supplierId: p.supplier_id };
+          });
+          return best;
+        },
+        lowRows(countOnly) {
+          const ids = this.branchIds();
+          const q = String(this.f.q || '').trim().toLowerCase();
+          const out = [];
+          let reorderUnits = 0, reorderValue = 0;
+          db.all('products').forEach((p) => {
+            if (!p.is_active || !db.isStockTracked(p)) return;
+            if (this.f.product && String(p.id) !== String(this.f.product)) return;
+            const label = db.productLabel(p.id);
+            if (q && ![label, p.sku, p.model, db.brandName(p.brand_id)].some((v) => String(v || '').toLowerCase().includes(q))) return;
+            const min = Number(p.min_stock) || 0;
+            ids.forEach((bid) => {
+              const row = db.first('branch_stock', (s) => s.branch_id == bid && s.product_id == p.id);
+              const qty = row ? Number(row.quantity) || 0 : 0;
+              if (qty > min) return;
+              if (min <= 0 && !row) return;
+              const last = this.lastPurchase(p.id);
+              const lastCost = last ? last.cost : (row && row.avg_cost ? row.avg_cost : Number(p.cost_price) || 0);
+              const reorder = Math.max(1, Math.max(Number(p.reorder_qty) || 0, min * 2 - qty));
+              const supplierId = p.supplier_id || (last ? last.supplierId : null);
+              reorderUnits += reorder; reorderValue += reorder * lastCost;
+              if (!countOnly) out.push({
+                key: p.id + '-' + bid, product_id: p.id, label, sku: p.sku || '-', branchCode: db.branchCode(bid), branchId: bid,
+                qty, min, reorder, lastCost: utils.round2(lastCost), reorderValue: utils.round2(reorder * lastCost),
+                supplierId, supplierName: supplierId ? db.supplierName(supplierId) : '',
+              });
+              else out.push(1);
+            });
+          });
+          if (countOnly) return out.length;
+          this.k = { ...this.k, reorderUnits, reorderValue: utils.round2(reorderValue) };
+          return utils.sortBy(out, (r) => r.qty * 1000 - r.min, 'asc');
+        },
+
+        /* ------------------------------------------------------ dead stock */
+        deadRows(countOnly) {
+          const ids = this.branchIds();
+          const q = String(this.f.q || '').trim().toLowerCase();
+          const cutoff = utils.isoDate(utils.addDays(new Date(), -Math.abs(Number(this.deadDays) || 60)));
+          const lastSale = {};
+          db.all('stock_movements').forEach((m) => {
+            if (!['sale', 'repair'].includes(m.movement_type)) return;
+            const key = m.branch_id + '|' + m.product_id;
+            const d = d10(m.created_at);
+            if (!lastSale[key] || d > lastSale[key]) lastSale[key] = d;
+          });
+          const today = utils.parseDate(utils.today());
+          const out = [];
+          let deadUnits = 0, deadValue = 0, neverSold = 0, oldestDays = 0;
+          db.all('branch_stock').forEach((s) => {
+            const qty = Number(s.quantity) || 0;
+            if (qty <= 0 || !ids.includes(Number(s.branch_id))) return;
+            const p = db.find('products', s.product_id);
+            if (!p || !db.isStockTracked(p)) return;
+            if (this.f.product && String(p.id) !== String(this.f.product)) return;
+            const label = db.productLabel(p.id);
+            if (q && ![label, p.sku, p.model, db.brandName(p.brand_id)].some((v) => String(v || '').toLowerCase().includes(q))) return;
+            const last = lastSale[s.branch_id + '|' + s.product_id] || null;
+            if (last && last > cutoff) return;
+            const days = last ? Math.round((today - utils.parseDate(last)) / 86400000) : null;
+            const unitCost = Number(s.avg_cost) || 0;
+            const value = utils.round2(qty * unitCost);
+            deadUnits += qty; deadValue += value;
+            if (days === null) neverSold += 1; else oldestDays = Math.max(oldestDays, days);
+            if (!countOnly) out.push({ key: s.branch_id + '-' + s.product_id, product_id: p.id, label, sku: p.sku || '-', type: db.productType(p), branchCode: db.branchCode(s.branch_id), qty, days, lastSale: last, unitCost, value });
+            else out.push(1);
+          });
+          if (countOnly) return out.length;
+          this.k = { ...this.k, deadUnits, deadValue: utils.round2(deadValue), neverSold, oldestDays };
+          return utils.sortBy(out, 'value', 'desc');
+        },
+
+        /* --------------------------------------------- stock by branch matrix */
+        matrixRows(countOnly) {
+          if (!this.isSuperAdmin) return countOnly ? 0 : [];
+          const q = String(this.f.q || '').trim().toLowerCase();
+          const out = [];
+          let matrixUnits = 0, matrixValue = 0;
+          db.all('products').forEach((p) => {
+            if (!db.isStockTracked(p)) return;
+            if (this.f.product && String(p.id) !== String(this.f.product)) return;
+            const label = db.productLabel(p.id);
+            if (q && ![label, p.sku, p.model, db.brandName(p.brand_id)].some((v) => String(v || '').toLowerCase().includes(q))) return;
+            const qtys = {}; let total = 0, value = 0;
+            this.branches.forEach((b) => {
+              const row = db.first('branch_stock', (s) => s.branch_id == b.id && s.product_id == p.id);
+              const qty = row ? Number(row.quantity) || 0 : 0;
+              qtys[b.id] = qty; total += qty; value += qty * (row ? Number(row.avg_cost) || 0 : 0);
+            });
+            if (total <= 0) return;
+            matrixUnits += total; matrixValue += value;
+            if (!countOnly) out.push({ key: 'p' + p.id, product_id: p.id, label, sku: p.sku || '-', type: db.productType(p), min: Number(p.min_stock) || 0, qtys, total, value: utils.round2(value) });
+            else out.push(1);
+          });
+          if (countOnly) return out.length;
+          this.k = { ...this.k, matrixUnits, matrixValue: utils.round2(matrixValue) };
+          return utils.sortBy(out, 'value', 'desc');
+        },
+
+        /* ------------------------------------------------------------- csv */
+        exportCsv() {
+          let cols = [];
+          if (this.tab === 'movements') cols = [
+            { label: 'Date', value: (r) => utils.datetime(r.created_at) }, { label: 'Branch', key: 'branchCode' }, { label: 'Product', key: 'productLabel' },
+            { label: 'IMEI / Serial', key: 'serial' }, { label: 'Type', value: (r) => utils.titleCase(r.movement_type) }, { label: 'Quantity', key: 'quantity' },
+            { label: 'Unit cost', key: 'unit_cost' }, { label: 'Balance after', key: 'balance_after' }, { label: 'Reference', value: (r) => (r.ref ? r.ref.label : '') },
+            { label: 'Notes', key: 'notes' }, { label: 'User', key: 'userName' },
+          ];
+          else if (this.tab === 'low') cols = [
+            { label: 'Branch', key: 'branchCode' }, { label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Quantity', key: 'qty' },
+            { label: 'Minimum', key: 'min' }, { label: 'Reorder qty', key: 'reorder' }, { label: 'Last purchase cost', key: 'lastCost' },
+            { label: 'Estimated value', key: 'reorderValue' }, { label: 'Supplier', key: 'supplierName' },
+          ];
+          else if (this.tab === 'dead') cols = [
+            { label: 'Branch', key: 'branchCode' }, { label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Type', value: (r) => ui.statusLabel(r.type) },
+            { label: 'Quantity', key: 'qty' }, { label: 'Days since last sale', value: (r) => (r.days === null ? 'Never sold' : r.days) },
+            { label: 'Last sale', key: 'lastSale' }, { label: 'Unit cost', key: 'unitCost' }, { label: 'Value tied up', key: 'value' },
+          ];
+          else cols = [{ label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Type', value: (r) => ui.statusLabel(r.type) }]
+            .concat(this.branches.map((b) => ({ label: b.code, value: (r) => r.qtys[b.id] || 0 })))
+            .concat([{ label: 'Total', key: 'total' }, { label: 'Value', key: 'value' }]);
+          if (!utils.download('inventory-' + this.tab + '-' + utils.today() + '.csv', utils.toCsv(this.rows, cols))) return;
+          ui.success('Exported ' + this.rows.length + ' row' + (this.rows.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

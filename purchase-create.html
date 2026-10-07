@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Receive Stock · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="purchase-create" data-title="Receive Stock" data-perm="purchases.add">
+  <main x-data="purchaseCreatePage()" @keydown.escape.window="onEscape()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="purchases.html" class="hover:text-navy-700">Purchases</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="po ? 'Receive ' + po.po_no : 'New purchase'"></span></div>
+        <h2 class="page-title">Receive stock</h2>
+        <p class="page-subtitle">Goods are added to <b x-text="branchName"></b> stock and the amount is posted to the supplier's ledger.</p>
+      </div>
+      <div class="page-actions">
+        <a :href="po ? 'purchase-order-view.html?id=' + po.id : 'purchases.html'" class="btn btn-secondary">Cancel</a>
+        <button type="button" class="btn btn-money" :disabled="busy || !lines.length" @click="save()"><span x-html="ABM.icon('check')"></span>Receive &amp; Save</button>
+      </div>
+    </div>
+
+    <!-- Receiving against a purchase order -->
+    <template x-if="po">
+      <div class="card mb-4 border-navy-200">
+        <div class="card-body !py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span class="chip chip-navy flex-none" x-html="ABM.icon('document')"></span>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold text-slate-800">Receiving against <a :href="'purchase-order-view.html?id=' + po.id" class="text-navy-700 hover:underline mono" x-text="po.po_no"></a> <span x-html="$badge(po.status, po.status === 'partial' ? 'Partially Received' : undefined)"></span></div>
+            <div class="text-xs text-slate-500">Ordered <span x-text="$date(po.order_date)"></span><span x-show="po.expected_date"> · expected <span :class="poOverdue && 'text-rose-600 font-semibold'" x-text="$date(po.expected_date)"></span></span> · <b class="text-slate-700" x-text="ABM.utils.num(poRemainingUnits)"></b> unit(s) still outstanding. Quantities below are pre-filled with the balance — change them if the delivery is short.</div>
+          </div>
+          <a :href="'purchase-order-view.html?id=' + po.id" class="btn btn-secondary btn-sm flex-none">Open order</a>
+        </div>
+      </div>
+    </template>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <!-- LEFT: supplier + lines -->
+      <div class="xl:col-span-2 space-y-4 min-w-0">
+        <!-- Supplier & details -->
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Supplier &amp; details</div><div class="card-subtitle">Who you bought from and where the stock is received</div></div>
+            <a href="suppliers.html" class="text-xs font-semibold text-navy-700 hover:underline">Manage suppliers</a>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="pc-supplier">Supplier <span class="req">*</span></label>
+                <template x-if="!supplier && !po">
+                  <div class="relative" @click.outside="sup.open = false">
+                    <div class="input-icon">
+                      <span x-html="ABM.icon('search')"></span>
+                      <input id="pc-supplier" x-ref="supInput" type="text" class="input" :class="errors.supplier && 'is-invalid'" placeholder="Search supplier by name, contact person or phone…" x-model="sup.q" @focus="sup.open = true" @input="sup.open = true" @keydown.enter.prevent="pickFirstSupplier()" @keydown.down.prevent="sup.open = true" autocomplete="off">
+                    </div>
+                    <div x-show="sup.open" x-cloak class="dropdown left-0 right-0 mt-1 max-h-72">
+                      <div class="dropdown-label" x-text="sup.q.trim() ? 'Matching suppliers' : 'Active suppliers'"></div>
+                      <template x-for="s in supplierResults" :key="s.id">
+                        <button type="button" class="dropdown-item" @click="selectSupplier(s)">
+                          <span class="w-8 h-8 rounded-lg bg-navy-50 text-navy-700 flex-none flex items-center justify-center" x-html="ABM.icon('store','w-4 h-4')"></span>
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate font-medium text-slate-800" x-text="s.name"></span>
+                            <span class="block text-xs text-slate-500 truncate" x-text="[s.contact_person, s.phone].filter(Boolean).join(' · ') || 'No contact details'"></span>
+                          </span>
+                          <span class="badge flex-none" :class="s.balance > 0 ? 'badge-red' : 'badge-green'" x-text="s.balance > 0 ? 'Owe ' + $money(s.balance, {decimals:0}) : 'Settled'"></span>
+                        </button>
+                      </template>
+                      <div x-show="!supplierResults.length" class="px-2.5 py-3 text-sm text-slate-500">No supplier matches. <a href="suppliers.html" class="text-navy-700 font-semibold hover:underline">Add one in Suppliers</a>.</div>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="supplier">
+                  <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <span class="chip chip-navy" x-html="ABM.icon('store')"></span>
+                    <div class="min-w-0 flex-1">
+                      <a :href="'supplier-view.html?id=' + supplier.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate" x-text="supplier.name"></a>
+                      <div class="text-xs text-slate-500 truncate" x-text="[supplier.contact_person, supplier.phone, supplier.email].filter(Boolean).join(' · ') || 'No contact details'"></div>
+                    </div>
+                    <div class="text-right flex-none min-w-0">
+                      <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Payable</div>
+                      <div class="text-sm font-bold tabular" :class="supplier.balance > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(supplier.balance, {decimals:0})"></div>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon flex-none" title="Change supplier" x-show="!po" @click="clearSupplier()" x-html="ABM.icon('x','w-4 h-4')"></button>
+                    <span class="badge badge-navy flex-none" x-show="po" title="Fixed by the purchase order">On order</span>
+                  </div>
+                </template>
+                <p class="field-error" x-show="errors.supplier" x-text="errors.supplier"></p>
+              </div>
+
+              <div>
+                <label class="label" for="pc-branch">Receiving branch <span class="req">*</span></label>
+                <template x-if="isSuperAdmin && !po">
+                  <select id="pc-branch" class="select" x-model="form.branch_id" :class="errors.branch && 'is-invalid'">
+                    <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                </template>
+                <template x-if="!isSuperAdmin || po">
+                  <div class="input bg-slate-50 flex items-center gap-2"><span class="badge badge-slate" x-text="branchCode"></span><span class="truncate" x-text="branchName"></span></div>
+                </template>
+                <p class="field-error" x-show="errors.branch" x-text="errors.branch"></p>
+              </div>
+              <div>
+                <label class="label" for="pc-date">Purchase date <span class="req">*</span></label>
+                <input id="pc-date" type="date" class="input" x-model="form.purchase_date" :max="today" :class="errors.date && 'is-invalid'">
+                <p class="field-error" x-show="errors.date" x-text="errors.date"></p>
+              </div>
+              <div>
+                <label class="label" for="pc-inv">Supplier invoice no.</label>
+                <input id="pc-inv" type="text" class="input mono" x-model="form.supplier_invoice_no" placeholder="e.g. SI-48211" maxlength="40">
+                <p class="help">The supplier's bill / challan number, for reconciliation.</p>
+              </div>
+              <div>
+                <label class="label" for="pc-notes">Notes</label>
+                <input id="pc-notes" type="text" class="input" x-model="form.notes" placeholder="Optional — delivery, condition, terms…" maxlength="300">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Items -->
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Items received</div><div class="card-subtitle"><span x-text="lines.length"></span> line<span x-text="lines.length === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(totals.units)"></span> units</div></div>
+            <button type="button" class="btn btn-primary btn-sm" @click="openBrowse()"><span x-html="ABM.icon('cube')"></span>Browse products</button>
+          </div>
+          <div class="card-body space-y-4">
+            <div class="relative" @click.outside="search.open = false">
+              <div class="input-icon">
+                <span x-html="ABM.icon('scan')"></span>
+                <input x-ref="productSearch" type="text" class="input" placeholder="Scan barcode or search by name, model, SKU, brand…" x-model="search.q" @focus="search.open = true" @input="onSearchInput()" @keydown.enter.prevent="pickFirstProduct()" autocomplete="off" aria-label="Search products">
+              </div>
+              <div x-show="search.open && search.q.trim()" x-cloak class="dropdown left-0 right-0 mt-1 max-h-80">
+                <template x-for="p in productResults" :key="p.id">
+                  <button type="button" class="dropdown-item" @click="addLine(p.id)">
+                    <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center" :class="p.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate font-medium text-slate-800" x-text="p.label"></span>
+                      <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · <span x-text="p.categoryName"></span><span x-show="p.serialized"> · <span x-text="p.serialLabel"></span></span> · stock <span x-text="p.qty"></span></span>
+                    </span>
+                    <span class="text-xs font-semibold tabular text-slate-600 flex-none" x-text="$money(p.cost_price, {decimals:0})"></span>
+                  </button>
+                </template>
+                <div x-show="!productResults.length" class="px-2.5 py-3 text-sm text-slate-500">No stock-tracked product matches. Services and inactive products cannot be purchased.</div>
+              </div>
+              <p class="help">Press <span class="kbd">Enter</span> to add the first match. A scanned barcode is added instantly. Services / labor items are excluded.</p>
+            </div>
+            <p class="field-error" x-show="errors.lines" x-text="errors.lines"></p>
+
+            <template x-if="!lines.length">
+              <div class="empty border border-dashed border-slate-300 rounded-xl">
+                <span x-html="ABM.icon('cube')"></span>
+                <div class="empty-title">No items yet</div>
+                <div class="text-sm mt-1">Scan a barcode, search above or browse the catalog to add products.</div>
+                <button type="button" class="btn btn-secondary btn-sm mt-4" @click="openBrowse()">Browse products</button>
+              </div>
+            </template>
+
+            <template x-for="(line, idx) in lines" :key="line.key">
+              <div class="rounded-xl border p-4" :class="line.error ? 'border-rose-300' : 'border-slate-200'">
+                <div class="flex items-start gap-3">
+                  <span class="w-10 h-10 rounded-xl flex-none flex items-center justify-center" :class="line.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(line.icon,'w-5 h-5')"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                      <a :href="'product-view.html?id=' + line.product_id" class="font-semibold text-slate-800 hover:text-navy-700 truncate max-w-full" x-text="line.label"></a>
+                      <span x-html="$badge(line.product_type)"></span>
+                      <span class="badge badge-navy" x-show="line.serialized" x-text="line.serialLabel + ' tracked'"></span>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
+                      <span class="mono truncate max-w-full" x-text="line.sku"></span>
+                      <span class="whitespace-nowrap">· in stock at <span x-text="branchCode"></span>: <b class="text-slate-700" x-text="line.stockQty"></b></span>
+                      <span class="whitespace-nowrap">· catalog cost <span x-text="$money(line.catalogCost, {decimals:0})"></span></span>
+                    </div>
+                    <div class="text-xs mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 min-w-0" x-show="line.poRemaining !== null">
+                      <span class="badge badge-navy flex-none">On order</span>
+                      <span class="text-slate-500"><b class="text-slate-700" x-text="line.poRemaining"></b> of <span x-text="line.poOrdered"></span> still to come</span>
+                      <span class="text-slate-400" x-show="line.poReceived">· <span x-text="line.poReceived"></span> already received</span>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600 flex-none" title="Remove line" @click="removeLine(idx)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+                  <div>
+                    <label class="label" x-text="line.serialized ? 'Expected units' : 'Quantity'"></label>
+                    <template x-if="!line.serialized">
+                      <input type="number" min="1" step="1" class="input" x-model.number="line.qty" @input="recalc()" aria-label="Quantity">
+                    </template>
+                    <template x-if="line.serialized">
+                      <div class="input-group"><input type="number" min="1" step="1" class="input" x-model.number="line.expected" @input="revalidate()" aria-label="Expected units"><span class="addon" x-text="line.qty + ' entered'"></span></div>
+                    </template>
+                    <p class="help" x-show="line.serialized">Quantity is locked to valid <span x-text="line.serialLabel"></span> entries below.</p>
+                    <p class="help text-amber-700 font-medium" x-show="line.poRemaining !== null && lineQty(line) > line.poRemaining">Over-delivery — <span x-text="line.poRemaining"></span> unit(s) were still on order.</p>
+                  </div>
+                  <div>
+                    <label class="label">Unit cost</label>
+                    <div class="input-group"><input type="number" min="0" step="0.01" class="input input-money" x-model.number="line.unit_cost" @input="recalc()" aria-label="Unit cost"><span class="addon">Rs.</span></div>
+                    <p class="help text-amber-700 font-medium" x-show="line.unit_cost !== '' && Number(line.unit_cost) !== line.catalogCost">Differs from catalog cost — <span x-text="opts.updateCost ? 'catalog cost will be updated on save.' : 'catalog cost stays unchanged.'"></span></p>
+                  </div>
+                  <div>
+                    <label class="label">Line total</label>
+                    <div class="input input-money bg-slate-50 font-bold text-slate-900" x-text="$money(line.total)"></div>
+                  </div>
+                </div>
+
+                <!-- Serialized unit entry -->
+                <template x-if="line.serialized">
+                  <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div class="text-sm font-semibold text-slate-800 flex items-center gap-2"><span x-html="ABM.icon('qr','w-4 h-4 text-slate-500')"></span><span x-text="line.serialLabel + ' entry'"></span></div>
+                      <div class="flex items-center gap-2 text-xs">
+                        <span class="font-semibold tabular" :class="line.qty > 0 && line.qty === Number(line.expected) ? 'text-emerald-700' : 'text-slate-600'" x-text="line.qty + ' of ' + (Number(line.expected) || 0) + ' entered'"></span>
+                        <span class="badge badge-red" x-show="line.invalidCount" x-text="line.invalidCount + ' invalid'"></span>
+                      </div>
+                    </div>
+                    <div class="progress mt-2" :class="line.qty > 0 && line.qty >= Number(line.expected) && 'progress-money'"><div :style="'width:' + line.progress + '%'"></div></div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                      <div>
+                        <label class="label">Scan / type one <span x-text="line.serialLabel"></span> and press Enter</label>
+                        <div class="input-icon">
+                          <span x-html="ABM.icon('scan')"></span>
+                          <input type="text" class="input mono" :data-scan="line.key" :placeholder="line.serialType === 'imei' ? '15-digit IMEI' : 'Serial number'" :inputmode="line.serialType === 'imei' ? 'numeric' : 'text'" x-model="line.scan" @keydown.enter.prevent="addScanned(line)" autocomplete="off" aria-label="Scan unit">
+                        </div>
+                        <p class="help">Each scan is appended to the list. Duplicates are rejected.</p>
+                      </div>
+                      <div>
+                        <label class="label">Or paste a list (one per line)</label>
+                        <textarea class="textarea mono text-xs !min-h-[4.5rem]" rows="3" x-model="line.unitsText" @input="revalidate()" :placeholder="line.serialType === 'imei' ? '351234567890123\n351234567890124' : 'DL5420ABC1234\nDL5420ABC1235'" aria-label="Unit list"></textarea>
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 mt-3" x-show="line.units.length">
+                      <template x-for="u in line.units" :key="u.key">
+                        <span class="badge" :class="u.ok ? 'badge-green' : 'badge-red'" :title="u.error || 'Valid — will be registered'"><span x-html="ABM.icon(u.ok ? 'check' : 'x-circle','w-3 h-3')"></span><span class="mono" x-text="u.value"></span><span x-show="!u.ok" x-text="'· ' + u.error"></span></span>
+                      </template>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 mt-2" x-show="line.invalidCount">
+                      <button type="button" class="btn btn-secondary btn-sm" @click="removeInvalid(line)"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Remove invalid entries</button>
+                      <span class="text-xs text-slate-500">Invalid units are never registered.</span>
+                    </div>
+                  </div>
+                </template>
+                <p class="field-error mt-2" x-show="line.error" x-text="line.error"></p>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: summary -->
+      <div class="space-y-4 min-w-0">
+        <div class="card xl:sticky xl:top-20">
+          <div class="card-header"><div><div class="card-title">Summary</div><div class="card-subtitle" x-text="lines.length ? lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' · ' + ABM.utils.num(totals.units) + ' units' : 'Nothing added yet'"></div></div></div>
+          <div class="card-body space-y-3">
+            <div class="flex items-center justify-between text-sm"><span class="text-slate-500">Subtotal</span><b class="tabular text-slate-800" x-text="$money(totals.subtotal)"></b></div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="label" for="pc-disc">Discount</label>
+                <div class="input-group"><input id="pc-disc" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.discount" :class="errors.discount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="errors.discount" x-text="errors.discount"></p>
+              </div>
+              <div>
+                <label class="label" for="pc-tax">Tax</label>
+                <div class="input-group"><input id="pc-tax" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.tax" :class="errors.tax && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="errors.tax" x-text="errors.tax"></p>
+              </div>
+            </div>
+            <div class="flex items-center justify-between gap-3 rounded-xl bg-navy-800 text-white px-4 py-3 min-w-0">
+              <span class="text-xs font-bold uppercase tracking-wider text-white/70">Total</span>
+              <span class="text-xl font-extrabold tabular truncate" x-text="$money(totals.total)"></span>
+            </div>
+          </div>
+          <div class="card-body border-t border-slate-200 space-y-3">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="card-title">Payment now</div>
+              <div class="flex gap-1">
+                <button type="button" class="btn btn-ghost btn-sm" @click="form.pay_amount = totals.total">Full</button>
+                <button type="button" class="btn btn-ghost btn-sm" @click="form.pay_amount = 0">None</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="label" for="pc-pay">Amount</label>
+                <div class="input-group"><input id="pc-pay" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.pay_amount" :class="errors.pay && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="errors.pay" x-text="errors.pay"></p>
+              </div>
+              <div>
+                <label class="label" for="pc-method">Method</label>
+                <select id="pc-method" class="select" x-model="form.pay_method" :class="errors.pay_method && 'is-invalid'">
+                  <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+                </select>
+                <p class="field-error" x-show="errors.pay_method" x-text="errors.pay_method"></p>
+              </div>
+              <div class="sm:col-span-2" x-show="form.pay_method !== 'cash'">
+                <label class="label" for="pc-ref">Payment reference <span class="req" x-show="Number(form.pay_amount) > 0">*</span></label>
+                <input id="pc-ref" type="text" class="input" x-model="form.pay_reference" :class="errors.pay_reference && 'is-invalid'" placeholder="Transaction id / cheque no" maxlength="60">
+                <p class="field-error" x-show="errors.pay_reference" x-text="errors.pay_reference"></p>
+              </div>
+            </div>
+            <div class="flex items-center justify-between text-sm"><span class="text-slate-500">Balance to supplier</span><b class="tabular" :class="totals.due > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(totals.due)"></b></div>
+            <label class="flex items-start gap-2 cursor-pointer select-none text-sm">
+              <input type="checkbox" class="checkbox mt-0.5" x-model="opts.updateCost">
+              <span><span class="font-medium text-slate-800">Update product cost price</span><span class="block text-xs text-slate-500">Set each product's catalog cost to the unit cost entered here. A minimum sale price below the new cost is raised with it.</span></span>
+            </label>
+          </div>
+          <div class="card-footer space-y-2">
+            <button type="button" class="btn btn-money btn-block btn-lg" :disabled="busy || !lines.length" @click="save()"><span x-html="ABM.icon('check')"></span><span x-text="busy ? 'Saving…' : 'Receive & Save'"></span></button>
+            <p class="text-[11px] text-slate-500 text-center">A purchase number (PUR-<span x-text="branchCode"></span>-…) is assigned on save.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="h-24 lg:hidden" aria-hidden="true"></div>
+
+    <!-- Sticky mobile action bar -->
+    <div class="fixed bottom-0 inset-x-0 z-30 lg:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-3 flex items-center gap-3 no-print">
+      <div class="min-w-0 flex-1">
+        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total · <span x-text="ABM.utils.num(totals.units)"></span> units</div>
+        <div class="text-lg font-extrabold text-slate-900 truncate tabular" x-text="$money(totals.total)"></div>
+      </div>
+      <button type="button" class="btn btn-money flex-none" :disabled="busy || !lines.length" @click="save()"><span x-html="ABM.icon('check')"></span>Receive &amp; Save</button>
+    </div>
+
+    <!-- Browse products modal -->
+    <div x-show="browse.open" x-cloak class="modal-backdrop" @click.self="browse.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="browseTitle">
+        <div class="modal-header">
+          <div class="min-w-0"><div class="modal-title" id="browseTitle">Browse products</div><div class="text-xs text-slate-500">Stock-tracked products only · stock shown for <span x-text="branchCode"></span></div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="browse.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="input-icon sm:col-span-2"><span x-html="ABM.icon('search')"></span><input x-ref="browseSearch" type="search" class="input" placeholder="Search name, model, SKU…" x-model="browse.q" aria-label="Search catalog"></div>
+            <select class="select" x-model="browse.category" aria-label="Category">
+              <option value="">All categories</option>
+              <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+            </select>
+          </div>
+          <div class="border border-slate-200 rounded-xl overflow-y-auto max-h-[50vh] divide-y divide-slate-100">
+            <template x-for="p in browseResults" :key="p.id">
+              <button type="button" class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 min-w-0" @click="addLine(p.id, true)">
+                <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="p.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-medium text-slate-800 text-sm" x-text="p.label"></span>
+                  <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · <span x-text="p.categoryName"></span><span x-show="p.serialized"> · <span x-text="p.serialLabel"></span></span></span>
+                </span>
+                <span class="flex flex-col items-end gap-0.5 flex-none">
+                  <span class="text-xs font-semibold tabular text-slate-700" x-text="$money(p.cost_price, {decimals:0})"></span>
+                  <span class="badge" :class="p.qty === 0 ? 'badge-red' : 'badge-slate'" x-text="'stock ' + p.qty"></span>
+                </span>
+                <span class="badge badge-green flex-none" x-show="p.inCart" x-text="'Added ×' + p.inCart"></span>
+              </button>
+            </template>
+            <div x-show="!browseResults.length" class="empty py-8 text-sm">No products match.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="text-xs text-slate-500 mr-auto self-center" x-text="lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' in this purchase'"></span>
+          <button type="button" class="btn btn-primary" @click="browse.open = false">Done</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function purchaseCreatePage() {
+      const { db, utils, ui, session } = ABM;
+      const METHODS = ['cash', 'bank_transfer', 'card', 'jazzcash', 'easypaisa'];
+      let lineKey = 0;
+      const iconFor = (p) => (['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : db.isSerialized(p) ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube');
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories').filter((c) => c.is_active && c.product_type !== 'service'), 'name'),
+        methods: METHODS,
+        today: utils.today(),
+        products: [],
+        form: { supplier_id: '', branch_id: String(session.branchId() || ''), purchase_date: utils.today(), supplier_invoice_no: '', notes: '', discount: 0, tax: 0, pay_amount: 0, pay_method: 'cash', pay_reference: '' },
+        opts: { updateCost: true },
+        sup: { q: '', open: false },
+        search: { q: '', open: false },
+        browse: { open: false, q: '', category: '' },
+        po: null, poItems: [],
+        lines: [], errors: {}, busy: false, saved: false,
+
+        /* ------------------------------------------------------- getters */
+        get supplier() { return this.form.supplier_id ? db.find('suppliers', this.form.supplier_id) : null; },
+        get poOverdue() { return !!this.po && !!this.po.expected_date && this.po.expected_date < this.today; },
+        get poRemainingUnits() { return this.poItems.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0)), 0); },
+        lineQty(line) { return line.serialized ? (Number(line.expected) || 0) : (Number(line.qty) || 0); },
+        get branchName() { return db.branchName(this.form.branch_id); },
+        get branchCode() { return db.branchCode(this.form.branch_id); },
+        get supplierResults() {
+          const q = this.sup.q.trim().toLowerCase();
+          return utils.sortBy(db.all('suppliers').filter((s) => s.is_active && (!q || [s.name, s.contact_person, s.phone, s.email].some((v) => String(v || '').toLowerCase().includes(q)))), 'name').slice(0, 8);
+        },
+        get productResults() {
+          const q = this.search.q.trim().toLowerCase();
+          if (!q) return [];
+          return this.products.filter((p) => [p.label, p.sku, p.barcode, p.model, p.brandName, p.categoryName].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 12).map((p) => ({ ...p, qty: ABM.stock.qty(this.form.branch_id, p.id) }));
+        },
+        get browseResults() {
+          const q = this.browse.q.trim().toLowerCase();
+          const counts = {}; this.lines.forEach((l) => { counts[l.product_id] = l.serialized ? (Number(l.expected) || 0) : (Number(l.qty) || 0); });
+          return this.products.filter((p) => (!this.browse.category || String(p.category_id) === String(this.browse.category)) && (!q || [p.label, p.sku, p.barcode, p.model, p.brandName].some((v) => String(v || '').toLowerCase().includes(q)))).slice(0, 60).map((p) => ({ ...p, qty: ABM.stock.qty(this.form.branch_id, p.id), inCart: counts[p.id] || 0 }));
+        },
+        get totals() {
+          const subtotal = utils.sum(this.lines, 'total');
+          const discount = Number(this.form.discount) || 0, tax = Number(this.form.tax) || 0;
+          const total = utils.round2(Math.max(0, subtotal - discount + tax));
+          const paid = Number(this.form.pay_amount) || 0;
+          return { subtotal, discount, tax, total, paid, due: utils.round2(total - paid), units: this.lines.reduce((a, l) => a + (l.serialized ? l.qty : (Number(l.qty) || 0)), 0) };
+        },
+
+        init() {
+          this.loadProducts();
+          if (!this.isSuperAdmin) this.form.branch_id = String(session.branchId());
+          if (!this.loadPurchaseOrder()) {
+            const sid = utils.qs('supplier');
+            if (sid && db.find('suppliers', sid)) this.form.supplier_id = String(sid);
+            const pid = utils.qs('product');
+            if (pid) { if (this.products.some((p) => String(p.id) === String(pid))) this.addLine(pid, true); else ui.warn('That product is inactive or not stock-tracked, so it cannot be purchased.'); }
+          }
+          this.$watch('form.branch_id', () => { this.lines.forEach((l) => { l.stockQty = ABM.stock.qty(this.form.branch_id, l.product_id); }); });
+          this.$nextTick(() => { if (!this.form.supplier_id && this.$refs.supInput) this.$refs.supInput.focus(); });
+          window.addEventListener('beforeunload', (e) => { if (this.lines.length && !this.saved) { e.preventDefault(); e.returnValue = ''; } });
+        },
+        /** `?po=<id>`: pre-fill this delivery from an open purchase order. Returns false when there is no usable order. */
+        loadPurchaseOrder() {
+          const id = utils.qs('po');
+          if (!id) return false;
+          const po = db.find('purchase_orders', id);
+          if (!po) { ui.error('Purchase order not found — receiving as a direct purchase instead.'); return false; }
+          if (!this.isSuperAdmin && String(po.branch_id) !== String(session.branchId())) { ui.error('That purchase order belongs to another branch.'); return false; }
+          if (!['ordered', 'partial'].includes(po.status)) {
+            ui.warn('Order ' + po.po_no + ' is ' + (po.status === 'draft' ? 'still a draft — send it to the supplier first' : ui.statusLabel(po.status).toLowerCase()) + ', so nothing can be received against it.');
+            return false;
+          }
+          const items = db.where('purchase_order_items', { po_id: po.id });
+          const open = items.filter((i) => (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0) > 0);
+          if (!open.length) { ui.warn('Every line on ' + po.po_no + ' has already been delivered.'); return false; }
+          this.po = { ...po };
+          this.poItems = items;
+          this.form.supplier_id = String(po.supplier_id);
+          this.form.branch_id = String(po.branch_id);
+          this.form.notes = po.po_no + (po.terms ? ' · ' + po.terms : '');
+          let skipped = 0;
+          open.forEach((it) => { if (!this.addPoLine(it)) skipped++; });
+          if (skipped) ui.warn(skipped + ' line' + (skipped === 1 ? ' is' : 's are') + ' no longer an active stock-tracked product and could not be pre-filled.');
+          return true;
+        },
+        /** One line pre-filled with the balance still outstanding on a purchase-order line. */
+        addPoLine(item) {
+          const p = this.products.find((x) => String(x.id) === String(item.product_id));
+          if (!p) return false;
+          const ordered = Number(item.quantity) || 0;
+          const already = Math.max(0, Number(item.received_quantity) || 0);
+          const remaining = Math.max(0, ordered - already);
+          this.lines.push({
+            key: ++lineKey, product_id: p.id, label: p.label, sku: p.sku, product_type: p.product_type, icon: p.icon,
+            serialized: p.serialized, serialType: p.serialType, serialLabel: p.serialLabel,
+            catalogCost: p.cost_price, unit_cost: Number(item.unit_cost) || p.cost_price,
+            qty: p.serialized ? 0 : remaining, expected: remaining,
+            unitsText: '', scan: '', units: [], invalidCount: 0, progress: 0, total: 0, error: '',
+            stockQty: ABM.stock.qty(this.form.branch_id, p.id),
+            po_item_id: item.id, poOrdered: ordered, poReceived: already, poRemaining: remaining,
+          });
+          this.recalc();
+          return true;
+        },
+        loadProducts() {
+          this.products = utils.sortBy(db.all('products').filter((p) => p.is_active && db.isStockTracked(p)).map((p) => ({
+            id: p.id, label: db.productLabel(p.id), sku: p.sku, barcode: p.barcode || '', model: p.model || '', brandName: db.brandName(p.brand_id), categoryName: db.categoryName(p.category_id), category_id: p.category_id,
+            cost_price: Number(p.cost_price) || 0, serialized: db.isSerialized(p), serialType: db.serialType(p), serialLabel: db.isSerialized(p) ? db.serialLabel(p) : '', product_type: db.productType(p), icon: iconFor(p),
+          })), 'label');
+        },
+        onEscape() { this.browse.open = false; this.search.open = false; this.sup.open = false; },
+
+        /* ------------------------------------------------------ supplier */
+        selectSupplier(s) { this.form.supplier_id = String(s.id); this.sup.open = false; this.sup.q = ''; this.errors.supplier = ''; this.$nextTick(() => { if (this.$refs.productSearch && !this.lines.length) this.$refs.productSearch.focus(); }); },
+        pickFirstSupplier() { const s = this.supplierResults[0]; if (s) this.selectSupplier(s); },
+        clearSupplier() { this.form.supplier_id = ''; this.$nextTick(() => { if (this.$refs.supInput) this.$refs.supInput.focus(); }); },
+
+        /* --------------------------------------------------------- lines */
+        onSearchInput() {
+          this.search.open = true;
+          const q = this.search.q.trim();
+          if (q.length >= 8) { const exact = this.products.find((p) => ABM.utils.sameBarcode(p.barcode, q)); if (exact) this.addLine(exact.id); }
+        },
+        pickFirstProduct() { const p = this.productResults[0]; if (p) this.addLine(p.id); else if (this.search.q.trim()) ui.warn('No stock-tracked product matches "' + this.search.q.trim() + '".'); },
+        openBrowse() { this.browse.open = true; this.$nextTick(() => { if (this.$refs.browseSearch) this.$refs.browseSearch.focus(); }); },
+        addLine(productId, fromBrowse = false) {
+          const p = this.products.find((x) => String(x.id) === String(productId));
+          if (!p) { ui.error('Product not found or not stock-tracked.'); return; }
+          const existing = this.lines.find((l) => l.product_id === p.id);
+          if (existing) {
+            if (p.serialized) { existing.expected = (Number(existing.expected) || 0) + 1; this.revalidate(); }
+            else { existing.qty = (Number(existing.qty) || 0) + 1; this.recalc(); }
+            ui.toast(p.label + (p.serialized ? ' — expected units +1' : ' — quantity +1'), 'info');
+          } else {
+            // a product that is on the order keeps its order link even when added by hand
+            const onOrder = this.po ? this.poItems.find((i) => String(i.product_id) === String(p.id) && !this.lines.some((l) => l.po_item_id === i.id)) : null;
+            const ordered = onOrder ? Number(onOrder.quantity) || 0 : 0;
+            const already = onOrder ? Math.max(0, Number(onOrder.received_quantity) || 0) : 0;
+            this.lines.push({ key: ++lineKey, product_id: p.id, label: p.label, sku: p.sku, product_type: p.product_type, icon: p.icon, serialized: p.serialized, serialType: p.serialType, serialLabel: p.serialLabel, catalogCost: p.cost_price, unit_cost: onOrder ? Number(onOrder.unit_cost) || p.cost_price : p.cost_price, qty: p.serialized ? 0 : 1, expected: 1, unitsText: '', scan: '', units: [], invalidCount: 0, progress: 0, total: 0, error: '', stockQty: ABM.stock.qty(this.form.branch_id, p.id), po_item_id: onOrder ? onOrder.id : null, poOrdered: ordered, poReceived: already, poRemaining: onOrder ? Math.max(0, ordered - already) : null });
+            this.recalc();
+            if (fromBrowse) ui.success(p.label + ' added.');
+          }
+          this.errors.lines = '';
+          this.search.q = ''; this.search.open = false;
+          if (!fromBrowse) this.$nextTick(() => {
+            const line = this.lines.find((l) => l.product_id === p.id);
+            const scan = line && line.serialized ? document.querySelector('[data-scan="' + line.key + '"]') : null;
+            if (scan) scan.focus(); else if (this.$refs.productSearch) this.$refs.productSearch.focus();
+          });
+        },
+        removeLine(idx) { this.lines.splice(idx, 1); this.revalidate(); },
+        recalc() { this.lines.forEach((l) => { const q = l.serialized ? l.qty : (Number(l.qty) || 0); l.total = utils.round2(q * (Number(l.unit_cost) || 0)); }); },
+        tokens(line) { return String(line.unitsText || '').split(/[\s,;]+/).map((s) => ABM.stock.normalizeSerial(s, line.serialType)).filter(Boolean); },
+        shortError(msg) {
+          const m = String(msg || '');
+          if (/already registered/i.test(m)) return 'Already registered';
+          if (/luhn/i.test(m)) return 'Bad check digit';
+          if (/15 digits/i.test(m)) return 'Must be 15 digits';
+          if (/4.40 letters/i.test(m)) return 'Bad format';
+          return m.replace(/^(IMEI|Serial number)\s+"?[^"\s]*"?\s*/i, '') || 'Invalid';
+        },
+        /** Re-validate every serialized line: format, check digit, registry uniqueness and duplicates across the whole purchase. */
+        revalidate() {
+          const used = new Set();
+          this.lines.forEach((line) => {
+            if (!line.serialized) return;
+            const product = db.find('products', line.product_id);
+            line.units = this.tokens(line).map((value, idx) => {
+              const upper = value.toUpperCase();
+              let ok = true, error = '';
+              if (used.has(upper)) { ok = false; error = 'Duplicate'; }
+              else { try { ABM.stock.validateSerial(value, product); } catch (e) { ok = false; error = this.shortError(e.message); } }
+              used.add(upper);
+              return { key: idx + ':' + upper, value, ok, error };
+            });
+            line.qty = line.units.filter((u) => u.ok).length;
+            line.invalidCount = line.units.length - line.qty;
+            const expected = Number(line.expected) || 0;
+            line.progress = expected > 0 ? Math.min(100, Math.round(line.qty / expected * 100)) : 0;
+          });
+          this.recalc();
+        },
+        addScanned(line) {
+          const v = ABM.stock.normalizeSerial(line.scan, line.serialType);
+          if (!v) return;
+          if (this.lines.some((l) => l.serialized && l.units.some((u) => u.value.toUpperCase() === v.toUpperCase()))) { ui.warn(v + ' is already in this purchase.'); line.scan = ''; return; }
+          line.unitsText = (String(line.unitsText || '').replace(/\s+$/, '') + '\n' + v).replace(/^\n/, '');
+          line.scan = '';
+          this.revalidate();
+          const last = line.units[line.units.length - 1];
+          if (last && !last.ok) ui.warn(last.value + ': ' + last.error);
+        },
+        removeInvalid(line) { line.unitsText = line.units.filter((u) => u.ok).map((u) => u.value).join('\n'); this.revalidate(); },
+
+        /* ---------------------------------------------------------- save */
+        validate() {
+          const e = {}; const f = this.form;
+          if (!f.supplier_id || !db.find('suppliers', f.supplier_id)) e.supplier = 'Select the supplier you bought from.';
+          if (!f.branch_id || !this.branches.some((b) => String(b.id) === String(f.branch_id))) e.branch = 'Select an active receiving branch.';
+          if (!f.purchase_date) e.date = 'Enter the purchase date.'; else if (f.purchase_date > this.today) e.date = 'Purchase date cannot be in the future.';
+          let lineErrors = 0;
+          this.lines.forEach((l) => {
+            l.error = '';
+            const cost = Number(l.unit_cost);
+            if (l.unit_cost === '' || l.unit_cost === null || isNaN(cost) || cost < 0) l.error = 'Enter a unit cost of 0 or more.';
+            else if (l.serialized) {
+              const expected = Number(l.expected);
+              if (!l.units.length) l.error = 'Scan or paste at least one ' + l.serialLabel + '.';
+              else if (l.invalidCount) l.error = l.invalidCount + ' ' + l.serialLabel + ' entr' + (l.invalidCount === 1 ? 'y is' : 'ies are') + ' invalid — fix or remove them.';
+              else if (!Number.isInteger(expected) || expected < 1) l.error = 'Expected units must be a whole number of at least 1.';
+              else if (l.qty !== expected) l.error = l.qty + ' of ' + expected + ' units entered — add the remaining units or change the expected quantity.';
+            } else {
+              const q = Number(l.qty);
+              if (l.qty === '' || !Number.isInteger(q) || q < 1) l.error = 'Quantity must be a whole number of at least 1.';
+            }
+            if (l.error) lineErrors++;
+          });
+          if (!this.lines.length) e.lines = 'Add at least one product to receive.';
+          else if (lineErrors) e.lines = lineErrors + ' line' + (lineErrors === 1 ? ' needs' : 's need') + ' attention — see the messages below.';
+          const t = this.totals;
+          const disc = Number(f.discount), tax = Number(f.tax), pay = Number(f.pay_amount);
+          if (f.discount === '' || f.discount === null || isNaN(disc) || disc < 0) e.discount = 'Discount must be 0 or more.'; else if (disc > t.subtotal) e.discount = 'Discount cannot exceed the subtotal.';
+          if (f.tax === '' || f.tax === null || isNaN(tax) || tax < 0) e.tax = 'Tax must be 0 or more.';
+          if (f.pay_amount === '' || f.pay_amount === null || isNaN(pay) || pay < 0) e.pay = 'Payment must be 0 or more.'; else if (pay > t.total + 0.005) e.pay = 'Payment cannot exceed the total of ' + utils.money(t.total) + '.';
+          if (pay > 0 && !METHODS.includes(f.pay_method)) e.pay_method = 'Select a payment method.';
+          if (pay > 0 && f.pay_method !== 'cash' && !String(f.pay_reference || '').trim()) e.pay_reference = 'Enter the transaction reference.';
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        scrollToError() {
+          this.$nextTick(() => { const el = document.querySelector('main .is-invalid, main .field-error:not([style*="display: none"])'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+        },
+        save() {
+          if (this.busy) return;
+          this.revalidate();
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); this.scrollToError(); return; }
+          this.busy = true;
+          try {
+            const f = this.form, t = this.totals;
+            const branchId = Number(f.branch_id), supplierId = Number(f.supplier_id);
+            const paid = utils.round2(f.pay_amount);
+            const no = db.nextNumber('PUR', db.branchCode(branchId));
+            // an order that was cancelled or completed while this page was open must not be received against
+            let order = this.po ? db.find('purchase_orders', this.po.id) : null;
+            if (this.po && (!order || !['ordered', 'partial'].includes(order.status))) throw new Error('Purchase order ' + this.po.po_no + ' is no longer open for delivery — reload the page.');
+            const purchase = db.insert('purchases', {
+              purchase_no: no, branch_id: branchId, supplier_id: supplierId, supplier_invoice_no: String(f.supplier_invoice_no || '').trim(), purchase_date: f.purchase_date,
+              subtotal: t.subtotal, discount_amount: utils.round2(f.discount), tax_amount: utils.round2(f.tax), total: t.total, paid_amount: paid, status: 'received',
+              purchase_order_id: order ? order.id : null,
+              notes: String(f.notes || '').trim(), created_by: (session.user() || {}).id || null,
+            });
+            let units = 0; const costUpdates = []; const belowRetail = [];
+            this.lines.forEach((l) => {
+              const cost = utils.round2(l.unit_cost);
+              const qty = l.serialized ? l.qty : Number(l.qty);
+              const imeis = l.serialized ? l.units.filter((u) => u.ok).map((u) => u.value) : [];
+              const item = db.insert('purchase_items', { purchase_id: purchase.id, product_id: l.product_id, quantity: qty, unit_cost: cost, total: utils.round2(qty * cost), imeis, po_item_id: l.po_item_id || null });
+              if (l.serialized) ABM.stock.addImeis(branchId, l.product_id, imeis, cost, 'purchase', { type: 'purchase', id: purchase.id, purchaseItemId: item.id });
+              else ABM.stock.add(branchId, l.product_id, qty, cost, 'purchase', { type: 'purchase', id: purchase.id }, null, 'Purchase ' + no);
+              units += qty;
+              if (this.opts.updateCost) {
+                const p = db.find('products', l.product_id);
+                if (p && Number(p.cost_price) !== cost) {
+                  const before = p.cost_price;
+                  const patch = { cost_price: cost };
+                  // keep the catalog rule cost <= minimum sale price <= retail intact when the cost rises
+                  const retail = Number(p.retail_price) || 0;
+                  const hasFloor = p.min_sale_price !== null && p.min_sale_price !== undefined && p.min_sale_price !== '';
+                  const floor = Number(p.min_sale_price) || 0;
+                  const wholesale = Number(p.wholesale_price) || 0;
+                  // the catalogue rule is cost <= minimum <= retail, and a floor of 0 counts as set —
+                  // leaving it under the new cost would save a product the product form itself rejects
+                  if (hasFloor && floor < cost) {
+                    patch.min_sale_price = retail > 0 ? Math.min(cost, retail) : cost;
+                    if (wholesale > 0 && wholesale < patch.min_sale_price) patch.wholesale_price = patch.min_sale_price;
+                  }
+                  if (retail > 0 && retail < cost) belowRetail.push(p.sku);
+                  db.update('products', p.id, patch);
+                  costUpdates.push(p.sku + ' ' + before + ' -> ' + cost
+                    + (patch.min_sale_price !== undefined ? ' (min sale ' + floor + ' -> ' + patch.min_sale_price + ')' : '')
+                    + (patch.wholesale_price !== undefined ? ' (wholesale ' + wholesale + ' -> ' + patch.wholesale_price + ')' : ''));
+                }
+              }
+            });
+            let orderNote = '';
+            if (order) {
+              const poItems = db.where('purchase_order_items', { po_id: order.id });
+              let credited = 0; const over = [];
+              this.lines.forEach((l) => {
+                // the order may have been edited since this page loaded, so re-resolve the line:
+                // by its own id first, then by product — a line we cannot place credits nothing.
+                const it = (l.po_item_id ? poItems.find((i) => String(i.id) === String(l.po_item_id)) : null)
+                  || poItems.find((i) => String(i.product_id) === String(l.product_id) && !this.lines.some((x) => x !== l && String(x.po_item_id) === String(i.id)));
+                if (!it) return;
+                const qty = l.serialized ? l.qty : Number(l.qty);
+                if (!(qty > 0)) return;
+                const already = Math.max(0, Number(it.received_quantity) || 0);
+                const ordered = Number(it.quantity) || 0;
+                db.update('purchase_order_items', it.id, { received_quantity: already + qty });
+                credited += qty;
+                if (already + qty > ordered) over.push(l.label + ' (' + (already + qty) + ' of ' + ordered + ' ordered)');
+              });
+              if (credited > 0) {
+                const after = db.where('purchase_order_items', { po_id: order.id });
+                const outstanding = after.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0)), 0);
+                const status = outstanding > 0 ? 'partial' : 'completed';
+                db.update('purchase_orders', order.id, { status, closed_at: status === 'completed' ? utils.now() : null, closed_short: 0 });
+                db.audit('purchase_order.receive', 'purchase_order', order.id, `${no} received against ${order.po_no}: ${credited} unit(s) credited, ${outstanding} still outstanding — order ${status === 'completed' ? 'completed' : 'partially received'}${over.length ? '; over-delivered: ' + over.join(', ') : ''}`, order.branch_id);
+                if (over.length) ui.warn('More arrived than was ordered for ' + over.join(', ') + ' — the order records the over-delivery.');
+              } else {
+                // nothing on this delivery belongs to the order: leave its status exactly as it was
+                db.audit('purchase_order.receive', 'purchase_order', order.id, `${no} was booked while ${order.po_no} was open but credited nothing to it — no line matched`, order.branch_id);
+                ui.warn('Nothing on this delivery matched ' + order.po_no + ', so the order is unchanged.');
+              }
+              orderNote = ' against ' + order.po_no;
+            }
+            ABM.ledger.supplier(supplierId, branchId, 'purchase', 0, t.total, { referenceType: 'purchase', referenceId: purchase.id, notes: 'Purchase ' + no + orderNote + (f.supplier_invoice_no ? ' (Inv ' + String(f.supplier_invoice_no).trim() + ')' : '') });
+            if (paid > 0) ABM.ledger.supplier(supplierId, branchId, 'payment', paid, 0, { referenceType: 'purchase', referenceId: purchase.id, paymentMethod: f.pay_method, paymentReference: String(f.pay_reference || '').trim() || null, notes: 'Payment against ' + no });
+            db.audit('purchase.create', 'purchase', purchase.id, `Purchase ${no}${orderNote} from ${db.supplierName(supplierId)}: ${this.lines.length} line(s), ${units} unit(s), total ${utils.money(t.total)}${paid ? ', paid ' + utils.money(paid) + ' (' + ui.statusLabel(f.pay_method) + ')' : ''}${costUpdates.length ? '; cost updated: ' + costUpdates.join(', ') : ''}`, branchId);
+            this.saved = true;
+            ui.success('Purchase ' + no + ' received — ' + units + ' unit' + (units === 1 ? '' : 's') + ' added to stock' + (orderNote ? orderNote : '') + '.');
+            if (belowRetail.length) ui.warn('New cost is above the retail price for ' + belowRetail.join(', ') + ' — review the selling price.');
+            setTimeout(() => { location.href = 'purchase-view.html?id=' + purchase.id; }, 350);
+          } catch (err) {
+            ui.error(err.message || 'Could not save the purchase.');
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

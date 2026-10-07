@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Audit Log · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="audit-log" data-title="Audit Log" data-perm="audit.view">
+  <main x-data="auditLogPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Audit Log</h2>
+        <p class="page-subtitle" x-text="isSuper ? 'Every login, sale, repair, online order, stock movement, user, website and settings change across all branches.' : 'Activity recorded at ' + (myBranch ? myBranch.name : 'your branch') + ', including actions by its staff.'"></p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'audit-log.html?' + range.query" class="stat stat-accent" title="Events in this period" @click.prevent="scrollToTable()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Events</div><div class="stat-value" x-text="ABM.utils.num(filtered.length)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('clipboard')"></span>
+        </div>
+        <div class="stat-meta" x-text="range.label + ' · ' + ABM.utils.num(rows.length) + ' total in scope'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="users.html" class="stat" title="Open Users">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Active users</div><div class="stat-value" x-text="k.users"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('user-group')"></span>
+        </div>
+        <div class="stat-meta">distinct users in the current view</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="audit-log.html?prefix=login&q=failed" class="stat" :class="k.failed ? 'stat-danger' : 'stat-money'" title="Show failed sign-ins" @click.prevent="showFailed()">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Failed logins</div><div class="stat-value" :class="k.failed && 'text-rose-600'" x-text="k.failed"></div></div>
+          <span class="chip" :class="k.failed ? 'chip-danger' : 'chip-money'" x-html="ABM.icon(k.failed ? 'warning' : 'shield')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.failed ? 'click to review the IPs' : 'no suspicious sign-ins'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="k.last ? 'audit-log.html?id=' + k.last.id : '#'" class="stat stat-warning" title="Open the latest event" @click.prevent="if (k.last) detail = k.last">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Last event</div><div class="stat-value" x-text="k.last ? ABM.utils.timeAgo(k.last.created_at) : '—'"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta truncate" x-text="k.last ? k.last.action + ' · ' + k.last.userName : 'nothing recorded yet'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" :class="isSuper ? 'lg:grid-cols-[1fr_12rem_12rem_12rem_auto]' : 'lg:grid-cols-[1fr_12rem_12rem_auto]'">
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 flex text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input !pl-9" placeholder="Search details, action, entity, IP…" x-model.trim="q" aria-label="Search audit log">
+          </div>
+          <select class="select" x-model="f.user" aria-label="User filter">
+            <option value="all">All users</option>
+            <template x-for="u in userOptions" :key="u.id"><option :value="String(u.id)" x-text="u.name"></option></template>
+          </select>
+          <select class="select" x-model="f.prefix" aria-label="Action filter">
+            <option value="all">All actions</option>
+            <template x-for="p in prefixes" :key="p"><option :value="p" x-text="p + '.*'"></option></template>
+          </select>
+          <select class="select" x-model="f.branch" aria-label="Branch filter" x-show="isSuper">
+            <option value="all">All branches</option>
+            <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+          </select>
+          <button type="button" class="btn btn-ghost" @click="resetFilters()" :disabled="!hasFilters"><span x-html="ABM.icon('x')"></span>Clear</button>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+          <span>Period: <b class="text-slate-700" x-text="range.label"></b></span>
+          <span class="hidden sm:inline">·</span>
+          <span>Actions cover logins, sales, returns, purchases, stock, transfers, repairs, online orders, website/CMS, users, branches and settings.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log table -->
+    <div class="card mt-4" id="audit-events">
+      <div class="card-header">
+        <div>
+          <div class="card-title">Events</div>
+          <div class="card-subtitle"><span x-text="ABM.utils.num(filtered.length)"></span> matching · newest first</div>
+        </div>
+        <div class="text-xs text-slate-500 hidden sm:block">Click a row for full details</div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>User</th>
+              <th class="hidden md:table-cell">Branch</th>
+              <th>Action</th>
+              <th class="hidden lg:table-cell">Entity</th>
+              <th class="hidden sm:table-cell">Details</th>
+              <th class="hidden xl:table-cell">IP</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pg.items" :key="r.id">
+              <tr class="cursor-pointer" @click="detail = r" tabindex="0" @keydown.enter="detail = r">
+                <td class="whitespace-nowrap">
+                  <div class="text-slate-800 font-medium" x-text="ABM.utils.date(r.created_at)"></div>
+                  <div class="text-xs text-slate-500" x-text="ABM.utils.time(r.created_at)"></div>
+                </td>
+                <td>
+                  <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold flex-none" :class="r.user ? avatarClass(r.user.role) : 'bg-slate-100 text-slate-400'" x-text="r.user ? ABM.utils.initials(r.user.name) : '?'"></div>
+                    <div class="min-w-0">
+                      <div class="font-semibold text-slate-800 whitespace-nowrap" x-text="r.userName"></div>
+                      <div class="text-xs text-slate-500 whitespace-nowrap" x-text="r.user ? ABM.roles.label(r.user.role) : (r.user_id == null ? 'System / website' : 'Unknown user')"></div>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden md:table-cell">
+                  <template x-if="r.branch_id"><span class="badge badge-slate mono" x-text="ABM.db.branchCode(r.branch_id)"></span></template>
+                  <template x-if="!r.branch_id"><span class="text-xs text-slate-400">—</span></template>
+                </td>
+                <td><span class="badge mono !text-[11px]" :class="'badge-' + actionColor(r.action)" x-text="r.action"></span></td>
+                <td class="hidden lg:table-cell whitespace-nowrap">
+                  <template x-if="r.entity_type"><span class="text-slate-600"><span x-text="ABM.utils.titleCase(r.entity_type)"></span><span class="text-slate-400 mono" x-show="r.entity_id != null" x-text="' #' + r.entity_id"></span></span></template>
+                  <template x-if="!r.entity_type"><span class="text-xs text-slate-400">—</span></template>
+                </td>
+                <td class="hidden sm:table-cell"><div class="max-w-[14rem] 2xl:max-w-sm truncate text-slate-600" :title="r.details" x-text="r.details || '—'"></div></td>
+                <td class="hidden xl:table-cell mono text-slate-500 whitespace-nowrap" x-text="r.ip || '—'"></td>
+              </tr>
+            </template>
+            <template x-if="!pg.items.length">
+              <tr>
+                <td colspan="7" class="empty">
+                  <span x-html="ABM.icon('clipboard')"></span>
+                  <div class="empty-title" x-text="rows.length ? 'No events match these filters' : 'Nothing recorded yet'"></div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Widen the period or clear the filters.' : 'Actions like logins, sales and stock changes will appear here.'"></div>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500" x-show="pg.total > 0">
+        <span>Showing <b class="text-slate-800" x-text="pg.from"></b>–<b class="text-slate-800" x-text="pg.to"></b> of <b class="text-slate-800" x-text="ABM.utils.num(pg.total)"></b></span>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pg.page <= 1" @click="page = pg.page - 1"><span x-html="ABM.icon('chevron-left')"></span>Prev</button>
+          <span class="px-2 tabular">Page <b x-text="pg.page"></b> / <b x-text="pg.pages"></b></span>
+          <button type="button" class="btn btn-secondary btn-sm" :disabled="pg.page >= pg.pages" @click="page = pg.page + 1">Next<span x-html="ABM.icon('chevron-right')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detail modal -->
+    <div x-show="detail" x-cloak class="modal-backdrop" @click.self="detail = null" @keydown.escape.window="detail = null">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="audit-detail-title">
+        <template x-if="detail">
+          <div>
+            <div class="modal-header">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="badge mono !text-[11px]" :class="'badge-' + actionColor(detail.action)" x-text="detail.action"></span>
+                <h3 class="modal-title truncate" id="audit-detail-title" x-text="'Event #' + detail.id"></h3>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="detail = null" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+            </div>
+            <div class="modal-body">
+              <dl class="grid grid-cols-1 sm:grid-cols-[9rem_1fr] gap-x-4 gap-y-3 text-sm">
+                <dt class="text-slate-500">When</dt><dd class="text-slate-800 font-medium"><span x-text="ABM.utils.datetime(detail.created_at)"></span> <span class="text-slate-400 text-xs" x-text="'(' + ABM.utils.timeAgo(detail.created_at) + ')'"></span></dd>
+                <dt class="text-slate-500">User</dt><dd class="text-slate-800"><span class="font-medium" x-text="detail.userName"></span><span class="text-slate-500" x-show="detail.user" x-text="detail.user ? ' · @' + detail.user.username + ' · ' + ABM.roles.label(detail.user.role) : ''"></span></dd>
+                <dt class="text-slate-500">Branch</dt><dd class="text-slate-800" x-text="detail.branch_id ? ABM.db.branchCode(detail.branch_id) + ' · ' + ABM.db.branchName(detail.branch_id) : '— (not branch-specific)'"></dd>
+                <dt class="text-slate-500">Entity</dt>
+                <dd class="text-slate-800">
+                  <span x-text="detail.entity_type ? ABM.utils.titleCase(detail.entity_type) + (detail.entity_id != null ? ' #' + detail.entity_id : '') : '—'"></span>
+                  <a x-show="entityLink(detail)" :href="entityLink(detail)" class="ml-2 inline-flex items-center gap-1 text-navy-700 font-semibold hover:underline text-xs">Open<span x-html="ABM.icon('arrow-up-right','w-3 h-3')"></span></a>
+                </dd>
+                <dt class="text-slate-500">Details</dt><dd class="text-slate-800 whitespace-pre-wrap break-words" x-text="detail.details || '—'"></dd>
+                <dt class="text-slate-500">IP address</dt><dd class="text-slate-800 mono" x-text="detail.ip || '—'"></dd>
+              </dl>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="detail = null">Close</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function auditLogPage() {
+      const { db, utils, ui, session } = ABM;
+      const isSuper = session.isSuperAdmin();
+      const myBranchId = session.branchId();
+      const DEFAULT_RANGE = 'this_month';
+      const PREFIX_COLOR = { login: 'blue', logout: 'slate', sale: 'green', pos: 'green', payment: 'green', return: 'amber', transfer: 'amber', purchase: 'navy', product: 'navy', imei: 'navy', serial: 'navy', stock: 'navy', inventory: 'navy', user: 'purple', branch: 'purple', settings: 'purple', data: 'purple', closing: 'green', expense: 'red', customer: 'blue', supplier: 'blue', category: 'slate', brand: 'slate', repair: 'amber', order: 'green', website: 'purple', cms: 'purple', request: 'blue', contact: 'blue' };
+      const RED_SUFFIX = ['failed', 'deactivate', 'void', 'delete', 'reject', 'cancel', 'remove', 'unpublish'];
+      const ENTITY_LINKS = { sale: 'sale-view.html?id=', product: 'product-view.html?id=', customer: 'customer-view.html?id=', stock_transfer: 'transfer-view.html?id=', purchase: 'purchase-view.html?id=', supplier: 'supplier-view.html?id=', sale_return: 'returns.html', user: 'users.html', branch: 'branches.html', daily_closing: 'closings.html', settings: 'settings.html', expense: 'expenses.html', product_imei: 'imeis.html', repair_job: 'repair-view.html?id=', repair_request: 'repairs.html', online_order: 'online-order-view.html?id=', cms: 'website.html', cms_page: 'website.html', website: 'website.html', banner: 'website.html', testimonial: 'website.html', menu: 'website.html', category: 'categories.html', brand: 'categories.html' };
+      const validPrefix = (p) => (p && /^[a-z_]+$/.test(p) ? p : 'all');
+      return {
+        isSuper, myBranch: session.branch(),
+        range: null, rows: [], userOptions: [], prefixes: [], branches: [],
+        q: utils.qs('q', '') || '', page: 1, detail: null,
+        f: { user: utils.qs('user') ? String(utils.qs('user')) : 'all', prefix: validPrefix(utils.qs('prefix')), branch: isSuper ? 'all' : String(myBranchId) },
+
+        init() {
+          // Standard date range bar (Today … Custom); honours ?range=&from=&to= and remembers the last preset.
+          this.range = ABM.range(DEFAULT_RANGE, () => { this.page = 1; }, 'audit');
+          this.branches = db.all('branches').filter((b) => b.is_active).slice().sort((a, b) => a.code.localeCompare(b.code));
+          this.load();
+          ['q', 'f.user', 'f.prefix', 'f.branch'].forEach((k) => this.$watch(k, () => { this.page = 1; }));
+          if (!this.userOptions.some((u) => String(u.id) === this.f.user)) this.f.user = 'all';
+          if (!this.prefixes.includes(this.f.prefix)) this.f.prefix = 'all';
+          // Filter selects get their <option>s from x-for after x-model has already applied the initial value;
+          // re-assigning the filter object on the next tick re-runs x-model once the options exist.
+          this.$nextTick(() => { this.f = { ...this.f }; });
+          const id = utils.qs('id');
+          if (id) {
+            const r = this.rows.find((x) => String(x.id) === String(id));
+            if (!r) ui.warn('Event #' + id + ' was not found in your scope.');
+            else { this.detail = r; if (!this.range.contains(r.created_at)) this.range.set('all'); }
+          }
+        },
+        load() {
+          const users = db.all('users');
+          const userById = Object.fromEntries(users.map((u) => [String(u.id), u]));
+          const all = db.all('audit_logs').map((r) => {
+            const user = userById[String(r.user_id)] || null;
+            return { ...r, user, userName: user ? user.name : (r.user_id == null ? 'System' : 'Deleted user #' + r.user_id), day: utils.isoDate(r.created_at), userBranch: user ? user.branch_id : null };
+          });
+          // Managers: rows tagged with their branch, plus branch-less rows created by their own staff.
+          this.rows = utils.sortBy(isSuper ? all : all.filter((r) => r.branch_id === myBranchId || (r.branch_id == null && r.userBranch === myBranchId)), 'created_at', 'desc');
+          const ids = new Set(this.rows.map((r) => String(r.user_id)));
+          this.userOptions = users.filter((u) => ids.has(String(u.id))).slice().sort((a, b) => a.name.localeCompare(b.name));
+          this.prefixes = [...new Set(this.rows.map((r) => String(r.action).split('.')[0]))].sort();
+        },
+        get hasFilters() { return !!this.q || this.f.user !== 'all' || this.f.prefix !== 'all' || (isSuper && this.f.branch !== 'all') || (this.range && this.range.preset !== DEFAULT_RANGE); },
+        resetFilters() { this.q = ''; this.f = { user: 'all', prefix: 'all', branch: isSuper ? 'all' : String(myBranchId) }; if (this.range && this.range.preset !== DEFAULT_RANGE) this.range.set(DEFAULT_RANGE); },
+        /** Stat-tile actions: filter to failed sign-ins / jump to the events table. */
+        showFailed() { this.f.prefix = this.prefixes.includes('login') ? 'login' : 'all'; this.q = 'failed'; this.scrollToTable(); },
+        scrollToTable() { const el = document.getElementById('audit-events'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+        get filtered() {
+          const q = this.q.toLowerCase(); const r0 = this.range;
+          return this.rows
+            .filter((r) => !r0 || r0.contains(r.day))
+            .filter((r) => this.f.user === 'all' || String(r.user_id) === this.f.user)
+            .filter((r) => this.f.prefix === 'all' || String(r.action).split('.')[0] === this.f.prefix)
+            .filter((r) => !isSuper || this.f.branch === 'all' || String(r.branch_id) === this.f.branch || (r.branch_id == null && String(r.userBranch) === this.f.branch))
+            .filter((r) => !q || [r.action, r.details, r.entity_type, r.entity_id, r.ip, r.userName].some((v) => String(v ?? '').toLowerCase().includes(q)));
+        },
+        get pg() { return utils.paginate(this.filtered, this.page); },
+        get k() {
+          const rows = this.filtered;
+          return { users: new Set(rows.map((r) => r.user_id).filter((x) => x != null)).size, failed: rows.filter((r) => /\.failed$/.test(r.action)).length, last: rows[0] || null };
+        },
+        actionColor(action) {
+          const [prefix, ...rest] = String(action || '').split('.');
+          if (rest.some((s) => RED_SUFFIX.includes(s))) return 'red';
+          return PREFIX_COLOR[prefix] || 'slate';
+        },
+        avatarClass(role) { return { super_admin: 'bg-purple-100 text-purple-700', branch_manager: 'bg-navy-100 text-navy-700', cashier: 'bg-slate-100 text-slate-600', technician: 'bg-emerald-100 text-emerald-700' }[role] || 'bg-slate-100 text-slate-600'; },
+        entityLink(r) {
+          if (!r || !r.entity_type) return '';
+          const base = ENTITY_LINKS[r.entity_type]; if (!base) return '';
+          if (base.endsWith('=')) return r.entity_id != null ? base + encodeURIComponent(r.entity_id) : '';
+          return base;
+        },
+        exportCsv() {
+          const cols = [
+            { label: 'Time', value: (r) => utils.datetime(r.created_at) }, { label: 'User', key: 'userName' }, { label: 'Role', value: (r) => (r.user ? ABM.roles.label(r.user.role) : '') },
+            { label: 'Branch', value: (r) => (r.branch_id ? db.branchCode(r.branch_id) : '') }, { label: 'Action', key: 'action' }, { label: 'Entity type', key: 'entity_type' },
+            { label: 'Entity id', key: 'entity_id' }, { label: 'Details', key: 'details' }, { label: 'IP', key: 'ip' },
+          ];
+          if (!utils.download('audit-log-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + utils.num(this.filtered.length) + ' events.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Balance Sheet &middot; Abbott Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="report-balance-sheet" data-title="Balance Sheet" data-perm="reports.view">
+  <main x-data="balanceSheetPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Balance Sheet</h2>
+        <p class="page-subtitle">What the business owns and owes as of <b x-text="$date(asOf)"></b> &middot; <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>Reports</a>
+        <a href="report-profit-loss.html" class="btn btn-secondary"><span x-html="ABM.icon('chart')"></span>Profit &amp; Loss</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" @click="ABM.ui.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+      </div>
+    </div>
+
+    <!-- Toolbar: as-of date + branch -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <label class="text-xs font-bold uppercase tracking-wider text-slate-500 whitespace-nowrap" for="bs-date">As of</label>
+            <input id="bs-date" type="date" class="input input-sm !w-auto" x-model="asOf" :max="today">
+          </div>
+          <div class="tabs-pill">
+            <button type="button" class="tab" :class="asOf === today && 'active'" @click="asOf = today">Today</button>
+            <button type="button" class="tab" :class="asOf === monthEnd && 'active'" @click="asOf = monthEnd">Month end</button>
+            <button type="button" class="tab" :class="asOf === lastMonthEnd && 'active'" @click="asOf = lastMonthEnd">Last month end</button>
+          </div>
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' - ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg" x-text="branch.code + ' - ' + branch.name"></span>
+          </template>
+          <span class="text-xs text-slate-500 ml-auto whitespace-nowrap" x-show="asOf !== today">Historical view</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Print header -->
+    <div class="hidden print:block mb-4">
+      <div class="text-lg font-bold" x-text="company"></div>
+      <div class="text-sm">Balance Sheet &middot; <span x-text="scopeLabel"></span></div>
+      <div class="text-xs">As of <span x-text="ABM.utils.date(asOf, 'long')"></span> &middot; generated <span x-text="ABM.utils.datetime(new Date())"></span></div>
+    </div>
+
+    <div class="print-area">
+      <!-- KPI tiles -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <a href="report-stock-valuation.html" class="stat stat-accent" title="See what makes up the assets">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Total assets</div><div class="stat-value" x-text="$money(totalAssets, {decimals:0})"></div></div>
+            <span class="chip chip-navy" x-html="ABM.icon('scale')"></span>
+          </div>
+          <div class="stat-meta">inventory <b x-text="$money(line('inventory'), {decimals:0})"></b> &middot; receivables <b x-text="$money(line('receivable'), {decimals:0})"></b></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="report-payables.html" class="stat stat-danger" title="Open the payables report">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Total liabilities</div><div class="stat-value" x-text="$money(totalLiabilities, {decimals:0})"></div></div>
+            <span class="chip chip-danger" x-html="ABM.icon('store')"></span>
+          </div>
+          <div class="stat-meta">suppliers <b x-text="$money(line('payable'), {decimals:0})"></b> &middot; customer credit <b x-text="$money(line('store_credit'), {decimals:0})"></b></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="report-profit-loss.html" class="stat stat-money" title="Open profit &amp; loss">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Owner's equity</div><div class="stat-value" :class="equity < 0 ? 'text-rose-600' : ''" x-text="$money(equity, {decimals:0})"></div></div>
+            <span class="chip chip-money" x-html="ABM.icon('chart')"></span>
+          </div>
+          <div class="stat-meta">assets less liabilities &middot; <span x-text="assetRatio"></span>% of assets</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a :href="'day-end.html?date=' + asOf" class="stat stat-warning" title="Open day-end closing">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Cash in drawer</div><div class="stat-value" x-text="$money(line('cash'), {decimals:0})"></div></div>
+            <span class="chip chip-warning" x-html="ABM.icon('banknotes')"></span>
+          </div>
+          <div class="stat-meta">in the bank <b class="text-emerald-700" x-text="$money(line('bank_real'), {decimals:0})"></b><span x-show="bankNet"> · wallets &amp; card (est.) <b :class="bankNet < 0 ? 'text-rose-600' : ''" x-text="$money(bankNet, {decimals:0})"></b></span></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </div>
+
+      <!-- Statement -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
+        <!-- Assets -->
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Assets</div><div class="card-subtitle">What the business owns</div></div>
+            <span class="text-sm font-bold text-slate-900 tabular" x-text="$money(totalAssets, {decimals:0})"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-compact">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <template x-for="b in branchCols" :key="'ah' + b.id"><th class="num hidden md:table-cell" x-text="b.code"></th></template>
+                  <th class="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in assets" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="r.href" class="font-medium text-slate-800 hover:text-navy-700" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400" x-text="r.note"></div>
+                    </td>
+                    <template x-for="b in branchCols" :key="'a' + r.key + b.id"><td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.values[b.id] || 0, {decimals:0})"></td></template>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(r.total, {decimals:0})"></td>
+                  </tr>
+                </template>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total assets</td>
+                  <template x-for="b in branchCols" :key="'af' + b.id"><td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(branchTotal(assets, b.id), {decimals:0})"></td></template>
+                  <td class="num whitespace-nowrap" x-text="$money(totalAssets, {decimals:0})"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <!-- Liabilities & equity -->
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">Liabilities &amp; equity</div><div class="card-subtitle">What the business owes, and what is left</div></div>
+            <span class="text-sm font-bold text-slate-900 tabular" x-text="$money(totalLiabilities + equity, {decimals:0})"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-compact">
+              <thead>
+                <tr>
+                  <th>Line</th>
+                  <template x-for="b in branchCols" :key="'lh' + b.id"><th class="num hidden md:table-cell" x-text="b.code"></th></template>
+                  <th class="num">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="r in liabilities" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="r.href" class="font-medium text-slate-800 hover:text-navy-700" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400" x-text="r.note"></div>
+                    </td>
+                    <template x-for="b in branchCols" :key="'l' + r.key + b.id"><td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.values[b.id] || 0, {decimals:0})"></td></template>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(r.total, {decimals:0})"></td>
+                  </tr>
+                </template>
+                <tr class="bg-slate-50">
+                  <td class="font-bold text-slate-900">Total liabilities</td>
+                  <template x-for="b in branchCols" :key="'lt' + b.id"><td class="num hidden md:table-cell font-bold whitespace-nowrap" x-text="$money(branchTotal(liabilities, b.id), {decimals:0})"></td></template>
+                  <td class="num font-bold text-slate-900 whitespace-nowrap" x-text="$money(totalLiabilities, {decimals:0})"></td>
+                </tr>
+                <tr>
+                  <td>
+                    <span class="font-medium text-slate-800">Owner's equity</span>
+                    <div class="text-[11px] text-slate-400">Assets less liabilities (retained value in the business)</div>
+                  </td>
+                  <template x-for="b in branchCols" :key="'eq' + b.id"><td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(branchTotal(assets, b.id) - branchTotal(liabilities, b.id), {decimals:0})"></td></template>
+                  <td class="num font-semibold whitespace-nowrap" :class="equity < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(equity, {decimals:0})"></td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>Total liabilities &amp; equity</td>
+                  <template x-for="b in branchCols" :key="'lf' + b.id"><td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(branchTotal(assets, b.id), {decimals:0})"></td></template>
+                  <td class="num whitespace-nowrap" x-text="$money(totalLiabilities + equity, {decimals:0})"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Warning when the estimated bank balance is negative -->
+      <div class="alert alert-warning mt-4" x-show="bankNet < 0" x-cloak>
+        <span x-html="ABM.icon('warning')"></span>
+        <div class="min-w-0">
+          <div class="font-semibold">The estimated bank position is negative</div>
+          <div>Bank and wallet payments out (supplier payments and expenses) exceed non-cash money collected, so the estimate is <b x-text="$money(bankNet, {decimals:0})"></b>. A negative balance is not an asset, so it is shown under liabilities as <b>Bank overdraft / owner funding</b>: that gap is owner capital and opening bank balances, which this prototype does not record yet &mdash; the value of the stock those payments bought is already sitting in <b>Inventory at cost</b>.</div>
+        </div>
+      </div>
+
+      <!-- Notes -->
+      <div class="card mt-4">
+        <div class="card-header"><div class="card-title">How these numbers are built</div></div>
+        <div class="card-body grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-500">
+          <div><b class="text-slate-700">Cash in drawer</b> &mdash; the last closed day-end actual cash for each branch on or before the date, plus cash taken in since (sales, khata receipts, repair payments) minus cash paid out (expenses, refunds, supplier payments).</div>
+          <div><b class="text-slate-700">Bank &amp; wallets (estimated)</b> &mdash; every non-cash collection (card, JazzCash, EasyPaisa, bank transfer) less non-cash expenses and supplier payments. It is an estimate, not a reconciled bank balance; when the net is negative it moves to the liability side as bank overdraft / owner funding.</div>
+          <div><b class="text-slate-700">Receivables aging</b> &mdash; a customer khata is counted once, against the branch of its latest entry, so the branch columns add up to the all-branch total.</div>
+          <div><b class="text-slate-700">Inventory at cost</b> &mdash; current branch stock valued at weighted average cost. Stock is not rewound to a past date, so historical views still show today's inventory.</div>
+          <div><b class="text-slate-700">Receivables &amp; payables</b> &mdash; customer and supplier ledgers replayed up to the date; each balance is shown against the branch of its latest transaction.</div>
+          <div><b class="text-slate-700">Repair dues</b> &mdash; the unpaid balance on every repair job that has not been cancelled.</div>
+          <div><b class="text-slate-700">Repair advances held</b> &mdash; money already collected on jobs that have not yet been delivered; it is still the customer's until the device is handed over.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function balanceSheetPage() {
+      const { db, utils, ui, session } = ABM;
+      const d10 = (v) => String(v || '').slice(0, 10);
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branch: session.branch() || { code: '', name: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        company: db.setting('company_name', 'Abbott Mobile'),
+        today: utils.today(),
+        asOf: utils.today(),
+        f: { branch: 'all' },
+        assets: [], liabilities: [], bankNet: 0,
+
+        get monthEnd() { const d = new Date(); return utils.isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0)); },
+        get lastMonthEnd() { const d = new Date(); return utils.isoDate(new Date(d.getFullYear(), d.getMonth(), 0)); },
+        get scopeLabel() { return this.f.branch === 'all' ? 'All branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.f.branch === 'all' && this.branches.length > 1; },
+        get branchCols() { return this.showBranch ? this.branches : []; },
+        get totalAssets() { return utils.sum(this.assets, 'total'); },
+        get totalLiabilities() { return utils.sum(this.liabilities, 'total'); },
+        get equity() { return utils.round2(this.totalAssets - this.totalLiabilities); },
+        get assetRatio() { return this.totalAssets ? Math.round(this.equity / this.totalAssets * 100) : 0; },
+
+        line(key) { const r = this.assets.concat(this.liabilities).find((x) => x.key === key); return r ? r.total : 0; },
+        branchTotal(rows, bid) { return utils.round2(rows.reduce((a, r) => a + (Number(r.values[bid]) || 0), 0)); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); this.f.branch = (b === 'all' || this.branches.some((x) => String(x.id) === b)) ? b : 'all'; }
+          const d = utils.qs('date') || utils.qs('as_of');
+          if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && utils.parseDate(d)) this.asOf = d;
+          this.compute();
+          this.$watch('asOf', () => { if (this.asOf && /^\d{4}-\d{2}-\d{2}$/.test(this.asOf)) this.compute(); });
+          this.$watch('f.branch', () => this.compute());
+        },
+
+        compute() {
+          const asOf = this.asOf;
+          const ids = this.f.branch === 'all' ? this.branches.map((b) => b.id) : [Number(this.f.branch)];
+          const has = (bid) => ids.includes(Number(bid));
+          const zero = () => { const o = {}; ids.forEach((b) => { o[b] = 0; }); return o; };
+          const add = (o, bid, v) => { if (has(bid)) o[bid] = utils.round2((o[bid] || 0) + (Number(v) || 0)); };
+
+          const saleById = {}; db.all('sales').forEach((s) => { saleById[s.id] = s; });
+          const jobs = db.all('repair_jobs');
+          const jobById = {}; jobs.forEach((j) => { jobById[j.id] = j; });
+          const upto = (v) => { const d = d10(v); return !!d && d <= asOf; };
+
+          /* ---------------- cash in drawer ---------------- */
+          const cash = zero();
+          ids.forEach((bid) => {
+            const closings = utils.sortBy(db.all('daily_closings').filter((c) => c.branch_id == bid && c.status === 'closed' && d10(c.closing_date) <= asOf), (c) => d10(c.closing_date));
+            const last = closings.length ? closings[closings.length - 1] : null;
+            const since = last ? d10(last.closing_date) : null;
+            const win = (v) => { const d = d10(v); if (!d || d > asOf) return false; return since ? d > since : true; };
+            // what the drawer actually KEEPS after a closing is the retained float — the rest was banked
+            let amount = last ? Number(last.retained_float != null ? last.retained_float : last.actual_cash) || 0 : 0;
+            db.all('sale_payments').forEach((p) => { const s = saleById[p.sale_id]; if (!s || s.branch_id != bid || s.status === 'void') return; if (p.method === 'cash' && win(p.created_at)) amount += Number(p.amount) || 0; });
+            db.all('customer_transactions').forEach((t) => { if (t.branch_id != bid) return; if (t.type === 'payment' && t.payment_method === 'cash' && win(t.created_at)) amount += Number(t.credit) || 0; });
+            db.all('repair_payments').forEach((p) => { const j = jobById[p.job_id]; if (!j || j.branch_id != bid) return; if (p.method === 'cash' && win(p.created_at)) amount += Number(p.amount) || 0; });
+            db.all('expenses').forEach((e) => { if (e.branch_id != bid) return; if (e.payment_method === 'cash' && win(e.expense_date)) amount -= Number(e.amount) || 0; });
+            db.all('sale_returns').forEach((r) => { if (r.branch_id != bid) return; if (r.refund_method === 'cash' && win(r.return_date)) amount -= Number(r.refund_amount) || 0; });
+            db.all('supplier_transactions').forEach((t) => { if (t.branch_id != bid) return; if (t.type === 'payment' && t.payment_method === 'cash' && win(t.created_at)) amount -= Number(t.debit) || 0; });
+            // cash that went to the bank has left the drawer; cash drawn from the bank came into it
+            db.all('bank_transactions').forEach((t) => {
+              if (t.branch_id != bid || t.method !== 'cash' || !win(t.txn_date)) return;
+              if (t.type === 'deposit') amount -= Number(t.amount) || 0;
+              else if (t.type === 'withdrawal') amount += Number(t.amount) || 0;
+            });
+            cash[bid] = utils.round2(amount);
+          });
+
+          /* ---------------- bank accounts (real, replayed to the date) ---------------- */
+          // Every account's balance is its own transactions up to the date. A shared account
+          // (no branch) belongs to the business, so it only shows when every branch is in view.
+          const bankReal = zero();
+          let sharedBank = 0;
+          db.all('bank_accounts').forEach((a) => {
+            const bal = utils.round2(db.where('bank_transactions', { account_id: a.id })
+              .filter((t) => upto(t.txn_date)).reduce((s, t) => s + (Number(t.signed) || 0), 0));
+            if (!bal) return;
+            if (a.branch_id == null) { if (this.f.branch === 'all') sharedBank = utils.round2(sharedBank + bal); }
+            else add(bankReal, a.branch_id, bal);
+          });
+
+          /* ---------------- wallets & card money not yet banked (estimated) ---------------- */
+          const bank = zero();
+          const nonCash = (m) => !!m && m !== 'cash' && m !== 'store_credit';
+          db.all('sale_payments').forEach((p) => { const s = saleById[p.sale_id]; if (!s || s.status === 'void') return; if (nonCash(p.method) && upto(p.created_at)) add(bank, s.branch_id, p.amount); });
+          db.all('customer_transactions').forEach((t) => { if (t.type === 'payment' && nonCash(t.payment_method) && upto(t.created_at)) add(bank, t.branch_id, t.credit); });
+          db.all('repair_payments').forEach((p) => { const j = jobById[p.job_id]; if (!j) return; if (nonCash(p.method) && upto(p.created_at)) add(bank, j.branch_id, p.amount); });
+          db.all('expenses').forEach((e) => { if (nonCash(e.payment_method) && upto(e.expense_date)) add(bank, e.branch_id, -(Number(e.amount) || 0)); });
+          db.all('supplier_transactions').forEach((t) => { if (t.type === 'payment' && nonCash(t.payment_method) && upto(t.created_at)) add(bank, t.branch_id, -(Number(t.debit) || 0)); });
+
+          /* ---------------- inventory at cost ---------------- */
+          const inventory = zero();
+          db.all('branch_stock').forEach((s) => {
+            const qty = Number(s.quantity) || 0; if (qty <= 0) return;
+            const p = db.find('products', s.product_id); if (!p || !db.isStockTracked(p)) return;
+            add(inventory, s.branch_id, qty * (Number(s.avg_cost) || 0));
+          });
+
+          /* ---------------- customer ledgers replayed to the date ---------------- */
+          const receivable = zero(); const storeCredit = zero();
+          const custAgg = {};
+          db.all('customer_transactions').forEach((t) => {
+            if (!upto(t.created_at)) return;
+            const a = custAgg[t.customer_id] || (custAgg[t.customer_id] = { bal: 0, branch: t.branch_id, at: '' });
+            a.bal += (Number(t.debit) || 0) - (Number(t.credit) || 0);
+            const k = d10(t.created_at) + String(t.id).padStart(8, '0');
+            if (k >= a.at) { a.at = k; a.branch = t.branch_id; }
+          });
+          Object.keys(custAgg).forEach((cid) => {
+            const a = custAgg[cid];
+            const bal = utils.round2(a.bal);
+            if (!bal) return;
+            if (!has(a.branch)) return;
+            if (bal > 0) add(receivable, a.branch, bal); else add(storeCredit, a.branch, -bal);
+          });
+
+          /* ---------------- supplier ledgers replayed to the date ---------------- */
+          const payable = zero();
+          const supAgg = {};
+          db.all('supplier_transactions').forEach((t) => {
+            if (!upto(t.created_at)) return;
+            const a = supAgg[t.supplier_id] || (supAgg[t.supplier_id] = { bal: 0, branch: t.branch_id, at: '' });
+            a.bal += (Number(t.credit) || 0) - (Number(t.debit) || 0);
+            const k = d10(t.created_at) + String(t.id).padStart(8, '0');
+            if (k >= a.at) { a.at = k; a.branch = t.branch_id; }
+          });
+          Object.keys(supAgg).forEach((sid) => {
+            const a = supAgg[sid];
+            const bal = utils.round2(a.bal);
+            if (bal <= 0 || !has(a.branch)) return;
+            add(payable, a.branch, bal);
+          });
+
+          /* ---------------- repairs ---------------- */
+          const repairDues = zero(); const advances = zero();
+          jobs.forEach((j) => {
+            if (!upto(j.received_at)) return;
+            if (j.status !== 'cancelled') add(repairDues, j.branch_id, j.due_amount);
+            if (!['delivered', 'cancelled'].includes(j.status)) add(advances, j.branch_id, j.paid_amount);
+          });
+
+          const row = (key, label, note, href, values) => ({ key, label, note, href, values, total: utils.round2(ids.reduce((a, b) => a + (Number(values[b]) || 0), 0)) });
+          /* A bank/wallet position below zero is a liability, never a negative asset. The prototype records no
+             opening bank balance or capital account, so non-cash supplier payments drag the estimate far below
+             zero; leaving it in the asset column understated total assets by the whole shortfall (inventory
+             alone can exceed the reported total). Split it: the positive side stays an asset, the shortfall is
+             shown as funding on the liability side. Equity (assets − liabilities) is unchanged either way. */
+          const bankAsset = zero(), bankOwed = zero();
+          ids.forEach((b) => { const v = utils.round2(bank[b]); if (v >= 0) bankAsset[b] = v; else bankOwed[b] = utils.round2(-v); });
+          const hasBankAsset = ids.some((b) => bankAsset[b] > 0);
+          const hasBankOwed = ids.some((b) => bankOwed[b] > 0);
+          this.bankNet = utils.round2(ids.reduce((a, b) => a + (Number(bank[b]) || 0), 0));
+          this.assets = [
+            row('cash', 'Cash in drawer', 'Retained float at the last closing plus cash movements since', 'day-end.html?date=' + asOf, cash),
+          ];
+          // real bank money first — it is recorded, not estimated
+          const hasBankReal = ids.some((b) => bankReal[b] !== 0) || sharedBank !== 0;
+          if (hasBankReal) {
+            const bankRow = row('bank_real', 'Bank accounts', 'Recorded deposits, payments, transfers and cleared cheques', 'banking.html', bankReal);
+            if (sharedBank) {
+              bankRow.total = utils.round2((Number(bankRow.total) || 0) + sharedBank);
+              bankRow.note += ' · includes ' + utils.money(sharedBank, { decimals: 0 }) + ' in accounts shared across branches';
+            }
+            this.assets.push(bankRow);
+          }
+          if (hasBankAsset || (!hasBankOwed && !hasBankReal)) this.assets.push(row('bank', 'Wallets & card money (estimated)', 'Card and wallet collections less non-cash payments — not yet in a bank account', 'report-sales.html', bankAsset));
+          this.assets.push(
+            row('inventory', 'Inventory at cost', 'Weighted average cost of stock on hand', 'report-stock-valuation.html', inventory),
+            row('receivable', 'Accounts receivable', 'Customer khata balances owed to us', 'report-receivables.html', receivable),
+            row('repair_dues', 'Repair dues', 'Unpaid balance on job cards', 'report-repairs.html', repairDues),
+          );
+          this.liabilities = [
+            row('payable', 'Accounts payable', 'Outstanding supplier balances', 'report-payables.html', payable),
+            row('store_credit', 'Customer store credit', 'Credit notes customers can still spend', 'customers.html', storeCredit),
+            row('advances', 'Repair advances held', 'Collected on jobs not yet delivered', 'repairs.html', advances),
+          ];
+          if (hasBankOwed) this.liabilities.push(row('bank_funding', 'Unrecorded funding', 'Card, wallet and bank-transfer payments out exceed what came in that way — money that never passed through a tracked bank account', 'report-payables.html', bankOwed));
+        },
+
+        exportCsv() {
+          const rows = [];
+          const push = (section, r) => {
+            const o = { section, line: r.label, amount: r.total };
+            this.branchCols.forEach((b) => { o['b' + b.id] = r.values[b.id] || 0; });
+            rows.push(o);
+          };
+          this.assets.forEach((r) => push('Assets', r));
+          rows.push({ section: 'Assets', line: 'Total assets', amount: this.totalAssets });
+          this.liabilities.forEach((r) => push('Liabilities', r));
+          rows.push({ section: 'Liabilities', line: 'Total liabilities', amount: this.totalLiabilities });
+          rows.push({ section: 'Equity', line: 'Owner equity', amount: this.equity });
+          const cols = [{ label: 'Section', key: 'section' }, { label: 'Line', key: 'line' }]
+            .concat(this.branchCols.map((b) => ({ label: b.code, key: 'b' + b.id })))
+            .concat([{ label: 'Amount', key: 'amount' }]);
+          if (!utils.download('balance-sheet-' + this.asOf + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Balance sheet exported.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

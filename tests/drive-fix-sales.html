@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drive: money fix — POS, returns, void, khata payments</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/pages/pos.js"></script>
+</head>
+<body data-public>
+<pre id="out">running…</pre>
+<script>
+/*
+ * Money-integrity fix pass, area "Sales, POS, returns & khata payments".
+ * Drives the REAL components: posPage (assets/js/pages/pos.js), saleViewPage (sale-view.html),
+ * returnsPage (returns.html) and customerViewPage (customer-view.html), and asserts the bank rows,
+ * ledgers and documents they write.
+ */
+(async function () {
+  const L = [];
+  let fails = 0;
+  const line = (s) => { L.push(s); console.log('DRIVE ' + s); };
+  const ok = (c, m, x) => { if (!c) fails++; line((c ? 'PASS  ' : 'FAIL  ') + m + (x !== undefined ? '  [' + x + ']' : '')); };
+  const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+  const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+  try {
+    const { db, utils, session, stock } = ABM;
+    const bank = ABM.bank;
+    db.reset();
+    const toasts = [];
+    ABM.ui.toast = (m, type) => { toasts.push({ m: String(m), type }); };
+    let confirmAnswer = true;
+    const confirms = [];
+    // approve every confirm except the "print the credit note" prompt, which would navigate away
+    ABM.ui.confirm = async (o) => { confirms.push((o && o.title) || ''); if (/Return recorded/i.test((o && o.title) || '')) return false; return confirmAnswer; };
+    const lastToast = (type) => { const t = toasts.filter((x) => !type || x.type === type).slice(-1)[0]; return t ? t.m : ''; };
+
+    const users = db.all('users');
+    const cashier = users.find((u) => u.username === 'cashier');
+    const manager = users.find((u) => u.username === 'manager');
+    const as = (u) => { session.logout(); session.login(u); };
+    as(cashier);
+    const BID = session.branchId();
+    line('=== branch ' + BID + ' (' + session.branchCode() + ')');
+
+    const stub = (o) => { o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {}; return o; };
+    const mkPos = () => { const c = stub(posPage()); c.init(); return c; };
+    const source = async (file, fnName) => {
+      const html = await (await fetch('../' + file)).text();
+      const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+      ok(!!body, 'loaded ' + fnName + '() from ' + file);
+      (0, eval)(body);
+    };
+    const mkPage = (factory, q) => { history.replaceState(null, '', location.pathname + (q || '')); const o = stub(factory()); o.init(); return o; };
+    await source('sale-view.html', 'saleViewPage');
+    await source('returns.html', 'returnsPage');
+    await source('customer-view.html', 'customerViewPage');
+    const mkView = (id) => mkPage(saleViewPage, '?id=' + id);
+
+    const acc = (id) => db.find('bank_accounts', id);
+    const bal = (id) => bank.balance(id);
+    const lastSale = () => db.all('sales').slice(-1)[0];
+    const pickAcc = (c, minQty, pred) => c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= (minQty || 1) && p.retail_price >= 300 && (!pred || pred(p)));
+    const cardAcc = bank.accountFor('card', BID), jazzAcc = bank.accountFor('jazzcash', BID), xferAcc = bank.accountFor('bank_transfer', BID);
+    ok(!!cardAcc && !!jazzAcc, 'the branch has default accounts for card and JazzCash', cardAcc + ' / ' + jazzAcc);
+    const otherAcc = bank.accounts(BID).find((a) => a.is_active && String(a.id) !== String(xferAcc) && a.account_type !== 'wallet');
+    ok(!!otherAcc, 'a second (non-wallet) account exists to pick', otherAcc && otherAcc.name);
+
+    /* ================= 1. POS: card / wallet / transfer money reaches the bank ================= */
+    line('=== TEST 1: POS non-cash payments post to the bank');
+    let c = mkPos();
+    const a1 = pickAcc(c, 2);
+    ok(!!a1, 'T1: found an accessory ' + (a1 && a1.name));
+    c.pick(a1); c.addLine(a1);
+    c.cart.tax_rate = 0;
+    await c.openCheckout();
+    ok(c.checkout.open, 'T1: checkout opened');
+    const T1 = c.totals.total;
+    const cardPart = utils.round2(Math.floor(T1 / 3)), jazzPart = utils.round2(Math.floor(T1 / 3)), xferPart = utils.round2(T1 - cardPart - jazzPart);
+    c.checkout.payments = [c.payRow('card', cardPart), c.payRow('jazzcash', jazzPart), c.payRow('bank_transfer', xferPart)];
+    c.checkout.payments[0].reference = 'AUTH-1'; c.checkout.payments[1].reference = 'TID-1'; c.checkout.payments[2].reference = 'BT-1';
+    c.checkout.payments[2].account_id = String(otherAcc.id);          // the cashier picks a different account for the transfer
+    eq(c.checkout.payments[0].account_id, String(cardAcc), 'T1: a card row defaults to the Banking-page card account');
+    eq(c.paymentErrors.length, 0, 'T1: validates (' + JSON.stringify(c.paymentErrors) + ')');
+    const b1 = { card: bal(cardAcc), jazz: bal(jazzAcc), other: bal(otherAcc.id) };
+    await c.completeSale();
+    const s1 = lastSale();
+    const p1 = db.where('sale_payments', { sale_id: s1.id });
+    eq(p1.length, 3, 'T1: three payment rows');
+    ok(p1.every((p) => !!p.bank_txn_id), 'T1: every non-cash payment row carries its bank_txn_id');
+    p1.forEach((p) => {
+      const t = db.find('bank_transactions', p.bank_txn_id);
+      ok(t && t.type === 'receipt' && t.reference_type === 'sale_payment' && String(t.reference_id) === String(p.id) && Math.abs(t.amount - p.amount) < 0.01, 'T1: ' + p.method + ' is a receipt linked to its sale payment', t && (t.type + ' ' + t.reference_type + '#' + t.reference_id));
+    });
+    const cardMoves = cardAcc === otherAcc.id ? cardPart + xferPart : cardPart;
+    near(bal(cardAcc), b1.card + cardMoves, 'T1: card money reached ' + acc(cardAcc).name);
+    near(bal(jazzAcc), b1.jazz + jazzPart, 'T1: JazzCash money reached ' + acc(jazzAcc).name);
+    near(bal(otherAcc.id), b1.other + xferPart + (cardAcc === otherAcc.id ? cardPart : 0), 'T1: the transfer landed in the PICKED account ' + otherAcc.name);
+    ok(lastToast('success').indexOf(acc(jazzAcc).name) >= 0, 'T1: the success toast names the accounts', lastToast('success'));
+    ok(/Card .* → /.test(db.all('audit_logs').filter((a) => a.action === 'sale.create').slice(-1)[0].details), 'T1: sale.create audit names where the card money went');
+
+    // no account at all → the sale must not half-save
+    const allAcc = db.all('bank_accounts').map((a) => ({ id: a.id, on: a.is_active }));
+    allAcc.forEach((a) => db.update('bank_accounts', a.id, { is_active: 0 }));
+    c = mkPos();
+    c.pick(pickAcc(c, 1));
+    await c.openCheckout();
+    c.checkout.payments = [c.payRow('card', c.totals.total)];
+    c.checkout.payments[0].reference = 'AUTH-X';
+    ok(c.paymentErrors.some((e) => /no bank or wallet account/i.test(e)), 'T1: a card payment with no open account is refused up front', c.paymentErrors[0]);
+    const nSales = db.all('sales').length, nBank = db.all('bank_transactions').length;
+    await c.completeSale();
+    eq(db.all('sales').length, nSales, 'T1: no sale was written');
+    eq(db.all('bank_transactions').length, nBank, 'T1: no bank row was written');
+    allAcc.forEach((a) => db.update('bank_accounts', a.id, { is_active: a.on }));
+    // a closed account picked by hand
+    const closedAcc = db.insert('bank_accounts', { name: 'Old Closed Account', bank_name: 'Test', branch_id: BID, account_type: 'current', opening_balance: 0, balance: 0, is_active: 0 });
+    c.checkout.payments[0].account_id = String(closedAcc.id);
+    ok(c.paymentErrors.some((e) => /is closed/.test(e)), 'T1: a closed account is refused', c.paymentErrors.find((e) => /closed/.test(e)));
+    c.checkout.open = false;
+
+    /* ================= 2. POS: the invoice discount respects every line's minimum price ================= */
+    line('=== TEST 2: invoice discount vs min_sale_price');
+    as(cashier);
+    c = mkPos();
+    const fp = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2 && p.min_sale_price > 0 && p.retail_price > p.min_sale_price * 1.05);
+    ok(!!fp, 'T2: a product with a minimum price (' + (fp && fp.name) + ' retail ' + (fp && fp.retail_price) + ' min ' + (fp && fp.min_sale_price) + ')');
+    const other2 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 1 && p.id !== fp.id && !(p.min_sale_price > 0 && p.retail_price * 0.5 < p.min_sale_price) && p.retail_price > 0);
+    c.pick(fp); if (other2) c.pick(other2);
+    c.cart.tax_rate = 0;
+    const pct = Math.min(95, Math.ceil((1 - fp.min_sale_price / fp.retail_price) * 100) + 4);
+    c.cart.discount_type = 'percent'; c.cart.discount_value = pct;
+    c.normalizeDiscount();
+    const sharesNow = c.invoiceShares();
+    const lines2 = c.cart.lines;
+    near(utils.sum(Object.values(sharesNow), (v) => v), c.totals.invoiceDisc, 'T2: the shares add up to the invoice discount');
+    if (lines2.length === 2) near(sharesNow[lines2[0].key], utils.round2(c.totals.invoiceDisc * c.lineTotal(lines2[0]) / c.totals.afterLine), 'T2: shared in proportion to the line totals');
+    ok(c.belowFloor.some((l) => l.product_id === fp.id), 'T2: ' + pct + '% takes the line below its minimum', c.effectiveUnit(lines2[0]) + ' < ' + fp.min_sale_price);
+    ok(c.validateCart().some((e) => /after the invoice discount/.test(e)), 'T2: checkout validation names it', c.validateCart()[0]);
+    await c.openCheckout();
+    eq(c.checkout.open, false, 'T2: a cashier cannot open checkout with it');
+    const ok2 = await c.guardInvoiceDiscount();
+    eq(ok2, false, 'T2: the guard refuses the discount for a cashier');
+    eq(Number(c.cart.discount_value), 0, 'T2: and puts the previous discount back');
+    ok(/minimum sale price/i.test(lastToast('error')), 'T2: with a readable error', lastToast('error'));
+
+    as(manager);
+    c = mkPos();
+    c.pick(c.productRow(fp.id)); if (other2) c.pick(c.productRow(other2.id));
+    c.cart.tax_rate = 0;
+    c.cart.discount_type = 'percent'; c.cart.discount_value = pct; c.normalizeDiscount();
+    const nOv = db.all('audit_logs').filter((a) => a.action === 'sale.price_override').length;
+    const okM = await c.guardInvoiceDiscount();
+    eq(okM, true, 'T2: a manager approves it');
+    const lf = c.cart.lines.find((l) => l.product_id === fp.id);
+    ok(lf.override && Math.abs(lf.override_at - c.effectiveUnit(lf)) < 0.011, 'T2: the approval records the net price it covers', lf.override_at);
+    ok(db.all('audit_logs').filter((a) => a.action === 'sale.price_override').length > nOv, 'T2: the approval is audited (same path as a line price)');
+    eq(c.belowFloor.length, 0, 'T2: nothing is below the floor any more');
+    // a bigger discount afterwards is NOT covered by the old approval
+    c.cart.discount_value = Math.min(99, pct + 3); c.normalizeDiscount();
+    ok(c.belowFloor.some((l) => l.product_id === fp.id), 'T2: raising the discount again needs a new approval');
+    c.cart.discount_value = pct; c.normalizeDiscount();
+    await c.openCheckout();
+    ok(c.checkout.open, 'T2: the manager can check out');
+    c.setCash(c.totals.total);
+    const disc2 = c.totals.invoiceDisc;
+    await c.completeSale();
+    const s2 = lastSale();
+    const its2 = db.where('sale_items', { sale_id: s2.id });
+    near(utils.sum(its2, 'invoice_discount_amount'), disc2, 'T2: each sale item carries its share of the invoice discount');
+    const aud2 = db.all('audit_logs').filter((a) => a.action === 'sale.create' && String(a.entity_id) === String(s2.id))[0];
+    ok(aud2 && /invoice discount/.test(aud2.details) && aud2.details.indexOf(pct + '%') >= 0 && aud2.details.indexOf(manager.name) >= 0, 'T2: sale.create audit states the invoice discount, % and who gave it', aud2 && aud2.details);
+    ok(aud2 && /below-minimum price approved/.test(aud2.details), 'T2: and the below-minimum approval');
+    // the discount was typed BEFORE the line was added: the manager is asked at checkout instead
+    c = mkPos();
+    c.cart.discount_type = 'percent'; c.cart.discount_value = pct; c.acceptDiscount();
+    c.pick(c.productRow(fp.id)); c.cart.tax_rate = 0;
+    ok(c.belowFloor.length === 1, 'T2: a line added under an existing discount is caught');
+    confirmAnswer = false;
+    await c.openCheckout();
+    eq(c.checkout.open, false, 'T2: declining the approval keeps checkout closed');
+    confirmAnswer = true;
+    await c.openCheckout();
+    ok(c.checkout.open && confirms.slice(-1)[0] === 'Below minimum sale price', 'T2: approving at checkout opens it');
+    c.checkout.open = false;
+
+    /* ================= 3. Void: bank side undone, web order released ================= */
+    line('=== TEST 3: void a card sale and an online-order invoice');
+    const cardBefore = bal(cardAcc);
+    as(cashier);
+    c = mkPos();
+    c.pick(pickAcc(c, 1));
+    c.cart.tax_rate = 0;
+    await c.openCheckout();
+    c.checkout.payments = [c.payRow('card', c.totals.total)]; c.checkout.payments[0].reference = 'AUTH-V';
+    await c.completeSale();
+    const s3 = lastSale();
+    const p3 = db.where('sale_payments', { sale_id: s3.id })[0];
+    near(bal(cardAcc), cardBefore + s3.total, 'T3: the card sale reached the bank');
+    as(manager);
+    let v = mkView(s3.id);
+    ok(v.voidable, 'T3: same-day invoice is voidable');
+    near(v.bankPaid, s3.total, 'T3: the void dialog knows the card money');
+    ok(v.bankAccountNames.indexOf(acc(cardAcc).name) >= 0, 'T3: and names the account', v.bankAccountNames);
+    v.openVoid(); v.vd.reason = 'Wrong card charged';
+    await v.submitVoid();
+    eq(db.find('sales', s3.id).status, 'void', 'T3: voided');
+    near(bal(cardAcc), cardBefore, 'T3: the card money was taken back out of the bank');
+    ok(!!db.find('bank_transactions', p3.bank_txn_id).reversed_by, 'T3: the original bank row is marked reversed');
+    ok(!!db.find('sale_payments', p3.id).bank_reversal_id, 'T3: the payment row points at its reversal');
+    ok(/taken back out of/.test(db.all('audit_logs').filter((a) => a.action === 'sale.void').slice(-1)[0].details), 'T3: the void audit says so');
+    v = mkView(s3.id);
+    ok(v.payments[0].bankReturned, 'T3: the invoice shows the card payment as taken back');
+
+    // a payment settled together with others (one settlement row for several payments) only takes its own amount back
+    const cust0 = db.all('customers').find((x) => x.is_walkin) || db.all('customers')[0];
+    const mkWebSale = (order, total, method) => {
+      const sale = db.insert('sales', { invoice_no: db.nextNumber('INV', session.branchCode()), branch_id: BID, customer_id: order.customer_id || cust0.id, user_id: manager.id, sale_date: utils.now(), subtotal: total, discount_amount: 0, tax_rate: 0, tax_amount: 0, delivery_fee: 0, total, paid_amount: total, due_amount: 0, status: 'completed', notes: 'Online order ' + order.order_no, online_order_id: order.id, source: 'online' });
+      const pay = db.insert('sale_payments', { sale_id: sale.id, method, amount: total, reference: 'WEB' });
+      db.update('online_orders', order.id, { sale_id: sale.id, status: 'delivered', payment_status: 'paid', invoiced_at: utils.now() });
+      return { sale, pay };
+    };
+    const settleBefore = bal(cardAcc);
+    const settle = bank.receive('card', 5000, { branchId: BID, reference: 'Card settlement (test)', ref: { type: 'settlement', id: null } });
+    const shared = db.insert('sales', { invoice_no: db.nextNumber('INV', session.branchCode()), branch_id: BID, customer_id: cust0.id, user_id: manager.id, sale_date: utils.now(), subtotal: 2000, discount_amount: 0, tax_rate: 0, tax_amount: 0, total: 2000, paid_amount: 2000, due_amount: 0, status: 'completed', notes: '' });
+    const sharedPay = db.insert('sale_payments', { sale_id: shared.id, method: 'card', amount: 2000, reference: 'AUTH-S', bank_txn_id: settle.id });
+    v = mkView(shared.id); v.openVoid(); v.vd.reason = 'Test shared settlement';
+    await v.submitVoid();
+    near(bal(cardAcc), settleBefore + 3000, 'T3: a payment inside a shared settlement takes back only its own 2,000');
+    ok(!db.find('bank_transactions', settle.id).reversed_by, 'T3: the shared settlement row itself is not reversed');
+    ok(!!db.find('sale_payments', sharedPay.id).bank_reversal_id, 'T3: the partial reversal is linked to the payment');
+
+    // web order invoiced then voided → released
+    const orders = db.all('online_orders').filter((o) => !o.sale_id && o.status !== 'cancelled');
+    ok(orders.length >= 2, 'T3: web orders without an invoice exist (' + orders.length + ')');
+    const o1 = orders[0];
+    const w1 = mkWebSale(o1, 3000, 'jazzcash');
+    const t1 = bank.receive('jazzcash', 3000, { branchId: BID, reference: 'WEB', ref: { type: 'sale_payment', id: w1.pay.id } });
+    db.update('sale_payments', w1.pay.id, { bank_txn_id: t1.id });
+    const jz0 = bal(jazzAcc);
+    v = mkView(w1.sale.id);
+    ok(!!v.order && v.order.order_no === o1.order_no, 'T3: the invoice links back to its web order ' + o1.order_no);
+    v.openVoid(); v.vd.reason = 'Invoiced the wrong units';
+    await v.submitVoid();
+    const o1b = db.find('online_orders', o1.id);
+    eq(o1b.sale_id, null, 'T3: the web order no longer points at the void invoice');
+    eq(o1b.status, 'confirmed', 'T3: it is back to Confirmed');
+    eq(o1b.payment_status, 'unpaid', 'T3: its JazzCash money was taken back, so it is unpaid');
+    near(bal(jazzAcc), jz0 - 3000, 'T3: the wallet gave the money back');
+    ok(db.all('audit_logs').some((a) => a.action === 'order.release' && String(a.entity_id) === String(o1.id)), 'T3: the release is audited');
+    ok((o1b.status_log || []).slice(-1)[0] && /voided/.test(o1b.status_log.slice(-1)[0].notes), 'T3: and noted on the order timeline');
+
+    // a web order whose money sits on the ORDER (its own receipt) keeps it
+    const o2 = orders[1];
+    const own = bank.receive('jazzcash', 1500, { branchId: BID, reference: 'WEB-OWN', ref: { type: 'online_order', id: o2.id } });
+    db.update('online_orders', o2.id, { bank_txn_id: own.id });
+    const w2 = mkWebSale(db.find('online_orders', o2.id), 1500, 'jazzcash');
+    db.update('sale_payments', w2.pay.id, { bank_txn_id: own.id });
+    const jz1 = bal(jazzAcc);
+    v = mkView(w2.sale.id); v.openVoid(); v.vd.reason = 'Re-invoice';
+    await v.submitVoid();
+    const o2b = db.find('online_orders', o2.id);
+    eq(o2b.payment_status, 'paid', 'T3: money still held for the web order keeps it Paid');
+    ok(!db.find('bank_transactions', own.id).reversed_by, 'T3: and the order\'s own receipt is not undone');
+    near(bal(jazzAcc), jz1, 'T3: the wallet balance is unchanged');
+    eq(o2b.sale_id, null, 'T3: but it is released for a new invoice');
+
+    /* ================= 4. Returns: the refund plan ================= */
+    line('=== TEST 4: returns follow the refund plan');
+    as(manager);
+    const cust = db.all('customers').find((x) => !x.is_walkin && x.is_active && x.credit_limit >= 100000);
+    ok(!!cust, 'T4: a credit customer ' + (cust && cust.name));
+    // 4a/4b: khata invoice, 500 paid in cash, the rest on the ledger
+    c = mkPos();
+    c.setCustomer(cust.id);
+    const a4 = pickAcc(c, 3, (p) => p.retail_price >= 800);
+    c.pick(a4); c.addLine(a4); c.addLine(a4);
+    c.cart.tax_rate = 0;
+    await c.openCheckout();
+    c.checkout.payments = [c.payRow('cash', 500)];
+    c.checkout.khata = true;
+    const balBefore = Number(db.find('customers', cust.id).balance) || 0;
+    await c.completeSale();
+    const s4 = lastSale();
+    const due4a = Number(s4.due_amount);          // s4 is the live row: keep the number before returns change it
+    near(due4a, s4.total - 500, 'T4: khata invoice written (due ' + due4a + ')');
+    v = mkView(s4.id);
+    v.openReturn();
+    v.ret.lines[0].qty = 1; v.ret.reason = 'Changed mind';
+    const V1 = v.retTotal;
+    ok(V1 < due4a, 'T4a: one unit is worth less than the due', V1 + ' < ' + due4a);
+    eq(v.plan.due, V1, 'T4a: the whole refund goes off the due');
+    eq(v.plan.rest, 0, 'T4a: nothing is paid out');
+    const nCtx = db.all('customer_transactions').length;
+    await v.submitReturn();
+    let r = db.all('sale_returns').slice(-1)[0];
+    ok(r.sale_id === s4.id && r.refund_method === 'ledger', 'T4a: return recorded as a ledger refund', r.return_no + ' ' + r.refund_method);
+    near(r.refund_due, V1, 'T4a: refund_due = value'); near(r.refund_paid, 0, 'T4a: nothing paid out'); near(r.refund_cash, 0, 'T4a: no cash left the drawer');
+    near(db.find('sales', s4.id).due_amount, due4a - V1, 'T4a: invoice due reduced');
+    near(db.find('customers', cust.id).balance, balBefore + due4a - V1, 'T4a: customer owes the value less');
+    const ctx4 = db.all('customer_transactions').slice(nCtx);
+    ok(ctx4.length === 1 && ctx4[0].type === 'refund' && Math.abs(ctx4[0].credit - V1) < 0.01, 'T4a: exactly one ledger refund row, no store credit');
+
+    // 4b: the rest — more than is still due: the due is cleared, the remainder paid back in cash (not store credit)
+    v = mkView(s4.id);
+    v.openReturn();
+    v.ret.lines[0].qty = v.ret.lines[0].max; v.ret.reason = 'Changed mind';
+    const due4 = db.find('sales', s4.id).due_amount;
+    const V2 = v.retTotal;
+    ok(V2 > due4, 'T4b: this return is worth more than what is still due', V2 + ' > ' + due4);
+    near(v.plan.due, due4, 'T4b: the due part is capped at the due');
+    near(v.plan.rest, V2 - due4, 'T4b: the rest is paid out');
+    near(v.plan.moneyLeft, 500, 'T4b: only the 500 actually paid can come back as money');
+    v.ret.method = 'ledger';
+    ok(!v.validateReturn() && /Nothing more is owed/.test(v.ret.errors.method || ''), 'T4b: a "ledger" refund larger than the due is refused', v.ret.errors.method);
+    v.ret.method = 'cash';
+    ok(v.validateReturn(), 'T4b: a cash remainder validates');
+    await v.submitReturn();
+    r = db.all('sale_returns').slice(-1)[0];
+    eq(r.refund_method, 'cash', 'T4b: the paid-out part was cash');
+    near(r.refund_due, due4, 'T4b: refund_due'); near(r.refund_cash, V2 - due4, 'T4b: refund_cash = the part that left the drawer'); near(r.refund_credit, 0, 'T4b: no store credit');
+    near(db.find('sales', s4.id).due_amount, 0, 'T4b: invoice due cleared');
+    near(db.find('customers', cust.id).balance, balBefore, 'T4b: the customer balance is back where it was — no accidental store credit');
+
+    // 4d: an invoice paid partly with store credit gives that part back as store credit first
+    const cust2 = db.all('customers').find((x) => !x.is_walkin && x.is_active && Number(x.balance) === 0 && x.id !== cust.id);
+    ABM.ledger.customer(cust2.id, BID, 'store_credit', 0, 50000, { notes: 'Driver fixture credit' });
+    c = mkPos();
+    c.setCustomer(cust2.id);
+    const a5 = pickAcc(c, 2, (p) => p.retail_price >= 800);
+    c.pick(a5); c.addLine(a5);
+    c.cart.tax_rate = 0;
+    await c.openCheckout();
+    const T5 = c.totals.total, SC = utils.round2(Math.floor(T5 * 0.3));
+    c.checkout.payments = [{ ...c.payRow('store_credit', SC) }, c.payRow('cash', utils.round2(T5 - SC))];
+    eq(c.paymentErrors.length, 0, 'T4d: store credit + cash validates');
+    await c.completeSale();
+    const s5 = lastSale();
+    const bal5 = Number(db.find('customers', cust2.id).balance);
+    v = mkView(s5.id);
+    v.openReturn();
+    v.ret.lines[0].qty = v.ret.lines[0].max; v.ret.reason = 'Faulty';
+    near(v.plan.credit, SC, 'T4d: the store-credit part goes back as store credit');
+    near(v.plan.rest, T5 - SC, 'T4d: only the cash part is paid out');
+    await v.submitReturn();
+    r = db.all('sale_returns').slice(-1)[0];
+    near(r.refund_credit, SC, 'T4d: refund_credit'); near(r.refund_credit_restored, SC, 'T4d: all of it restored credit'); near(r.refund_cash, T5 - SC, 'T4d: refund_cash');
+    near(db.find('customers', cust2.id).balance, bal5 - SC, 'T4d: store credit restored on the ledger');
+
+    // 4e: never more money back than the invoice took in
+    as(cashier);
+    c = mkPos();
+    const a6 = pickAcc(c, 3, (p) => p.retail_price >= 800);
+    c.pick(a6); c.addLine(a6); c.addLine(a6);
+    c.cart.tax_rate = 0;
+    await c.openCheckout(); c.setCash(c.totals.total);
+    await c.completeSale();
+    const s6 = lastSale();
+    as(manager);
+    // an old-style return (before the plan) that already paid the whole invoice back in cash
+    db.insert('sale_returns', { return_no: 'RET-LEGACY-1', sale_id: s6.id, branch_id: BID, customer_id: s6.customer_id, user_id: manager.id, return_date: utils.now(), subtotal: s6.total, refund_amount: s6.total, refund_method: 'cash', reason: 'Legacy', notes: '' });
+    v = mkView(s6.id);
+    v.openReturn();
+    v.ret.lines[0].qty = 1; v.ret.method = 'cash'; v.ret.reason = 'Again';
+    near(v.plan.moneyLeft, 0, 'T4e: nothing is left to pay back');
+    ok(!v.validateReturn() && /at most/.test(v.ret.errors.method || ''), 'T4e: a cash refund beyond what was paid is refused', v.ret.errors.method);
+    const nRet = db.all('sale_returns').length;
+    await v.submitReturn();
+    eq(db.all('sale_returns').length, nRet, 'T4e: nothing was written');
+    db.remove('sale_returns', db.all('sale_returns').find((x) => x.return_no === 'RET-LEGACY-1').id);
+
+    // 4f: a card refund leaves the bank account; an account that cannot cover it is refused
+    const cardB = bal(cardAcc);
+    v = mkView(s6.id);
+    v.openReturn();
+    v.ret.lines[0].qty = 1; v.ret.method = 'card'; v.ret.reason = 'Refund to card'; v.ret.reference = 'REV-1';
+    const V6 = v.retTotal;
+    eq(String(v.retAccountId()), String(cardAcc), 'T4f: the refund account defaults to the card account');
+    const poor = db.insert('bank_accounts', { name: 'Tiny Account', bank_name: 'Test', branch_id: BID, account_type: 'current', opening_balance: 10, balance: 0, is_active: 1 });
+    bank.post(poor.id, { type: 'opening', amount: 10, reference: 'Opening balance' });
+    v.ret.account_id = String(poor.id);
+    ok(!v.validateReturn() && /only holds/.test(v.ret.errors.account || ''), 'T4f: an account that would be overdrawn is refused', v.ret.errors.account);
+    v.ret.account_id = '';
+    await v.submitReturn();
+    r = db.all('sale_returns').slice(-1)[0];
+    eq(r.refund_method, 'card', 'T4f: refunded to card');
+    ok(!!r.bank_txn_id, 'T4f: the return carries its bank_txn_id');
+    const rt = db.find('bank_transactions', r.bank_txn_id);
+    ok(rt && rt.type === 'payment' && rt.reference_type === 'sale_return' && String(rt.reference_id) === String(r.id), 'T4f: a bank payment linked to the return');
+    near(bal(cardAcc), cardB - V6, 'T4f: the money left ' + acc(cardAcc).name);
+    near(r.refund_cash, 0, 'T4f: no cash left the drawer');
+    ok(/Card/.test(lastToast('success')) && lastToast('success').indexOf(acc(cardAcc).name) >= 0, 'T4f: the toast names the account', lastToast('success'));
+
+    // 4h: another tab returned the units meanwhile → no double return
+    v = mkView(s6.id);
+    v.openReturn();
+    v.ret.lines[0].qty = v.ret.lines[0].max; v.ret.method = 'cash'; v.ret.reason = 'Stale tab';
+    const it6 = db.where('sale_items', { sale_id: s6.id })[0];
+    const rq6 = Number(it6.returned_quantity) || 0;
+    db.update('sale_items', it6.id, { returned_quantity: it6.quantity });      // "the other tab"
+    const nRet2 = db.all('sale_returns').length;
+    await v.submitReturn();
+    eq(db.all('sale_returns').length, nRet2, 'T4h: a stale return form cannot return the same units twice');
+    ok(/can still be returned/.test(lastToast('error')), 'T4h: with a readable message', lastToast('error'));
+    db.update('sale_items', it6.id, { returned_quantity: rq6 });
+
+    // 4g: returns.html shows the split
+    const rl = mkPage(returnsPage, '?range=all');
+    const row4b = rl.rows.find((x) => x.sale_id === s4.id && x.refund_method === 'cash');
+    ok(!!row4b && row4b.isSplit && row4b.splitParts.length === 2, 'T4g: the split return lists two parts', row4b && row4b.splitNote);
+    ok(row4b && row4b.splitParts[0].label === 'Off the unpaid invoice balance', 'T4g: first the part off the due');
+    const cashTile = utils.sum(rl.rows.filter((x) => x.split.method === 'cash'), (x) => x.split.paid);
+    near(rl.tiles.cash, cashTile, 'T4g: the cash tile counts only money that left the drawer');
+    ok(rl.tiles.cash < utils.sum(rl.rows.filter((x) => x.refund_method === 'cash'), 'refund_amount'), 'T4g: (less than the full value of cash-method returns)');
+    rl.f.method = 'card';
+    ok(rl.filtered.length >= 1 && rl.filtered.every((x) => x.split.method === 'card'), 'T4g: the card filter finds the card refund');
+    rl.f.method = 'ledger';
+    ok(rl.filtered.some((x) => x.id === row4b.id), 'T4g: a split return also matches the "reduced ledger due" filter');
+    rl.clearFilters();
+    const csv = utils.toCsv(rl.filtered.slice(0, 3), [{ label: 'x', key: 'return_no' }]);
+    ok(!!csv, 'T4g: the list still exports');
+
+    /* ================= 5. Khata payments: bank methods and cheques ================= */
+    line('=== TEST 5: customer-view khata payments');
+    as(manager);
+    const cust3 = db.all('customers').find((x) => !x.is_walkin && x.is_active && x.credit_limit >= 100000 && x.id !== cust.id);
+    c = mkPos();
+    c.setCustomer(cust3.id);
+    c.pick(pickAcc(c, 2, (p) => p.retail_price >= 800)); c.cart.tax_rate = 0;
+    await c.openCheckout();
+    c.checkout.payments = [c.payRow('cash', 100)]; c.checkout.khata = true;
+    await c.completeSale();
+    const s7 = lastSale();
+    let cv = mkPage(customerViewPage, '?id=' + cust3.id);
+    ok(cv.openInvoices.some((s) => s.id === s7.id), 'T5: the khata invoice is open on the customer page');
+    const due7 = db.find('sales', s7.id).due_amount;
+    // 5a: JazzCash into the default wallet
+    cv.openPay();
+    cv.pay.amount = 1000; cv.pay.method = 'jazzcash'; cv.pay.reference = 'TID-K1'; cv.pay.allocate = true;
+    const jz5 = bal(jazzAcc), bal7 = Number(db.find('customers', cust3.id).balance);
+    cv.savePay();
+    let t5 = db.all('customer_transactions').slice(-1)[0];
+    ok(t5.type === 'payment' && t5.payment_method === 'jazzcash' && !!t5.bank_txn_id, 'T5a: ledger payment carries its bank_txn_id');
+    const bt5 = db.find('bank_transactions', t5.bank_txn_id);
+    ok(bt5 && bt5.type === 'receipt' && String(bt5.account_id) === String(jazzAcc) && bt5.reference_type === 'customer_transaction' && String(bt5.reference_id) === String(t5.id), 'T5a: a receipt into the wallet, linked to the ledger row');
+    near(bal(jazzAcc), jz5 + 1000, 'T5a: the wallet balance went up');
+    near(db.find('customers', cust3.id).balance, bal7 - 1000, 'T5a: the customer owes 1,000 less');
+    ok(Array.isArray(t5.allocations) && t5.allocations.length >= 1, 'T5a: the invoice allocation is kept on the ledger row');
+    ok(/received/.test(lastToast('success')) || lastToast('success').indexOf(acc(jazzAcc).name) >= 0, 'T5a: toast names the account', lastToast('success'));
+    cv.compute();
+    const row5 = cv.ledger.find((x) => x.id === t5.id);
+    ok(row5 && row5.accountName === acc(jazzAcc).name, 'T5a: the ledger shows where the money went');
+    // 5b: bank transfer into an account picked by hand
+    cv.openPay();
+    cv.pay.amount = 700; cv.pay.method = 'bank_transfer'; cv.pay.reference = 'BT-K2'; cv.pay.account_id = String(otherAcc.id);
+    const ob5 = bal(otherAcc.id);
+    cv.savePay();
+    near(bal(otherAcc.id), ob5 + 700, 'T5b: the transfer landed in the picked account ' + otherAcc.name);
+    // 5c: no open account → refused, nothing written
+    cv.openPay();
+    cv.pay.amount = 300; cv.pay.method = 'card'; cv.pay.reference = 'AUTH-K3'; cv.pay.account_id = String(closedAcc.id);
+    const nCtx5 = db.all('customer_transactions').length;
+    cv.savePay();
+    ok(!!cv.pay.errors.account, 'T5c: a closed account is refused', cv.pay.errors.account);
+    eq(db.all('customer_transactions').length, nCtx5, 'T5c: nothing written');
+    cv.closePay();
+    // 5d: a cheque — the cheque's own ledger credit is the payment
+    cv.openPay();
+    cv.pay.amount = 2000; cv.pay.method = 'cheque'; cv.pay.cheque_no = ''; cv.pay.bank_name = 'HBL';
+    cv.savePay();
+    ok(!!cv.pay.errors.cheque_no, 'T5d: a cheque needs its number', cv.pay.errors.cheque_no);
+    cv.pay.cheque_no = 'CHQ-5501'; cv.pay.due_date = utils.today();
+    const bankSum = () => utils.round2(db.all('bank_accounts').reduce((s, a) => s + (Number(a.balance) || 0), 0));
+    const bs5 = bankSum(), nCtx6 = db.all('customer_transactions').length, bal8 = Number(db.find('customers', cust3.id).balance);
+    const openDue = () => utils.round2(utils.sum(db.all('sales').filter((s) => String(s.customer_id) === String(cust3.id) && String(s.branch_id) === String(BID) && s.status !== 'void'), 'due_amount'));
+    const dueBeforeChq = openDue();
+    cv.savePay();
+    const chq = db.all('cheques').slice(-1)[0];
+    ok(chq && chq.cheque_no === 'CHQ-5501' && chq.direction === 'received' && chq.status === 'pending' && String(chq.party_id) === String(cust3.id), 'T5d: a pending received cheque is in the register');
+    eq(db.all('customer_transactions').length, nCtx6 + 1, 'T5d: exactly ONE ledger row (the cheque\'s own)');
+    const tc = db.all('customer_transactions').slice(-1)[0];
+    ok(tc.type === 'payment' && tc.payment_method === 'cheque' && String(tc.cheque_id) === String(chq.id) && String(chq.ledger_txn_id) === String(tc.id), 'T5d: cheque and ledger row point at each other');
+    near(db.find('customers', cust3.id).balance, bal8 - 2000, 'T5d: the balance is credited now');
+    near(bankSum(), bs5, 'T5d: no bank balance moved (a cheque is not money until it clears)');
+    near(openDue(), utils.round2(Math.max(0, dueBeforeChq - 2000)), 'T5d: the cheque was allocated to the unpaid invoices, oldest first');
+    ok(Array.isArray(tc.allocations) && tc.allocations.length >= 1, 'T5d: the allocation is kept on the cheque\'s ledger row');
+    cv.compute();
+    const rowC = cv.ledger.find((x) => x.id === tc.id);
+    eq(rowC && rowC.chequeStatus, 'pending', 'T5d: the ledger shows the cheque status');
+    ok(rowC && /Cheque|INV|RET/.test(rowC.refLabel || '') , 'T5d: and a reference', rowC && rowC.refLabel);
+    ABM.bank.cheque.bounce(chq.id, 'Insufficient funds');
+    near(db.find('customers', cust3.id).balance, bal8, 'T5d: a bounce puts the amount back on the khata');
+    cv.compute();
+    eq(cv.ledger.find((x) => x.id === tc.id).chequeStatus, 'bounced', 'T5d: and the payment row now reads bounced');
+    // cash still works, without any bank row
+    cv.openPay();
+    cv.pay.amount = 50; cv.pay.method = 'cash';
+    const nb = db.all('bank_transactions').length;
+    cv.savePay();
+    eq(db.all('bank_transactions').length, nb, 'T5e: a cash khata payment touches no bank account');
+    ok(db.all('audit_logs').slice(-1)[0].action === 'customer.payment', 'T5e: audited');
+
+    /* ================= 6. books tie out ================= */
+    line('=== TEST 6: consistency');
+    ok(db.all('bank_accounts').every((a) => {
+      const sum = db.where('bank_transactions', { account_id: a.id }).reduce((s, t) => s + t.signed, 0);
+      return Math.abs(utils.round2(sum) - utils.round2(a.balance)) < 0.01;
+    }), 'T6: every account balance equals its own transactions');
+    const key = (t) => String(t.created_at) + '|' + String(t.id).padStart(8, '0');
+    [cust, cust2, cust3].forEach((cu) => {
+      const tx = db.all('customer_transactions').filter((t) => String(t.customer_id) === String(cu.id)).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+      const run = tx.reduce((s, t) => utils.round2(s + (Number(t.debit) || 0) - (Number(t.credit) || 0)), 0);
+      near(run, db.find('customers', cu.id).balance, 'T6: ' + cu.name + ' balance replays from the ledger');
+    });
+  } catch (e) {
+    fails++;
+    line('FAIL  exception: ' + (e && e.stack || e));
+  }
+  const verdict = 'RESULT: ' + (fails ? 'FAIL (' + fails + ')' : 'PASS');
+  line(verdict);
+  document.getElementById('out').textContent = L.join('\n');
+})();
+</script>
+</body>
+</html>

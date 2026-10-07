@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Sign in · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-public data-page="login">
+  <main class="min-h-full grid lg:grid-cols-2">
+    <!-- Brand panel -->
+    <section class="hidden lg:flex flex-col justify-between bg-gradient-to-br from-navy-900 via-navy-950 to-slate-950 text-white p-12 relative overflow-hidden">
+      <div class="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-emerald-500/15 blur-3xl"></div>
+      <div class="absolute -bottom-40 -left-20 w-[28rem] h-[28rem] rounded-full bg-navy-500/40 blur-3xl"></div>
+      <div class="absolute inset-0 opacity-[.07]" style="background-image: linear-gradient(rgba(255,255,255,.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.6) 1px, transparent 1px); background-size: 48px 48px;"></div>
+      <div class="relative flex items-center gap-3">
+        <span class="w-14 h-14 rounded-2xl bg-white p-1.5 flex items-center justify-center shadow-lg shadow-black/40 flex-none">
+          <img src="assets/img/logo.png" alt="" data-abm-logo class="w-full h-full object-contain" data-fallback-class="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-emerald-600 text-white flex items-center justify-center font-black text-xl">
+        </span>
+        <div>
+          <div class="text-xl font-extrabold tracking-tight" x-data x-text="ABM.brand.name()">Abbott Mobiles</div>
+          <div class="text-xs text-white/50">Multi-Branch POS · Inventory · Accounting</div>
+        </div>
+      </div>
+      <div class="relative max-w-md">
+        <h2 class="text-4xl font-extrabold leading-tight tracking-tight">Run every branch from one screen.</h2>
+        <p class="mt-4 text-white/70 leading-relaxed">IMEI-level stock control, tax invoicing, customer khata, supplier payables and a day-end Z-report — built for mobile phone retail.</p>
+        <ul class="mt-8 space-y-3 text-sm text-white/85">
+          <li class="flex items-center gap-3"><span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-xs font-bold">✓</span>Scan a 15-digit IMEI straight into the cart</li>
+          <li class="flex items-center gap-3"><span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-xs font-bold">✓</span>Inter-branch transfers with IMEI inspection</li>
+          <li class="flex items-center gap-3"><span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-xs font-bold">✓</span>Split payments: cash, card, JazzCash, EasyPaisa, ledger</li>
+          <li class="flex items-center gap-3"><span class="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-xs font-bold">✓</span>Thermal 80mm and A4 tax invoices</li>
+        </ul>
+      </div>
+      <div class="relative text-xs text-white/40">© <span x-data x-text="new Date().getFullYear()"></span> Abbott Mobiles. Frontend prototype — demo data lives in your browser.</div>
+    </section>
+
+    <!-- Sign-in form -->
+    <section class="flex items-center justify-center p-6 sm:p-10">
+      <div class="w-full max-w-md" x-data="loginPage()">
+        <div class="lg:hidden flex items-center gap-3 mb-8">
+          <img src="assets/img/logo.png" alt="" data-abm-logo class="w-11 h-11 object-contain" data-fallback-class="w-10 h-10 rounded-xl bg-navy-900 text-emerald-400 flex items-center justify-center font-black text-lg">
+          <div><div class="font-extrabold text-slate-900" x-text="ABM.brand.name()">Abbott Mobiles</div><div class="text-xs text-slate-500" x-text="ABM.brand.tagline()">The name of trust</div></div>
+        </div>
+        <h1 class="text-2xl font-extrabold text-slate-900 tracking-tight">Sign in to your branch</h1>
+        <p class="text-sm text-slate-500 mt-1">Use your staff username and password.</p>
+
+        <form class="mt-8 space-y-5" @submit.prevent="submit()" novalidate>
+          <div x-show="error" x-cloak class="alert" :class="errorKind === 'locked' ? 'alert-warning' : 'alert-danger'" role="alert" aria-live="polite">
+            <span x-html="ABM.icon(errorKind === 'locked' ? 'lock' : errorKind === 'blocked' ? 'warning' : 'x-circle')"></span>
+            <div class="min-w-0">
+              <div x-text="error"></div>
+              <div class="text-xs mt-1 opacity-90" x-show="errorHint" x-text="errorHint"></div>
+            </div>
+          </div>
+          <div>
+            <label class="label" for="username">Username</label>
+            <div class="input-icon">
+              <span x-html="ABM.icon('user')"></span>
+              <input id="username" x-model.trim="username" type="text" class="input input-lg" placeholder="e.g. ahmed.raza" autocomplete="username" autocapitalize="off" spellcheck="false" autofocus required>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between">
+              <label class="label" for="password">Password</label>
+              <a href="#" class="text-xs font-semibold text-navy-700 hover:underline" :aria-expanded="forgot ? 'true' : 'false'" aria-controls="forgot-help" @click.prevent="forgot = !forgot">Forgot password?</a>
+            </div>
+            <div class="input-icon">
+              <span x-html="ABM.icon('key')"></span>
+              <input id="password" x-ref="pw" x-model="password" :type="showPw ? 'text' : 'password'" class="input input-lg pr-16" placeholder="••••••••" autocomplete="current-password" required @keyup="caps($event)" @keydown="caps($event)">
+              <button type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1" @click="showPw=!showPw" x-text="showPw ? 'Hide' : 'Show'"></button>
+            </div>
+            <p class="help !text-amber-700 flex items-center gap-1" x-show="capsOn" x-cloak><span x-html="ABM.icon('warning','w-3.5 h-3.5')"></span>Caps Lock is on.</p>
+          </div>
+          <div id="forgot-help" x-show="forgot" x-cloak class="alert alert-info">
+            <span x-html="ABM.icon('info')"></span>
+            <div class="min-w-0 space-y-1.5">
+              <div class="font-semibold">Staff passwords are reset in the shop, not by email.</div>
+              <p>Ask a <b>Super Admin</b>, or anyone at your branch whose role has <b>Users: Edit</b> (usually the branch manager), to open <b>Users</b> and choose <b>Reset password</b>. They give you a temporary password, and you choose your own the first time you sign in with it.</p>
+              <p>Locked out after too many wrong passwords? The same people can <b>Unlock</b> your account from Users, or wait <span x-text="lockMinutes"></span> minutes and try again.</p>
+            </div>
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" class="checkbox" x-model="remember"> Keep me signed in on this device</label>
+            <p class="help ml-6" x-text="remember ? 'You stay signed in after the browser closes. Untick this on a shared counter PC.' : 'You will be signed out when this browser is closed.'"></p>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg btn-block" :disabled="busy">
+            <span x-show="!busy">Sign in</span>
+            <span x-show="busy" x-cloak>Signing in…</span>
+          </button>
+        </form>
+
+        <!-- Demo quick sign-in: only while Settings → Demo mode is on (turn it off before real use) -->
+        <div class="mt-8" x-show="demoMode && demoList.length" x-cloak>
+          <div class="flex items-center gap-3 text-xs text-slate-400"><span class="flex-1 h-px bg-slate-200"></span><span class="text-center">Demo accounts · password <b class="mono text-slate-600" x-text="demoPassword"></b></span><span class="flex-1 h-px bg-slate-200"></span></div>
+          <div class="mt-4 grid grid-cols-1 gap-2">
+            <template x-for="d in demoList" :key="d.username">
+              <button type="button" class="card card-hover text-left px-4 py-3 flex items-center gap-3" @click="quick(d.username)" :disabled="busy">
+                <span :class="d.color" class="w-9 h-9 rounded-xl flex items-center justify-center flex-none" x-html="ABM.icon(d.icon,'w-5 h-5')"></span>
+                <div class="min-w-0 flex-1"><div class="text-sm font-bold text-slate-800" x-text="d.label"></div><div class="text-xs text-slate-500 truncate" x-text="'@' + d.username + ' · ' + d.hint"></div></div>
+                <span class="text-xs font-semibold text-navy-700 flex items-center gap-1 flex-none">Sign in <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function loginPage() {
+      const { session, shell, db, utils } = ABM;
+      const DEMOS = [
+        { username: 'admin', label: 'Super Admin', hint: 'All branches · settings', icon: 'shield', color: 'bg-purple-100 text-purple-700' },
+        { username: 'manager', label: 'Branch Manager', hint: 'Main Branch operations', icon: 'building', color: 'bg-navy-100 text-navy-700' },
+        { username: 'cashier', label: 'Cashier', hint: 'POS terminal only', icon: 'cart', color: 'bg-emerald-100 text-emerald-700' },
+      ];
+      // only relative page links are followed after sign-in (never another site)
+      const SAFE_NEXT = /^[a-z0-9-]+\.html(\?.*)?$/i;
+      return {
+        username: '', password: '', remember: true, showPw: false, capsOn: false, forgot: false,
+        error: '', errorKind: '', errorHint: '', busy: false,
+        demoMode: shell.demoMode(), demoPassword: session.DEMO_PASSWORD, demoList: [],
+        lockMinutes: Number(db.setting('login_lock_minutes', 15)) || 15,
+        init() {
+          shell.layoutDebug(); // ?__layout=1 QA check (public pages have no shell to run it)
+          // already signed in (and still allowed): straight on, via the password change when one is due
+          if (session.check()) { this.go(this.nextUrl(session.user())); return; }
+          // a quick button only for demo accounts that still open with the demo password
+          const users = db.all('users');
+          this.demoList = this.demoMode ? DEMOS.filter((d) => { const u = users.find((x) => String(x.username).toLowerCase() === d.username); return u && !u.password_hash; }) : [];
+        },
+        go(url) { location.replace(url); },
+        /** Where to land: the requested page (if it is one of ours) or the role's home, after a forced password change. */
+        nextUrl(user) {
+          const next = utils.qs('next');
+          const safe = next && SAFE_NEXT.test(next) ? next : '';
+          if (user && user.must_change_password) return 'profile.html?change=1' + (safe ? '&next=' + encodeURIComponent(safe) : '');
+          return safe || session.homeFor(user ? user.role : null);
+        },
+        caps(e) { this.capsOn = !!(e && e.getModifierState && e.getModifierState('CapsLock')); },
+        quick(u) {
+          if (!this.demoMode) return;
+          this.username = u; this.password = session.DEMO_PASSWORD; this.submit();
+        },
+        submit() {
+          if (this.busy) return;
+          this.error = ''; this.errorKind = ''; this.errorHint = '';
+          if (!this.username || !this.password) { this.error = 'Please enter your username and password.'; this.errorKind = 'empty'; return; }
+          this.busy = true;
+          setTimeout(() => this.attempt(), 350);
+        },
+        attempt() {
+          const r = session.authenticate(this.username, this.password, { remember: !!this.remember });
+          if (r.ok) { this.go(this.nextUrl(r.user)); return; } // keep "Signing in…" while the next page loads
+          this.busy = false;
+          this.error = r.error || 'Sign-in failed.';
+          const msg = this.error;
+          if (/locked/i.test(msg)) {
+            this.errorKind = 'locked';
+            this.errorHint = 'Wait for the lock to run out, or ask a Super Admin (or anyone with Users: Edit at your branch) to unlock it from Users.';
+          } else if (/deactivated/i.test(msg)) {
+            this.errorKind = 'blocked';
+            this.errorHint = /branch/i.test(msg) || (r.user && r.user.is_active) ? 'A Super Admin can reactivate the branch from Branches.' : 'A Super Admin can reactivate it from Users.';
+          } else if (/not correct/i.test(msg)) {
+            this.errorKind = 'wrong';
+            this.errorHint = 'Forgotten it? A Super Admin or your branch manager can reset it from Users.';
+          } else this.errorKind = 'unknown';
+          this.password = '';
+          this.$nextTick(() => { if (this.$refs.pw && this.errorKind !== 'unknown') this.$refs.pw.focus(); });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

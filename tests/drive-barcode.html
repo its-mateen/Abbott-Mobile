@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: barcode encoding</title>
+  <script src="../assets/js/barcode.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <div id="render" style="width:300px"></div>
+  <script>
+    // Structural proof of the encoders: a wrong table shows up as a wrong module count,
+    // a broken guard pattern, wrong parity or a check digit that does not match the standard.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      var bc = ABM.barcode;
+
+      try {
+        /* ---------------- EAN-13 check digits (published examples) ---------------- */
+        ok('check digit for 590123412345 is 7', bc.checkDigitEan13('590123412345') === 7, String(bc.checkDigitEan13('590123412345')));
+        ok('check digit for 400638133393 is 1', bc.checkDigitEan13('400638133393') === 1, String(bc.checkDigitEan13('400638133393')));
+        ok('check digit for 978020137962 is 4', bc.checkDigitEan13('978020137962') === 4, String(bc.checkDigitEan13('978020137962')));
+        ok('check digit for 000000000000 is 0', bc.checkDigitEan13('000000000000') === 0);
+        ok('a short number has no check digit', bc.checkDigitEan13('123') === null);
+
+        /* ---------------- EAN-13 structure ---------------- */
+        var e = bc.ean13('5901234123457');
+        ok('a valid EAN-13 encodes', e.ok, e.error);
+        ok('EAN-13 is always 95 modules', e.modules.length === 95, String(e.modules.length));
+        ok('it starts with the guard 101', e.modules.slice(0, 3) === '101');
+        ok('it ends with the guard 101', e.modules.slice(-3) === '101');
+        ok('the centre guard is 01010', e.modules.slice(45, 50) === '01010', e.modules.slice(45, 50));
+        ok('the encoder appends the check digit itself', bc.ean13('590123412345').text === '5901234123457');
+        var bad = bc.ean13('5901234123450');
+        ok('a wrong check digit is refused', !bad.ok && /Check digit/.test(bad.error), bad.error);
+        ok('letters are refused', !bc.ean13('59012341234A').ok);
+
+        // every left digit uses the parity the first digit dictates, every right digit uses R
+        var digits = '5901234123457';
+        var parity = bc.PARITY[Number(digits[0])];
+        var leftOk = true, rightOk = true;
+        for (var i = 1; i <= 6; i++) {
+          var seg = e.modules.substr(3 + (i - 1) * 7, 7);
+          var want = (parity[i - 1] === 'L' ? bc.L : bc.G)[Number(digits[i])];
+          if (seg !== want) leftOk = false;
+        }
+        for (var j = 7; j <= 12; j++) {
+          var seg2 = e.modules.substr(50 + (j - 7) * 7, 7);
+          if (seg2 !== bc.R[Number(digits[j])]) rightOk = false;
+        }
+        ok('left half follows the parity table', leftOk);
+        ok('right half uses the R set', rightOk);
+        ok('R is the inverse of L', bc.R.every(function (r, i) { return r === bc.L[i].split('').map(function (c) { return c === '1' ? '0' : '1'; }).join(''); }));
+        ok('G is R reversed', bc.G.every(function (g, i) { return g === bc.R[i].split('').reverse().join(''); }));
+        ok('every L pattern is 7 modules and starts with a space', bc.L.every(function (p) { return p.length === 7 && p[0] === '0'; }));
+        ok('every R pattern starts with a bar', bc.R.every(function (p) { return p[0] === '1'; }));
+        ok('all ten parity patterns are unique', new Set(bc.PARITY).size === 10);
+        ok('first digit 0 is all-L', bc.PARITY[0] === 'LLLLLL');
+
+        /* ---------------- Code 39 ---------------- */
+        var c = bc.code39('ABM-1234');
+        ok('Code 39 encodes letters, digits and a dash', c.ok, c.error);
+        ok('it is wrapped in start/stop guards', c.modules.indexOf('1') === 0 && c.modules.slice(-1) === '1');
+        // 10 characters (8 + 2 guards), each 9 elements = 6 narrow + 3 wide = 15 modules, + 9 gaps
+        ok('module count matches the element widths', c.modules.length === 10 * 15 + 9, String(c.modules.length));
+        var keys = Object.keys(bc.C39);
+        ok('the Code 39 table covers 0-9, A-Z and the seven symbols', keys.length === 44, String(keys.length));
+        ok('every Code 39 pattern is 9 elements', keys.every(function (k) { return bc.C39[k].length === 9; }));
+        ok('every Code 39 pattern has exactly three wide elements',
+          keys.every(function (k) { return bc.C39[k].split('').filter(function (x) { return x === '1'; }).length === 3; }),
+          keys.filter(function (k) { return bc.C39[k].split('').filter(function (x) { return x === '1'; }).length !== 3; }).join(','));
+        ok('every Code 39 pattern is unique', new Set(keys.map(function (k) { return bc.C39[k]; })).size === keys.length);
+        ok('every character has exactly two wide BARS and one wide space (or the reverse for symbols)',
+          keys.every(function (k) {
+            var bars = bc.C39[k].split('').filter(function (x, i) { return i % 2 === 0 && x === '1'; }).length;
+            var spaces = bc.C39[k].split('').filter(function (x, i) { return i % 2 === 1 && x === '1'; }).length;
+            return (bars === 2 && spaces === 1) || (bars === 0 && spaces === 3);
+          }),
+          keys.filter(function (k) {
+            var bars = bc.C39[k].split('').filter(function (x, i) { return i % 2 === 0 && x === '1'; }).length;
+            var spaces = bc.C39[k].split('').filter(function (x, i) { return i % 2 === 1 && x === '1'; }).length;
+            return !((bars === 2 && spaces === 1) || (bars === 0 && spaces === 3));
+          }).join(','));
+        ok('lower case is accepted and upper-cased', bc.code39('abm').text === 'ABM');
+        ok('an unsupported character is refused', !bc.code39('abm!').ok, bc.code39('abm!').error);
+        ok('an empty value is refused', !bc.code39('').ok);
+        ok('a 15-digit IMEI encodes as Code 39', bc.code39('356938035643809').ok);
+
+        /* ---------------- picking the symbology ---------------- */
+        ok('a 13-digit number picks EAN-13', bc.encode('8800000007').symbology !== 'EAN-13' && bc.encode('5901234123457').symbology === 'EAN-13');
+        ok('a SKU picks Code 39', bc.encode('SAM-GALAXYA1-006').symbology === 'Code 39');
+        ok('an IMEI picks Code 39', bc.encode('356938035643809').symbology === 'Code 39');
+        ok('the symbology can be forced', bc.encode('5901234123457', { symbology: 'code39' }).symbology === 'Code 39');
+
+        /* ---------------- SVG output ---------------- */
+        var out = bc.svg('5901234123457', { height: 12, moduleWidth: 0.33 });
+        ok('svg() returns an <svg>', /^<svg/.test(out) && /<\/svg>$/.test(out));
+        ok('it draws bars', (out.match(/<rect /g) || []).length > 20, String((out.match(/<rect /g) || []).length));
+        ok('it prints the human-readable number', out.indexOf('5901234123457') > 0);
+        ok('the viewBox is the true width in mm', out.indexOf('viewBox="0 0 ' + (95 * 0.33).toFixed(2)) > 0, out.slice(out.indexOf('viewBox'), out.indexOf('viewBox') + 40));
+        var quiet = bc.svg('SAM-GALAXYA1-006', { showText: false });
+        ok('text can be hidden', quiet.indexOf('<text') < 0);
+        var broken = bc.svg('12345', { symbology: 'ean13' });
+        ok('a bad value renders a readable message, not a broken image', broken.indexOf('<text') > 0 && broken.indexOf('<rect') < 0);
+
+        // and it actually renders in the DOM
+        document.getElementById('render').innerHTML = bc.svg('5901234123457');
+        var el = document.querySelector('#render svg');
+        ok('the SVG mounts in the page', !!el && el.querySelectorAll('rect').length > 20);
+        ok('it scales to its container', !!el && el.getBoundingClientRect().width > 100);
+
+      } catch (err) { fails++; L.push('FAIL  threw: ' + err.message + '\n' + (err.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 300);
+  </script>
+</body>
+</html>

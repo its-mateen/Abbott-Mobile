@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: purchase-order permissions / branch scoping</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+
+    async function main() {
+      const { db, utils, session, ui } = ABM;
+      db.reset();
+      ui.confirm = async (o) => { log('    CONFIRM: ' + (o && o.title)); return true; };
+      ui.toast = () => {};
+
+      const real = window.setTimeout;
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+      const as = (username) => { const u = db.all('users').find((x) => x.username === username); session.logout(); session.login(u); return u; };
+
+      await source('purchase-orders.html', 'purchaseOrdersPage');
+      await source('purchase-order-create.html', 'purchaseOrderCreatePage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+      await source('purchase-create.html', 'purchaseCreatePage');
+      await source('audit-log.html', 'auditLogPage');
+
+      /* ================= 1. role matrix ================= */
+      log('=== 1. role matrix for purchases.*');
+      [['admin', true, true], ['manager', true, true], ['cashier', false, false], ['technician', false, false], ['sana', true, true]].forEach(([un, v, m]) => {
+        as(un);
+        eq(session.can('purchases.view'), v, '1: ' + un + ' purchases.view');
+        eq(session.can('purchases.manage'), m, '1: ' + un + ' purchases.manage');
+      });
+
+      /* ================= 2. manager bypass attempts ================= */
+      log('=== 2. branch-1 manager cannot reach branch-2 orders');
+      const mgr = as('manager');
+      const B = session.branchId();
+      log('    manager branch = ' + B);
+      const foreignPo = db.all('purchase_orders').find((p) => String(p.branch_id) !== String(B));
+      log('    foreign order = ' + foreignPo.po_no + ' branch ' + foreignPo.branch_id + ' status ' + foreignPo.status);
+
+      eq(mk(purchaseOrderViewPage, '?id=' + foreignPo.id).po, null, '2: ?id= of another branch is refused on the view page');
+      ok(!!mk(purchaseOrderCreatePage, '?id=' + foreignPo.id).blocked, '2: ?id= of another branch is refused on the edit page');
+      let lastErr = '';
+      const realErr = ui.error; ui.error = (m) => { lastErr = m; };
+      eq(mk(purchaseCreatePage, '?po=' + foreignPo.id).po, null, '2: ?po= of another branch is refused on the receive page');
+      log('    refusal message shown to the branch-1 manager: "' + lastErr + '"');
+      ok(!lastErr.includes(foreignPo.po_no), '2: the refusal does not leak the other branch PO number');
+      ui.error = realErr;
+
+      let l = mk(purchaseOrdersPage, '?range=all&branch=' + foreignPo.branch_id);
+      eq(l.f.branch, String(B), '2: ?branch=<other> is ignored on the list');
+      ok(l.rows.every((r) => String(r.branch_id) === String(B)), '2: list rows stay on the manager branch');
+      l = mk(purchaseOrdersPage, '?range=all&branch=all');
+      ok(l.rows.every((r) => String(r.branch_id) === String(B)), '2: ?branch=all is ignored on the list');
+      // direct session tampering
+      session.setBranch(foreignPo.branch_id);
+      eq(String(session.branchId()), String(B), '2: setBranch() is a no-op for a branch manager');
+
+      /* ================= 3. super admin acts on ANOTHER branch order ================= */
+      log('=== 3. super admin cross-branch action -> audit branch stamp');
+      const admin = as('admin');
+      const adminBranch = session.branchId();
+      log('    admin active branch = ' + adminBranch + ' (' + db.branchCode(adminBranch) + ')');
+      const target = db.all('purchase_orders').find((p) => String(p.branch_id) !== String(adminBranch) && ['ordered', 'partial'].includes(p.status));
+      log('    target order = ' + target.po_no + ' branch ' + target.branch_id + ' (' + db.branchCode(target.branch_id) + ') status ' + target.status);
+
+      const v = mk(purchaseOrderViewPage, '?id=' + target.id);
+      ok(!!v.po, '3: super admin can open another branch order (by design)');
+      const auditBefore = db.all('audit_logs').length;
+      await noNavAsync(() => v.cancelOrder());
+      eq(db.find('purchase_orders', target.id).status, 'cancelled', '3: the branch-2 order was cancelled by the super admin');
+      const entry = db.all('audit_logs').slice(auditBefore);
+      eq(entry.length, 1, '3: exactly one audit row was written');
+      log('    audit row: action=' + entry[0].action + ' branch_id=' + entry[0].branch_id + ' entity=' + entry[0].entity_type + '#' + entry[0].entity_id);
+      eq(entry[0].branch_id, target.branch_id, '3: the audit row is stamped with the ORDER branch (' + target.branch_id + ')');
+
+      // can the owning branch manager see it in audit-log.html?
+      as('sana');
+      log('    sana branch = ' + session.branchId());
+      const audit = mk(auditLogPage, '?range=all');
+      const seen = audit.rows.filter((r) => r.entity_type === 'purchase_order' && String(r.entity_id) === String(target.id));
+      log('    rows the B2 manager sees for ' + target.po_no + ': ' + seen.length);
+      ok(seen.length >= 1, '3: the owning branch manager sees the cancellation of their own order in the audit log');
+
+      /* ================= 4. same, for receive (stock actually moves) ================= */
+      log('=== 4. super admin receives another branch order');
+      db.reset();
+      ui.confirm = async () => true; ui.toast = () => {};
+      as('admin');
+      const ab = session.branchId();
+      const t2 = db.all('purchase_orders').find((p) => String(p.branch_id) !== String(ab) && ['ordered', 'partial'].includes(p.status));
+      log('    receiving ' + t2.po_no + ' (branch ' + t2.branch_id + ') while active branch = ' + ab);
+      const rec = mk(purchaseCreatePage, '?po=' + t2.id);
+      ok(!!rec.po, '4: super admin may receive against another branch order');
+      eq(String(rec.form.branch_id), String(t2.branch_id), '4: goods are booked to the ORDER branch, not the active branch');
+      rec.lines.filter((x) => x.serialized).forEach((x) => { x.expected = 0; rec.revalidate && rec.revalidate(); });
+      rec.lines = rec.lines.filter((x) => !x.serialized);
+      rec.form.pay_amount = 0;
+      const aBefore = db.all('audit_logs').length;
+      noNav(() => rec.save());
+      const grn = db.all('purchases').slice(-1)[0];
+      eq(String(grn.branch_id), String(t2.branch_id), '4: the purchase row is on the order branch');
+      ok(/^PUR-/.test(grn.purchase_no) && grn.purchase_no.includes(db.branchCode(t2.branch_id)), '4: the purchase number carries the order branch code (' + grn.purchase_no + ')');
+      const newAudits = db.all('audit_logs').slice(aBefore);
+      newAudits.forEach((r) => log('    audit: ' + r.action + ' branch_id=' + r.branch_id));
+      ok(newAudits.every((r) => String(r.branch_id) === String(t2.branch_id)), '4: every audit row for the delivery is stamped with the order branch');
+
+      /* ================= 5. super admin editing can move an order to another branch ================= */
+      log('=== 5. editing an already-sent order never moves it to another branch (its number carries the branch code)');
+      db.reset(); ui.confirm = async () => true; ui.toast = () => {};
+      as('admin');
+      const sentPo = db.all('purchase_orders').find((p) => p.status === 'ordered');
+      const other = db.all('branches').find((b) => b.is_active && String(b.id) !== String(sentPo.branch_id));
+      const ed = mk(purchaseOrderCreatePage, '?id=' + sentPo.id);
+      eq(ed.blocked, null, '5: an ordered PO with nothing received opens for editing');
+      ed.form.branch_id = String(other.id);
+      noNav(() => ed.save(true));
+      const moved = db.find('purchase_orders', sentPo.id);
+      log('    po_no=' + moved.po_no + ' branch_id=' + moved.branch_id + ' (code ' + db.branchCode(moved.branch_id) + ')');
+      eq(String(moved.branch_id), String(sentPo.branch_id), '5: the order stays on its branch even if another is picked');
+      ok(moved.po_no.includes(db.branchCode(moved.branch_id)), '5: the PO number still matches its branch code');
+
+      /* ================= 6. nav / links ================= */
+      log('=== 6. nav + link targets');
+      as('manager');
+      eq(ABM.shell ? ABM.shell.activeKey('purchase-orders') : 'n/a', 'purchase-orders', '6: list page highlights Purchase Orders');
+      eq(ABM.shell.activeKey('purchase-order-create'), 'purchase-orders', '6: create page highlights Purchase Orders');
+      eq(ABM.shell.activeKey('purchase-order-view'), 'purchase-orders', '6: view page highlights Purchase Orders');
+      eq(ABM.shell.activeKey('purchase-create'), 'purchases', '6: receive page highlights Purchases');
+      const files = ['purchase-orders.html', 'purchase-order-create.html', 'purchase-order-view.html', 'purchase-create.html', 'purchase-view.html', 'purchases.html', 'suppliers.html', 'supplier-view.html', 'product-view.html'];
+      for (const f of files) { const r = await fetch('../' + f, { method: 'GET' }); ok(r.ok, '6: ' + f + ' exists (' + r.status + ')'); }
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Role Permissions · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .perm-matrix th.act, .perm-matrix td.act { width: 4.75rem; text-align: center; }
+    .perm-matrix td.act .checkbox { width: 1.125rem; height: 1.125rem; }
+    .perm-matrix tr.grp td { background: rgb(var(--slate-500) / .06); }
+    .col-toggle { display: inline-flex; flex-direction: column; align-items: center; gap: .125rem; font-weight: 700; }
+    .col-toggle:hover { color: rgb(var(--navy-700)); }
+    .perm-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .6rem; border-radius: .6rem; font-size: .75rem; font-weight: 600;
+      border: 1px solid rgb(var(--slate-300)); color: rgb(var(--slate-600)); background: rgb(var(--surface)); transition: background-color .12s, border-color .12s; }
+    .perm-chip .tick { width: .9rem; height: .9rem; border-radius: .25rem; border: 1px solid rgb(var(--slate-300)); display: inline-flex; align-items: center; justify-content: center; }
+    .perm-chip.on { border-color: rgb(var(--emerald-600) / .5); background: rgb(var(--emerald-600) / .1); color: rgb(4 120 87); }
+    .perm-chip.on .tick { background: rgb(var(--emerald-600)); border-color: rgb(var(--emerald-600)); color: #fff; }
+    .perm-chip:disabled { opacity: .45; cursor: not-allowed; }
+    .swatch { width: 1.75rem; height: 1.75rem; border-radius: 999px; border: 2px solid transparent; box-shadow: inset 0 0 0 2px rgb(255 255 255 / .6); }
+    .swatch.active { border-color: rgb(var(--slate-900)); }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="role-edit" data-title="Role Permissions" data-perm="roles.view">
+  <main x-data="roleEditPage()">
+    <!-- Not found -->
+    <template x-if="notFound">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('shield','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900" x-text="notFound"></h2>
+          <div class="mt-6 flex justify-center gap-2"><a href="roles.html" class="btn btn-primary">All roles</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="!notFound">
+      <div>
+        <!-- Header -->
+        <div class="page-header">
+          <div class="min-w-0">
+            <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="roles.html" class="hover:text-navy-700">Roles &amp; permissions</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="isNew ? 'New role' : 'Permissions'"></span></div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="page-title truncate" x-text="isNew ? (form.name || 'New role') : form.name"></h2>
+              <span class="badge badge-purple" x-show="full">Full access</span>
+              <span class="badge badge-slate" x-show="role && role.is_system && !full">Built in</span>
+              <span class="badge badge-amber badge-dot" x-show="dirty" x-cloak>Unsaved changes</span>
+            </div>
+            <p class="page-subtitle" x-text="isNew ? 'Name the role, then tick what it may do on each screen.' : (people.length + ' user' + (people.length === 1 ? '' : 's') + ' have this role · ' + count + ' of ' + total + ' permissions')"></p>
+          </div>
+          <div class="page-actions">
+            <template x-if="canDelete && role && !role.is_system"><button type="button" class="btn btn-danger-soft" :disabled="busy || assigned > 0" :title="assigned ? 'Move its users to another role first' : 'Delete this role'" @click="remove()"><span x-html="ABM.icon('trash')"></span>Delete</button></template>
+            <a href="roles.html" class="btn btn-secondary" x-text="editable ? 'Cancel' : 'Back'"></a>
+            <template x-if="editable"><button type="button" class="btn btn-primary" data-save :disabled="busy || (!isNew && !dirty)" @click="save()"><span x-html="ABM.icon('check')"></span><span x-text="isNew ? 'Create role' : 'Save changes'"></span></button></template>
+          </div>
+        </div>
+
+        <div class="alert alert-info mb-4" x-show="full"><span x-html="ABM.icon('shield')"></span><span><b>Super Admin always has full access</b> — every screen, every action and every branch. It cannot be narrowed, so there is always someone who can fix a role.</span></div>
+        <div class="alert alert-warning mb-4" x-show="!full && !editable" x-cloak><span x-html="ABM.icon('eye')"></span><span x-text="readOnlyReason"></span></div>
+        <div class="alert alert-warning mb-4" x-show="editable && isMine" x-cloak><span x-html="ABM.icon('warning')"></span><span>This is <b>your own role</b>. Changes apply to you as soon as you save.</span></div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-[20rem_1fr] gap-4 items-start">
+          <!-- Details -->
+          <div class="space-y-4 xl:sticky xl:top-24">
+            <div class="card">
+              <div class="card-header"><div class="card-title">Role details</div></div>
+              <div class="card-body space-y-4">
+                <div>
+                  <label class="label" for="r-name">Name <span class="req">*</span></label>
+                  <input id="r-name" x-ref="name" type="text" class="input" :class="errors.name && 'is-invalid'" x-model.trim="form.name" maxlength="40" placeholder="e.g. Senior Cashier" :disabled="!editable">
+                  <p class="field-error" x-show="errors.name" x-text="errors.name"></p>
+                </div>
+                <div>
+                  <label class="label" for="r-desc">What is it for? <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <textarea id="r-desc" class="textarea" rows="3" x-model="form.description" maxlength="200" placeholder="Shown next to the role when you give it to someone" :disabled="!editable" :class="errors.description && 'is-invalid'"></textarea>
+                  <p class="field-error" x-show="errors.description" x-text="errors.description"></p>
+                </div>
+                <div>
+                  <div class="label">Colour</div>
+                  <div class="flex flex-wrap gap-2">
+                    <template x-for="c in colors" :key="c.key">
+                      <button type="button" class="swatch" :class="[c.cls, form.color === c.key && 'active']" :title="c.label" :aria-label="c.label + ' colour'" :disabled="!editable" @click="form.color = c.key"></button>
+                    </template>
+                  </div>
+                  <div class="mt-2" x-html="preview"></div>
+                </div>
+                <div x-show="editable && !full">
+                  <label class="label" for="r-from">Copy permissions from</label>
+                  <select id="r-from" class="select" x-model="copyFrom" @change="applyCopy()">
+                    <option value="">— pick a role to start from —</option>
+                    <template x-for="r in copyChoices" :key="r.id"><option :value="String(r.id)" x-text="r.name"></option></template>
+                  </select>
+                  <p class="help">Replaces the ticks below; nothing is saved until you press Save.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="card" x-show="!isNew">
+              <div class="card-header">
+                <div><div class="card-title">People with this role</div><div class="card-subtitle" x-text="people.length ? people.length + ' active' : 'Nobody yet'"></div></div>
+                <a :href="'users.html?role=' + (role ? role.key : '')" class="btn btn-ghost btn-sm" x-show="$can('users.view')">Users <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a>
+              </div>
+              <div class="card-body">
+                <div class="flex flex-wrap gap-1.5">
+                  <template x-for="u in people.slice(0, 12)" :key="u.id"><span class="badge badge-slate" :title="u.branch" x-text="u.name"></span></template>
+                  <span class="text-xs text-slate-500 self-center" x-show="people.length > 12" x-text="'+' + (people.length - 12) + ' more'"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Permissions -->
+          <div class="card min-w-0">
+            <div class="card-header flex-wrap gap-2">
+              <div class="min-w-0">
+                <div class="card-title">Permissions</div>
+                <div class="card-subtitle"><b class="text-slate-800 tabular" x-text="count"></b> of <span x-text="total"></span> ticked · <span x-text="screens"></span> screen<span x-text="screens === 1 ? '' : 's'"></span> visible in the menu</div>
+              </div>
+              <div class="flex flex-wrap items-center gap-2 ml-auto" x-show="editable">
+                <button type="button" class="btn btn-ghost btn-sm" @click="setAll(true)"><span x-html="ABM.icon('check-circle','w-4 h-4')"></span>Tick everything</button>
+                <button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="setAll(false)"><span x-html="ABM.icon('x-circle','w-4 h-4')"></span>Clear</button>
+              </div>
+            </div>
+            <div class="card-body !py-3 border-b border-slate-200">
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 flex text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+                <input type="search" class="input !pl-9" placeholder="Find a screen or action — e.g. cheque, void, export" x-model.trim="q" aria-label="Filter permissions">
+              </div>
+              <p class="field-error mt-2" x-show="errors.permissions" x-text="errors.permissions"></p>
+              <p class="text-xs text-slate-500 mt-2">Ticking Add, Edit, Delete, Export or an extra action also ticks <b>View</b> for that screen. Untick View and the whole screen is removed.</p>
+            </div>
+
+            <!-- Desktop / tablet: the grid -->
+            <div class="hidden md:block table-wrap">
+              <table class="table table-compact perm-matrix">
+                <thead>
+                  <tr>
+                    <th>Screen</th>
+                    <template x-for="a in actions" :key="a.key">
+                      <th class="act">
+                        <button type="button" class="col-toggle" :disabled="!editable" :title="editable ? 'Tick or clear ' + a.label + ' on every screen shown' : a.label" @click="toggleCol(a.key)">
+                          <span x-text="a.label"></span>
+                          <span class="text-[10px] font-semibold text-slate-400 tabular" x-text="colCount(a.key)"></span>
+                        </button>
+                      </th>
+                    </template>
+                    <th class="act">All</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="row in visibleRows" :key="row.id">
+                    <tr :class="row.type === 'group' && 'grp'">
+                      <template x-if="row.type === 'group'">
+                        <td :colspan="actions.length + 2" class="!py-1.5">
+                          <div class="flex items-center gap-2">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500" x-text="row.name"></span>
+                            <span class="text-[11px] text-slate-400" x-text="groupCount(row.name)"></span>
+                            <button type="button" class="ml-auto text-[11px] font-semibold text-navy-700 hover:underline" x-show="editable" @click="toggleGroup(row.name)" x-text="groupState(row.name) === 'all' ? 'Clear section' : 'Tick section'"></button>
+                          </div>
+                        </td>
+                      </template>
+                      <template x-if="row.type === 'module'">
+                        <td>
+                          <div class="flex items-center gap-2 min-w-0">
+                            <span class="text-slate-400 flex-none" x-html="ABM.icon(row.m.icon || 'cube','w-4 h-4')"></span>
+                            <span class="font-semibold text-slate-800" x-text="row.m.label"></span>
+                          </div>
+                          <div class="text-[11px] text-slate-500 mt-0.5 pl-6" x-show="row.noteText" x-text="row.noteText"></div>
+                          <div class="flex flex-wrap gap-1.5 mt-1.5 pl-6" x-show="(row.m.extras || []).length">
+                            <template x-for="x in row.m.extras" :key="x.key">
+                              <button type="button" class="perm-chip" :class="has(row.m.key + '.' + x.key) && 'on'" :disabled="!canTick(row.m.key + '.' + x.key)" :title="x.hint || x.label" @click="toggle(row.m, x.key)">
+                                <span class="tick" x-html="has(row.m.key + '.' + x.key) ? ABM.icon('check','w-3 h-3') : ''"></span><span x-text="x.label"></span>
+                              </button>
+                            </template>
+                          </div>
+                        </td>
+                      </template>
+                      <template x-for="a in (row.type === 'module' ? actions : [])" :key="a.key">
+                        <td class="act">
+                          <template x-if="row.m.actions.includes(a.key)">
+                            <input type="checkbox" class="checkbox" :checked="has(row.m.key + '.' + a.key)" :disabled="!canTick(row.m.key + '.' + a.key)" :title="row.m.label + ': ' + a.label + ((row.m.notes || {})[a.key] ? ' — ' + row.m.notes[a.key] : '')" :aria-label="row.m.label + ' ' + a.label" @change="toggle(row.m, a.key)">
+                          </template>
+                          <template x-if="!row.m.actions.includes(a.key)"><span class="text-slate-300" title="Not used on this screen">—</span></template>
+                        </td>
+                      </template>
+                      <template x-if="row.type === 'module'">
+                        <td class="act">
+                          <button type="button" class="switch" :class="rowState(row.m) === 'all' && 'on'" role="switch" :aria-checked="rowState(row.m) === 'all' ? 'true' : 'false'" :aria-label="'Everything on ' + row.m.label" :disabled="!editable" @click="toggleRow(row.m)" :style="rowState(row.m) === 'some' ? 'background: rgb(var(--emerald-600) / .45)' : ''"></button>
+                        </td>
+                      </template>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Phone: one card per screen with tap-to-toggle chips -->
+            <div class="md:hidden divide-y divide-slate-200">
+              <template x-for="row in visibleRows" :key="'m' + row.id">
+                <div :class="row.type === 'group' ? 'bg-slate-50 px-4 py-2' : 'px-4 py-3'">
+                  <template x-if="row.type === 'group'">
+                    <div class="flex items-center gap-2">
+                      <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500" x-text="row.name"></span>
+                      <button type="button" class="ml-auto text-[11px] font-semibold text-navy-700" x-show="editable" @click="toggleGroup(row.name)" x-text="groupState(row.name) === 'all' ? 'Clear' : 'Tick all'"></button>
+                    </div>
+                  </template>
+                  <template x-if="row.type === 'module'">
+                    <div>
+                      <div class="flex items-center gap-2">
+                        <span class="text-slate-400 flex-none" x-html="ABM.icon(row.m.icon || 'cube','w-4 h-4')"></span>
+                        <span class="font-semibold text-slate-800 flex-1 min-w-0 truncate" x-text="row.m.label"></span>
+                        <button type="button" class="switch flex-none" :class="rowState(row.m) === 'all' && 'on'" role="switch" :aria-checked="rowState(row.m) === 'all' ? 'true' : 'false'" :aria-label="'Everything on ' + row.m.label" :disabled="!editable" @click="toggleRow(row.m)" :style="rowState(row.m) === 'some' ? 'background: rgb(var(--emerald-600) / .45)' : ''"></button>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5 mt-2">
+                        <template x-for="a in row.m.actions" :key="a">
+                          <button type="button" class="perm-chip" :class="has(row.m.key + '.' + a) && 'on'" :disabled="!canTick(row.m.key + '.' + a)" @click="toggle(row.m, a)">
+                            <span class="tick" x-html="has(row.m.key + '.' + a) ? ABM.icon('check','w-3 h-3') : ''"></span><span x-text="actionLabel(a)"></span>
+                          </button>
+                        </template>
+                        <template x-for="x in (row.m.extras || [])" :key="x.key">
+                          <button type="button" class="perm-chip" :class="has(row.m.key + '.' + x.key) && 'on'" :disabled="!canTick(row.m.key + '.' + x.key)" @click="toggle(row.m, x.key)">
+                            <span class="tick" x-html="has(row.m.key + '.' + x.key) ? ABM.icon('check','w-3 h-3') : ''"></span><span x-text="x.label"></span>
+                          </button>
+                        </template>
+                      </div>
+                      <div class="text-[11px] text-slate-500 mt-1.5" x-show="row.noteText" x-text="row.noteText"></div>
+                    </div>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <div class="card-body text-center text-sm text-slate-500" x-show="!visibleRows.length">No screen or action matches “<span x-text="q"></span>”.</div>
+          </div>
+        </div>
+
+        <!-- Sticky save bar (phones) -->
+        <div class="h-20 lg:hidden" x-show="editable"></div>
+        <div class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-3 flex items-center gap-3" x-show="editable" x-cloak>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-bold text-slate-900 truncate" x-text="count + ' of ' + total + ' permissions'"></div>
+            <div class="text-xs truncate" :class="dirty ? 'text-amber-700 font-semibold' : 'text-slate-500'" x-text="dirty ? 'Unsaved changes' : 'Nothing changed'"></div>
+          </div>
+          <button type="button" class="btn btn-primary" :disabled="busy || (!isNew && !dirty)" @click="save()"><span x-html="ABM.icon('check')"></span><span x-text="isNew ? 'Create' : 'Save'"></span></button>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function roleEditPage() {
+      const { db, utils, ui, session, roles } = ABM;
+      const me = session.user() || {};
+      const COLORS = [
+        { key: 'navy', label: 'Navy', cls: 'bg-navy-700' }, { key: 'blue', label: 'Blue', cls: 'bg-sky-500' },
+        { key: 'green', label: 'Green', cls: 'bg-emerald-500' }, { key: 'amber', label: 'Amber', cls: 'bg-amber-500' },
+        { key: 'red', label: 'Red', cls: 'bg-rose-500' }, { key: 'purple', label: 'Purple', cls: 'bg-purple-500' },
+        { key: 'slate', label: 'Grey', cls: 'bg-slate-400' },
+      ];
+      const mine = new Set(roles.grantable());
+      const toMap = (list) => { const o = {}; (list || []).forEach((k) => { o[k] = true; }); return o; };
+      const keysOf = (m) => m.actions.concat((m.extras || []).map((x) => x.key)).map((a) => m.key + '.' + a);
+      return {
+        colors: COLORS, actions: roles.ACTIONS, total: roles.KEYS.length,
+        role: null, isNew: true, full: false, notFound: '', busy: false, saved: false,
+        form: { name: '', description: '', color: 'navy' }, perms: {}, errors: {}, q: '', copyFrom: '', snap: '',
+
+        init() {
+          const id = utils.qs('id'), copy = utils.qs('copy');
+          if (id) {
+            const r = db.find('roles', id);
+            if (!r) { this.notFound = 'Role not found'; return; }
+            this.role = r; this.isNew = false; this.full = roles.isFull(r);
+            this.form = { name: r.name, description: r.description || '', color: r.color || 'slate' };
+            this.perms = toMap(roles.permsOf(r));
+          } else {
+            if (!session.can('roles.add')) { this.notFound = 'Your role is not allowed to create roles'; return; }
+            const src = copy ? db.find('roles', copy) : null;
+            if (src && !roles.isFull(src)) {
+              this.form = { name: src.name + ' (copy)', description: src.description || '', color: src.color || 'navy' };
+              this.perms = toMap(roles.permsOf(src).filter((k) => mine.has(k)));
+            }
+          }
+          this.snap = this.signature();
+          this.$nextTick(() => { if (this.isNew && this.$refs.name) this.$refs.name.focus(); });
+          window.addEventListener('beforeunload', (e) => { if (this.editable && this.dirty && !this.saved) { e.preventDefault(); e.returnValue = ''; } });
+        },
+        /* ------------------------------------------------------------ state */
+        get isMine() { return !!this.role && this.role.key === me.role; },
+        get editable() {
+          if (this.full) return false;
+          if (this.isNew) return session.can('roles.add');
+          return session.can('roles.edit') && (roles.isFull(me.role) || roles.canGrant(this.role));
+        },
+        get readOnlyReason() {
+          if (!session.can('roles.edit')) return 'You can look at this role, but changing roles is not part of your own role.';
+          return 'This role has permissions you do not hold yourself, so you can look at it but not change it.';
+        },
+        get canDelete() { return session.can('roles.delete'); },
+        get people() {
+          if (!this.role) return [];
+          return utils.sortBy(db.all('users').filter((u) => u.role === this.role.key && u.is_active), 'name').map((u) => ({ id: u.id, name: u.name, branch: u.branch_id ? db.branchName(u.branch_id) : 'All branches' }));
+        },
+        get assigned() { return this.role ? db.all('users').filter((u) => u.role === this.role.key).length : 0; },
+        get list() { return roles.KEYS.filter((k) => this.perms[k]); },
+        get count() { return this.list.length; },
+        get screens() { return roles.MODULES.filter((m) => this.perms[m.key + '.view'] || (!m.actions.includes('view') && keysOf(m).some((k) => this.perms[k]))).length; },
+        get dirty() { return this.signature() !== this.snap; },
+        signature() { return JSON.stringify([this.form.name, this.form.description, this.form.color, this.list]); },
+        get preview() { return '<span class="badge badge-' + this.form.color + ' badge-dot">' + utils.escape(this.form.name || 'Role name') + '</span>'; },
+        get copyChoices() { return roles.all().filter((r) => !roles.isFull(r) && (!this.role || r.id !== this.role.id)); },
+        actionLabel(a) { return (roles.ACTIONS.find((x) => x.key === a) || {}).label || a; },
+
+        /** Group headings + module rows, filtered by the search box (matches screens, actions, extras and notes). */
+        get visibleRows() {
+          const q = this.q.toLowerCase();
+          const out = []; let last = '';
+          roles.MODULES.forEach((m) => {
+            const notes = Object.entries(m.notes || {}).map(([a, t]) => this.actionLabel(a) + ' = ' + t);
+            const hay = [m.label, m.group, ...m.actions, ...(m.extras || []).map((x) => x.label), ...notes].join(' ').toLowerCase();
+            if (q && !hay.includes(q)) return;
+            if (m.group !== last) { out.push({ type: 'group', id: 'g-' + m.group, name: m.group }); last = m.group; }
+            out.push({ type: 'module', id: m.key, m, noteText: notes.join(' · ') });
+          });
+          return out;
+        },
+        get visibleModules() { return this.visibleRows.filter((r) => r.type === 'module').map((r) => r.m); },
+
+        /* ---------------------------------------------------------- ticking */
+        has(key) { return !!this.perms[key]; },
+        canTick(key) { return this.editable && mine.has(key); },
+        set(key, on) { if (!on) { delete this.perms[key]; } else if (mine.has(key)) { this.perms[key] = true; } this.perms = { ...this.perms }; },
+        toggle(m, act) {
+          const key = m.key + '.' + act;
+          if (!this.canTick(key)) return;
+          const on = !this.has(key);
+          if (act === 'view' && !on) { keysOf(m).forEach((k) => delete this.perms[k]); this.perms = { ...this.perms }; return; }
+          this.set(key, on);
+          if (on && act !== 'view' && m.actions.includes('view')) this.set(m.key + '.view', true);
+        },
+        rowState(m) { const ks = keysOf(m).filter((k) => mine.has(k)); const n = ks.filter((k) => this.perms[k]).length; return !ks.length || n === 0 ? 'none' : n === ks.length ? 'all' : 'some'; },
+        toggleRow(m) {
+          if (!this.editable) return;
+          const clear = this.rowState(m) === 'all';
+          keysOf(m).forEach((k) => { if (clear) delete this.perms[k]; else if (mine.has(k)) this.perms[k] = true; });
+          this.perms = { ...this.perms };
+        },
+        colCount(act) { const ms = this.visibleModules.filter((m) => m.actions.includes(act)); return ms.filter((m) => this.perms[m.key + '.' + act]).length + '/' + ms.length; },
+        toggleCol(act) {
+          if (!this.editable) return;
+          const ms = this.visibleModules.filter((m) => m.actions.includes(act) && mine.has(m.key + '.' + act));
+          const clear = ms.length && ms.every((m) => this.perms[m.key + '.' + act]);
+          ms.forEach((m) => {
+            if (clear) { if (act === 'view') keysOf(m).forEach((k) => delete this.perms[k]); else delete this.perms[m.key + '.' + act]; }
+            else { this.perms[m.key + '.' + act] = true; if (m.actions.includes('view')) this.perms[m.key + '.view'] = true; }
+          });
+          this.perms = { ...this.perms };
+        },
+        groupState(g) {
+          const ks = roles.MODULES.filter((m) => m.group === g).flatMap(keysOf).filter((k) => mine.has(k));
+          const n = ks.filter((k) => this.perms[k]).length;
+          return !n ? 'none' : n === ks.length ? 'all' : 'some';
+        },
+        groupCount(g) { const ms = roles.MODULES.filter((m) => m.group === g); return ms.filter((m) => keysOf(m).some((k) => this.perms[k])).length + ' of ' + ms.length + ' screens'; },
+        toggleGroup(g) {
+          if (!this.editable) return;
+          const clear = this.groupState(g) === 'all';
+          roles.MODULES.filter((m) => m.group === g).flatMap(keysOf).forEach((k) => { if (clear) delete this.perms[k]; else if (mine.has(k)) this.perms[k] = true; });
+          this.perms = { ...this.perms };
+        },
+        setAll(on) {
+          if (!this.editable) return;
+          this.perms = on ? toMap(roles.KEYS.filter((k) => mine.has(k))) : {};
+        },
+        applyCopy() {
+          const src = db.find('roles', this.copyFrom);
+          if (!src) return;
+          const list = roles.permsOf(src);
+          const dropped = list.filter((k) => !mine.has(k)).length;
+          this.perms = toMap(list.filter((k) => mine.has(k)));
+          ui.toast('Copied ' + (list.length - dropped) + ' permissions from ' + src.name + (dropped ? ' (' + dropped + ' you do not hold were left out)' : '') + '.', 'info');
+          this.copyFrom = '';
+        },
+
+        /* ------------------------------------------------------------- save */
+        save() {
+          if (!this.editable || this.busy) return;
+          const payload = { name: this.form.name, description: this.form.description, color: this.form.color, permissions: this.list };
+          this.errors = roles.validate(payload, this.role ? this.role.id : null);
+          if (Object.keys(this.errors).length) { ui.error(Object.values(this.errors)[0]); return; }
+          this.busy = true;
+          try {
+            if (this.isNew) {
+              const row = roles.create(payload);
+              this.saved = true;
+              ui.success('Role ' + row.name + ' created with ' + row.permissions.length + ' permissions.');
+              setTimeout(() => { location.href = 'role-edit.html?id=' + row.id; }, 400);
+            } else {
+              const row = roles.update(this.role.id, payload);
+              this.role = row;
+              this.perms = toMap(roles.permsOf(row));
+              this.snap = this.signature();
+              ui.success('Saved. ' + this.people.length + ' user' + (this.people.length === 1 ? '' : 's') + ' with this role now have the new permissions.');
+            }
+          } catch (err) {
+            if (err.errors) this.errors = err.errors;
+            ui.error(err.message || 'Could not save the role.');
+          } finally { this.busy = false; }
+        },
+        async remove() {
+          if (!this.role || this.role.is_system) return;
+          if (this.assigned) { ui.warn('Move the users with this role to another role first.'); return; }
+          const ok = await ui.confirm({ title: 'Delete the ' + this.role.name + ' role?', message: 'Nobody has this role, so nothing else changes. This cannot be undone.', confirmText: 'Delete role', danger: true });
+          if (!ok) return;
+          try { roles.remove(this.role.id); this.saved = true; ui.success('Role deleted.'); setTimeout(() => { location.href = 'roles.html'; }, 400); }
+          catch (err) { ui.error(err.message); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

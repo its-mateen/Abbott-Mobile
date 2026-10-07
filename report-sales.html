@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Sales Report · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .print-only { display: none; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      main { padding: 0 !important; max-width: none !important; }
+      .card { border: 1px solid #cbd5e1 !important; box-shadow: none !important; break-inside: avoid; margin-bottom: .75rem; }
+      .table thead th, .table tbody td, .table tfoot td { padding: .3rem .5rem !important; font-size: 11px !important; }
+      .table thead th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .table-wrap { overflow: visible !important; }
+      .hidden.md\:table-cell, .hidden.lg\:table-cell, .hidden.sm\:table-cell { display: table-cell !important; }
+      canvas { max-height: 220px !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="report-sales" data-title="Sales Report" data-perm="reports.view">
+  <main x-data="salesReport()">
+    <!-- Print header -->
+    <div class="print-only mb-4">
+      <div class="text-xl font-extrabold text-slate-900" x-text="companyName + ' — Sales Report'"></div>
+      <div class="text-sm text-slate-600"><span x-text="scopeLabel"></span> · <span x-text="range.label"></span> · <span x-text="tabLabel"></span> · printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="userName"></span></div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Sales Report</h2>
+        <p class="page-subtitle"><b x-text="scopeLabel"></b> · <span x-text="range.label"></span> · void invoices excluded</p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>All reports</a>
+        <button type="button" class="btn btn-secondary" @click="printReport()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a :href="'sales.html?' + linkQuery" class="btn btn-primary"><span x-html="ABM.icon('receipt')"></span>Invoice list</a>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto font-semibold" x-model="branchSel" x-ref="branchSelect" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg"><span x-text="ABM.db.branchCode(scopeId)"></span> · <span x-text="scopeLabel"></span></span>
+          </template>
+          <div class="relative flex-1 min-w-[10rem] max-w-xs">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input input-sm pl-9" placeholder="Filter rows…" x-model.debounce.200ms="q" aria-label="Filter report rows">
+          </div>
+          <select class="select input-sm !w-auto" x-model.number="perPage" aria-label="Rows per page">
+            <option :value="15">15 rows</option>
+            <option :value="50">50 rows</option>
+            <option :value="0">All rows</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 no-print">
+      <a :href="'sales.html?' + linkQuery" class="stat stat-accent" title="Open the invoice list">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Invoices</div><div class="stat-value" x-text="ABM.utils.num(k.invoices)"></div></div>
+          <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('receipt','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.itemsSold)"></span> items sold</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#report-table" class="stat" @click="setTab('product')" title="See gross sales by product">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Gross sales</div><div class="stat-value" x-text="$money(k.gross, {decimals:0})"></div></div>
+          <span class="chip chip-slate !w-9 !h-9" x-html="ABM.icon('tag','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">before discounts &amp; tax</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#report-table" class="stat stat-warning" @click="setTab('day')" title="See discounts by day">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Discounts</div><div class="stat-value text-amber-700" x-text="$money(k.discounts, {decimals:0})"></div></div>
+          <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('minus','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.discountPct"></span>% of gross</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#report-table" class="stat" @click="setTab('day')" :title="taxLabel + ' collected'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label" x-text="taxLabel"></div><div class="stat-value" x-text="$money(k.tax, {decimals:0})"></div></div>
+          <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('scale','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">collected on invoices</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-profit-loss.html?' + linkQuery" class="stat stat-money" title="Open profit &amp; loss">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Net sales</div><div class="stat-value" x-text="$money(k.net, {decimals:0})"></div></div>
+          <span class="chip chip-money !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">profit <b class="text-emerald-700" x-text="$money(k.profit, {decimals:0})"></b> · <span x-text="k.margin"></span>% margin</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#report-table" class="stat" @click="setTab('customer')" title="See sales by customer">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Avg basket</div><div class="stat-value" x-text="$money(k.avgBasket, {decimals:0})"></div></div>
+          <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('cart','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.avgItems"></span> items per invoice</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'returns.html?' + range.query" class="stat stat-danger" title="Open returns">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Returns</div><div class="stat-value" x-text="ABM.utils.num(k.returns)"></div></div>
+          <span class="chip chip-danger !w-9 !h-9" x-html="ABM.icon('return','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">refunded <b class="text-rose-600" x-text="$money(k.returnsAmount, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#report-table" class="stat" @click="setTab('product')" title="See units sold by product">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Items sold</div><div class="stat-value" x-text="ABM.utils.num(k.itemsSold)"></div></div>
+          <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('cube','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(k.lines)"></span> lines · <span x-text="ABM.utils.num(k.productsSold)"></span> products</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <div class="print-area">
+      <!-- Chart -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div class="min-w-0"><div class="card-title" x-text="chartTitle"></div><div class="card-subtitle" x-text="range.label + ' · ' + scopeLabel"></div></div>
+          <span class="badge badge-slate no-print" x-text="rows.length + ' row' + (rows.length === 1 ? '' : 's')"></span>
+        </div>
+        <div class="card-body">
+          <div :class="tab === 'type' || tab === 'method' || tab === 'category' ? 'h-64' : 'h-72 sm:h-80'"><canvas id="reportChart"></canvas></div>
+          <template x-if="!rows.length">
+            <div class="text-center text-sm text-slate-500 -mt-24 sm:-mt-28 relative">No sales in this period.</div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Tabs + table -->
+      <div class="card mt-4" id="report-table">
+        <div class="card-header !py-0 !px-0 border-b-0">
+          <div class="tabs w-full px-2">
+            <template x-for="t in tabs" :key="t.key">
+              <button type="button" class="tab" :data-tab="t.key" :class="tab === t.key && 'active'" @click="setTab(t.key)" x-text="t.label"></button>
+            </template>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table table-striped">
+            <thead>
+              <tr>
+                <th class="th-sort" @click="setSort('label')">
+                  <span class="inline-flex items-center gap-1"><span x-text="labelHeader"></span><span x-html="sortIcon('label')"></span></span>
+                </th>
+                <template x-for="c in cols" :key="c.key">
+                  <th class="num th-sort" :class="c.hide" @click="setSort(c.key)">
+                    <span class="inline-flex items-center gap-1 justify-end"><span x-text="c.label"></span><span x-html="sortIcon(c.key)"></span></span>
+                  </th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="row in pager.items" :key="row.key">
+                <tr>
+                  <td>
+                    <div class="min-w-0 max-w-[16rem]">
+                      <template x-if="row.link">
+                        <a :href="row.link" class="font-semibold text-navy-700 hover:underline block truncate" x-text="row.label"></a>
+                      </template>
+                      <template x-if="!row.link && row.badge">
+                        <span x-html="$badge(row.badge, row.label)"></span>
+                      </template>
+                      <template x-if="!row.link && !row.badge">
+                        <span class="font-medium text-slate-800 block truncate" x-text="row.label"></span>
+                      </template>
+                      <div class="text-xs text-slate-400 truncate" x-show="row.sub" x-text="row.sub"></div>
+                    </div>
+                  </td>
+                  <template x-for="c in cols" :key="c.key">
+                    <td class="num whitespace-nowrap" :class="(c.hide || '') + ' ' + (c.cls || '')" x-text="fmt(row[c.key], c.fmt)"></td>
+                  </template>
+                </tr>
+              </template>
+              <template x-if="!pager.items.length">
+                <tr><td :colspan="cols.length + 1">
+                  <div class="empty">
+                    <span x-html="ABM.icon('chart')"></span>
+                    <div class="empty-title">Nothing to report</div>
+                    <div class="text-sm mt-1" x-text="rows.length ? 'No row matches your filter.' : 'No sales were recorded in this period.'"></div>
+                    <div class="mt-4 flex justify-center gap-2 flex-wrap no-print">
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="q" @click="q = ''">Clear filter</button>
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="!rows.length && range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    </div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+            <tfoot x-show="pager.items.length">
+              <tr>
+                <td class="font-bold">Total<span class="font-normal text-slate-500 text-xs" x-show="rows.length !== pager.total" x-text="' (filtered)'"></span></td>
+                <template x-for="c in cols" :key="c.key">
+                  <td class="num whitespace-nowrap" :class="(c.hide || '') + ' ' + (c.cls || '')" x-text="fmt(totals[c.key], c.fmt)"></td>
+                </template>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500" x-show="pager.pages > 1">
+          <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+          <div class="flex items-center gap-1 no-print">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Largest invoices (drill-down) -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Largest invoices</div><div class="card-subtitle">Top 8 by value · <span x-text="range.label"></span></div></div>
+          <a :href="'sales.html?' + linkQuery" class="text-xs font-semibold text-navy-700 hover:underline no-print">All invoices</a>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Invoice</th><th>Customer</th><th class="hidden md:table-cell">Cashier</th><th class="hidden sm:table-cell">Date</th><th class="num">Items</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              <template x-for="s in topInvoices" :key="s.id">
+                <tr>
+                  <td><a :href="'sale-view.html?id=' + s.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="s.invoice_no"></a></td>
+                  <td>
+                    <div class="min-w-0 max-w-[12rem]">
+                      <template x-if="!s.isWalkin"><a :href="'customer-view.html?id=' + s.customer_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate" x-text="s.customerName"></a></template>
+                      <template x-if="s.isWalkin"><span class="text-slate-600 block truncate" x-text="s.customerName"></span></template>
+                      <div class="text-xs text-slate-400 sm:hidden" x-text="$date(s.sale_date)"></div>
+                    </div>
+                  </td>
+                  <td class="hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="s.cashier"></td>
+                  <td class="hidden sm:table-cell text-slate-500 whitespace-nowrap" x-text="$date(s.sale_date)"></td>
+                  <td class="num" x-text="s.units"></td>
+                  <td class="num font-semibold whitespace-nowrap" x-text="$money(s.total, {decimals:0})"></td>
+                </tr>
+              </template>
+              <template x-if="!topInvoices.length"><tr><td colspan="6" class="empty">No invoices in this period.</td></tr></template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function salesReport() {
+      const { db, utils, ui, session } = ABM;
+      const DIGITAL = ['card', 'jazzcash', 'easypaisa', 'bank_transfer'];
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        branchSel: String(session.branchId() || ''),
+        companyName: db.setting('company_name', 'Abbott Mobile'),
+        taxLabel: db.setting('tax_label', 'Sales Tax'),
+        userName: (session.user() || {}).name || '',
+        range: null,
+        tabs: [
+          { key: 'day', label: 'By day' }, { key: 'product', label: 'By product' }, { key: 'category', label: 'By category' },
+          { key: 'type', label: 'By type' }, { key: 'cashier', label: 'By cashier' }, { key: 'method', label: 'By payment method' }, { key: 'customer', label: 'By customer' },
+        ],
+        tab: 'day',
+        q: '',
+        page: 1,
+        perPage: 15,
+        sort: { key: 'label', dir: 'asc' },
+        k: { invoices: 0, gross: 0, discounts: 0, discountPct: 0, tax: 0, net: 0, profit: 0, margin: 0, avgBasket: 0, avgItems: 0, returns: 0, returnsAmount: 0, itemsSold: 0, lines: 0, productsSold: 0 },
+        agg: { day: [], product: [], category: [], type: [], cashier: [], method: [], customer: [] },
+        topInvoices: [],
+        chart: null,
+        byMonth: false,
+
+        init() {
+          const qb = utils.qs('branch');
+          if (this.isSuperAdmin && qb !== null) this.branchSel = (qb === 'all' || this.branches.some((b) => String(b.id) === String(qb))) ? String(qb) : String(session.branchId() || '');
+          const hash = String(location.hash || '').replace('#', '').toLowerCase();
+          const alias = { products: 'product', categories: 'category', types: 'type', cashiers: 'cashier', methods: 'method', payments: 'method', customers: 'customer', days: 'day' };
+          const wanted = alias[hash] || hash;
+          if (this.tabs.some((t) => t.key === wanted)) this.tab = wanted;
+          this.sort = this.defaultSort(this.tab);
+          this.range = ABM.range('this_month', () => this.refresh(), 'report-sales');
+          this.refresh();
+          // <select> options come from an x-for template, so sync the DOM value once they exist
+          this.$nextTick(() => { if (this.$refs.branchSelect) this.$refs.branchSelect.value = this.branchSel; });
+          this.$watch('branchSel', () => this.refresh());
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('perPage', () => { this.page = 1; });
+          ABM.theme.onChange(() => this.drawChart());
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeId() { return this.isSuperAdmin ? (this.branchSel === 'all' ? null : Number(this.branchSel)) : session.branchId(); },
+        get scopeLabel() { return this.scopeId === null ? 'All branches' : db.branchName(this.scopeId); },
+        inScope(row) { const id = this.scopeId; return id === null || Number(row.branch_id) === Number(id); },
+        get linkQuery() { return this.range.query + (this.isSuperAdmin ? '&branch=' + encodeURIComponent(this.branchSel) : ''); },
+        get tabLabel() { const t = this.tabs.find((x) => x.key === this.tab); return t ? t.label : ''; },
+
+        setTab(key) {
+          if (!this.tabs.some((t) => t.key === key)) return;
+          this.tab = key; this.page = 1; this.q = '';
+          this.sort = this.defaultSort(key);
+          try { history.replaceState(null, '', location.pathname + location.search + '#' + key); } catch (e) { /* ignore */ }
+          this.$nextTick(() => this.drawChart());
+        },
+        defaultSort(tab) { return tab === 'day' ? { key: 'label', dir: 'asc' } : { key: tab === 'method' ? 'amount' : 'net', dir: 'desc' }; },
+        setSort(key) {
+          if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc';
+          else this.sort = { key, dir: key === 'label' ? 'asc' : 'desc' };
+          this.page = 1;
+        },
+        sortIcon(key) {
+          if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300');
+          return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700');
+        },
+        fmt(v, kind) {
+          if (v === undefined || v === null || v === '') return kind === 'text' ? '—' : '0';
+          if (kind === 'money') return utils.money(v, { decimals: 0 });
+          if (kind === 'pct') return (Number(v) || 0) + '%';
+          if (kind === 'int') return utils.num(v);
+          return String(v);
+        },
+
+        /* -------------------------------------------------------------- data */
+        refresh() { this.compute(); this.$nextTick(() => this.drawChart()); },
+        compute() {
+          const r = this.range;
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && this.inScope(s) && r.contains(s.sale_date));
+          const ids = new Set(sales.map((s) => s.id));
+          const items = db.all('sale_items').filter((i) => ids.has(i.sale_id));
+          const pays = db.all('sale_payments').filter((p) => ids.has(p.sale_id));
+          const returns = db.all('sale_returns').filter((x) => this.inScope(x) && r.contains(x.return_date));
+          const netQty = (i) => Math.max(0, (Number(i.quantity) || 0) - (Number(i.returned_quantity) || 0));
+          const lineRevenue = (i) => (Number(i.total) || 0) / (Number(i.quantity) || 1) * netQty(i);
+          const lineCost = (i) => (Number(i.unit_cost) || 0) * netQty(i);
+
+          const gross = utils.sum(sales, 'subtotal');
+          const discounts = utils.sum(sales, 'discount_amount');
+          const tax = utils.sum(sales, 'tax_amount');
+          const net = utils.sum(sales, 'total');
+          const revenue = utils.sum(items, lineRevenue);
+          const cost = utils.sum(items, lineCost);
+          const itemsSold = items.reduce((a, i) => a + netQty(i), 0);
+          this.k = {
+            invoices: sales.length, gross, discounts, discountPct: gross ? Math.round(discounts / gross * 100) : 0, tax, net,
+            profit: utils.round2(revenue - cost), margin: revenue ? Math.round((revenue - cost) / revenue * 100) : 0,
+            avgBasket: sales.length ? utils.round2(net / sales.length) : 0, avgItems: sales.length ? Math.round(itemsSold / sales.length * 10) / 10 : 0,
+            returns: returns.length, returnsAmount: utils.sum(returns, 'refund_amount'),
+            itemsSold, lines: items.length, productsSold: new Set(items.map((i) => i.product_id)).size,
+          };
+
+          /* ---- by day / month ---- */
+          const v = r.value;
+          let keys = [];
+          if (v.from && v.to) {
+            const days = r.days();
+            this.byMonth = days.length > 62;
+            keys = this.byMonth ? [...new Set(days.map((d) => d.slice(0, 7)))] : days;
+          } else {
+            const found = [...new Set(sales.map((s) => String(s.sale_date).slice(0, 10)))].sort();
+            this.byMonth = found.length > 62;
+            keys = this.byMonth ? [...new Set(found.map((d) => d.slice(0, 7)))] : found;
+          }
+          const bucketOf = (d) => String(d || '').slice(0, this.byMonth ? 7 : 10);
+          const dayMap = {};
+          keys.forEach((kk) => { dayMap[kk] = { key: kk, label: this.bucketLabel(kk), link: this.dayLink(kk), invoices: 0, units: 0, gross: 0, discount: 0, net: 0, profit: 0 }; });
+          sales.forEach((s) => {
+            const b = bucketOf(s.sale_date);
+            const row = dayMap[b] || (dayMap[b] = { key: b, label: this.bucketLabel(b), link: this.dayLink(b), invoices: 0, units: 0, gross: 0, discount: 0, net: 0, profit: 0 });
+            row.invoices += 1; row.gross += Number(s.subtotal) || 0; row.discount += Number(s.discount_amount) || 0; row.net += Number(s.total) || 0;
+          });
+          items.forEach((i) => {
+            const s = sales.find((x) => x.id === i.sale_id); if (!s) return;
+            const row = dayMap[bucketOf(s.sale_date)]; if (!row) return;
+            row.units += netQty(i); row.profit += lineRevenue(i) - lineCost(i);
+          });
+          this.agg.day = Object.values(dayMap).map((x) => ({ ...x, gross: utils.round2(x.gross), discount: utils.round2(x.discount), net: utils.round2(x.net), profit: utils.round2(x.profit), avg: x.invoices ? utils.round2(x.net / x.invoices) : 0 }));
+
+          /* ---- by product / category / type ---- */
+          const prod = {}, cat = {}, typ = {};
+          items.forEach((i) => {
+            const p = db.product(i.product_id) || {};
+            const q = netQty(i), rev = lineRevenue(i), cst = lineCost(i);
+            const pr = prod[i.product_id] || (prod[i.product_id] = { key: 'p' + i.product_id, label: db.productLabel(i.product_id), sub: [p.sku, db.categoryName(p.category_id)].filter(Boolean).join(' · '), link: 'product-view.html?id=' + i.product_id, qty: 0, net: 0, cost: 0 });
+            pr.qty += q; pr.net += rev; pr.cost += cst;
+            const cKey = p.category_id || 0;
+            const cr = cat[cKey] || (cat[cKey] = { key: 'c' + cKey, label: p.category_id ? db.categoryName(p.category_id) : 'Uncategorised', link: p.category_id ? 'products.html?category=' + p.category_id : null, qty: 0, net: 0, cost: 0, lines: 0 });
+            cr.qty += q; cr.net += rev; cr.cost += cst; cr.lines += 1;
+            const tKey = db.productType(p);
+            const tr = typ[tKey] || (typ[tKey] = { key: 't' + tKey, label: db.productTypeLabel(tKey), badge: tKey, qty: 0, net: 0, cost: 0, lines: 0 });
+            tr.qty += q; tr.net += rev; tr.cost += cst; tr.lines += 1;
+          });
+          const finishMargin = (o) => { const n = utils.round2(o.net), c = utils.round2(o.cost); return { ...o, net: n, cost: c, profit: utils.round2(n - c), margin: n ? Math.round((n - c) / n * 100) : 0, share: revenue ? Math.round(n / revenue * 100) : 0 }; };
+          this.agg.product = Object.values(prod).map(finishMargin);
+          this.agg.category = Object.values(cat).map(finishMargin);
+          this.agg.type = Object.values(typ).map(finishMargin);
+
+          /* ---- by cashier ---- */
+          const cash = {};
+          sales.forEach((s) => {
+            const row = cash[s.user_id] || (cash[s.user_id] = { key: 'u' + s.user_id, label: db.userName(s.user_id), sub: db.branchCode(s.branch_id), link: 'sales.html?' + this.range.query + '&cashier=' + s.user_id, invoices: 0, units: 0, gross: 0, discount: 0, net: 0, due: 0 });
+            row.invoices += 1; row.gross += Number(s.subtotal) || 0; row.discount += Number(s.discount_amount) || 0; row.net += Number(s.total) || 0; row.due += Number(s.due_amount) || 0;
+          });
+          items.forEach((i) => { const s = sales.find((x) => x.id === i.sale_id); if (!s) return; const row = cash[s.user_id]; if (row) row.units += netQty(i); });
+          this.agg.cashier = Object.values(cash).map((x) => ({ ...x, gross: utils.round2(x.gross), discount: utils.round2(x.discount), net: utils.round2(x.net), due: utils.round2(x.due), avg: x.invoices ? utils.round2(x.net / x.invoices) : 0 }));
+
+          /* ---- by payment method ---- */
+          const meth = {};
+          pays.forEach((p) => {
+            const row = meth[p.method] || (meth[p.method] = { key: 'm' + p.method, label: ui.statusLabel(p.method), badge: p.method, link: 'sales.html?' + this.range.query + '&method=' + p.method, count: 0, amount: 0 });
+            row.count += 1; row.amount += Number(p.amount) || 0;
+          });
+          const due = utils.sum(sales, 'due_amount');
+          if (due > 0) meth.credit = { key: 'mcredit', label: 'On ledger (khata)', badge: 'credit', link: 'sales.html?' + this.range.query + '&method=credit', count: sales.filter((s) => (Number(s.due_amount) || 0) > 0).length, amount: due };
+          const paidTotal = Object.values(meth).reduce((a, m) => a + m.amount, 0) || 1;
+          this.agg.method = Object.values(meth).map((m) => ({ ...m, amount: utils.round2(m.amount), share: Math.round(m.amount / paidTotal * 100) }));
+
+          /* ---- by customer ---- */
+          const cust = {};
+          sales.forEach((s) => {
+            const c = db.customer(s.customer_id);
+            const key = s.customer_id || 0;
+            const row = cust[key] || (cust[key] = { key: 'cu' + key, label: db.customerName(s.customer_id), sub: c && c.phone ? c.phone : '', link: c && !c.is_walkin ? 'customer-view.html?id=' + key : null, invoices: 0, units: 0, net: 0, due: 0, last: '' });
+            row.invoices += 1; row.net += Number(s.total) || 0; row.due += Number(s.due_amount) || 0;
+            if (!row.last || String(s.sale_date) > row.last) row.last = String(s.sale_date);
+          });
+          items.forEach((i) => { const s = sales.find((x) => x.id === i.sale_id); if (!s) return; const row = cust[s.customer_id || 0]; if (row) row.units += netQty(i); });
+          this.agg.customer = Object.values(cust).map((x) => ({ ...x, net: utils.round2(x.net), due: utils.round2(x.due), avg: x.invoices ? utils.round2(x.net / x.invoices) : 0, lastLabel: utils.date(x.last) }));
+
+          /* ---- largest invoices ---- */
+          const unitsBySale = {};
+          items.forEach((i) => { unitsBySale[i.sale_id] = (unitsBySale[i.sale_id] || 0) + netQty(i); });
+          this.topInvoices = utils.sortBy(sales, 'total', 'desc').slice(0, 8).map((s) => {
+            const c = db.customer(s.customer_id);
+            return { ...s, customerName: db.customerName(s.customer_id), isWalkin: !c || !!c.is_walkin, cashier: db.userName(s.user_id), units: unitsBySale[s.id] || 0 };
+          });
+        },
+
+        bucketLabel(key) {
+          if (!key) return '—';
+          if (this.byMonth) { const d = utils.parseDate(key + '-01'); return d ? d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }) : key; }
+          const d = utils.parseDate(key);
+          return d ? d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }) : key;
+        },
+        dayLink(key) {
+          if (!key) return null;
+          if (this.byMonth) { const from = key + '-01'; const end = utils.parseDate(key + '-01'); const to = utils.isoDate(new Date(end.getFullYear(), end.getMonth() + 1, 0)); return 'sales.html?range=custom&from=' + from + '&to=' + to + (this.isSuperAdmin ? '&branch=' + this.branchSel : ''); }
+          return 'sales.html?range=custom&from=' + key + '&to=' + key + (this.isSuperAdmin ? '&branch=' + this.branchSel : '');
+        },
+
+        /* ------------------------------------------------------- table model */
+        get cols() {
+          const m = 'money', i = 'int', p = 'pct';
+          switch (this.tab) {
+            case 'day': return [
+              { key: 'invoices', label: 'Invoices', fmt: i }, { key: 'units', label: 'Items', fmt: i, hide: 'hidden sm:table-cell' },
+              { key: 'gross', label: 'Gross', fmt: m, hide: 'hidden md:table-cell' }, { key: 'discount', label: 'Discount', fmt: m, hide: 'hidden lg:table-cell', cls: 'text-amber-700' },
+              { key: 'net', label: 'Net sales', fmt: m, cls: 'font-semibold' }, { key: 'profit', label: 'Profit', fmt: m, hide: 'hidden md:table-cell', cls: 'text-emerald-700' },
+              { key: 'avg', label: 'Avg invoice', fmt: m, hide: 'hidden xl:table-cell' },
+            ];
+            case 'product': return [
+              { key: 'qty', label: 'Qty', fmt: i }, { key: 'net', label: 'Revenue', fmt: m, cls: 'font-semibold' },
+              { key: 'cost', label: 'Cost', fmt: m, hide: 'hidden lg:table-cell' }, { key: 'profit', label: 'Profit', fmt: m, hide: 'hidden sm:table-cell', cls: 'text-emerald-700' },
+              { key: 'margin', label: 'Margin', fmt: p, hide: 'hidden md:table-cell' }, { key: 'share', label: 'Share', fmt: p, hide: 'hidden xl:table-cell' },
+            ];
+            case 'category': case 'type': return [
+              { key: 'lines', label: 'Lines', fmt: i, hide: 'hidden xl:table-cell' }, { key: 'qty', label: 'Qty', fmt: i },
+              { key: 'net', label: 'Revenue', fmt: m, cls: 'font-semibold' }, { key: 'cost', label: 'Cost', fmt: m, hide: 'hidden lg:table-cell' },
+              { key: 'profit', label: 'Profit', fmt: m, hide: 'hidden sm:table-cell', cls: 'text-emerald-700' }, { key: 'margin', label: 'Margin', fmt: p, hide: 'hidden md:table-cell' },
+              { key: 'share', label: 'Share', fmt: p, hide: 'hidden md:table-cell' },
+            ];
+            case 'cashier': return [
+              { key: 'invoices', label: 'Invoices', fmt: i }, { key: 'units', label: 'Items', fmt: i, hide: 'hidden sm:table-cell' },
+              { key: 'gross', label: 'Gross', fmt: m, hide: 'hidden lg:table-cell' }, { key: 'discount', label: 'Discount', fmt: m, hide: 'hidden xl:table-cell', cls: 'text-amber-700' },
+              { key: 'net', label: 'Net sales', fmt: m, cls: 'font-semibold' }, { key: 'due', label: 'On ledger', fmt: m, hide: 'hidden md:table-cell', cls: 'text-rose-600' },
+              { key: 'avg', label: 'Avg invoice', fmt: m, hide: 'hidden md:table-cell' },
+            ];
+            case 'method': return [
+              { key: 'count', label: 'Payments', fmt: i }, { key: 'amount', label: 'Amount', fmt: m, cls: 'font-semibold' }, { key: 'share', label: 'Share', fmt: p },
+            ];
+            case 'customer': return [
+              { key: 'invoices', label: 'Invoices', fmt: i }, { key: 'units', label: 'Items', fmt: i, hide: 'hidden sm:table-cell' },
+              { key: 'net', label: 'Net sales', fmt: m, cls: 'font-semibold' }, { key: 'due', label: 'Outstanding', fmt: m, hide: 'hidden md:table-cell', cls: 'text-rose-600' },
+              { key: 'avg', label: 'Avg invoice', fmt: m, hide: 'hidden lg:table-cell' }, { key: 'lastLabel', label: 'Last purchase', fmt: 'text', hide: 'hidden xl:table-cell' },
+            ];
+            default: return [];
+          }
+        },
+        get labelHeader() { return ({ day: this.byMonth ? 'Month' : 'Date', product: 'Product', category: 'Category', type: 'Product type', cashier: 'Cashier', method: 'Payment method', customer: 'Customer' })[this.tab] || ''; },
+        get rows() { return this.agg[this.tab] || []; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const list = q ? this.rows.filter((r) => [r.label, r.sub].some((v) => String(v || '').toLowerCase().includes(q))) : this.rows;
+          const key = this.sort.key;
+          const val = (r) => { const v = r[key]; return typeof v === 'number' ? v : String(v === undefined || v === null ? '' : v).toLowerCase(); };
+          if (this.tab === 'day' && key === 'label') return utils.sortBy(list, 'key', this.sort.dir);
+          return utils.sortBy(list, val, this.sort.dir);
+        },
+        get totals() {
+          const t = {};
+          this.cols.forEach((c) => { if (c.fmt === 'money' || c.fmt === 'int') t[c.key] = utils.sum(this.filtered, c.key); else t[c.key] = ''; });
+          const sumOf = (k) => utils.sum(this.filtered, k);
+          if (this.cols.some((c) => c.key === 'margin')) { const n = sumOf('net'), c = sumOf('cost'); t.margin = n ? Math.round((n - c) / n * 100) : 0; }
+          if (this.cols.some((c) => c.key === 'share')) { t.share = this.filtered.length === this.rows.length ? 100 : Math.min(100, utils.sum(this.filtered, 'share')); }
+          if (this.cols.some((c) => c.key === 'avg')) { const n = sumOf('net'), inv = sumOf('invoices'); t.avg = inv ? utils.round2(n / inv) : 0; }
+          if (this.tab === 'day' && this.cols.some((c) => c.key === 'avg')) { const n = sumOf('net'), inv = sumOf('invoices'); t.avg = inv ? utils.round2(n / inv) : 0; }
+          return t;
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, this.perPage > 0 ? this.perPage : Math.max(1, this.filtered.length)); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+
+        /* ------------------------------------------------------------ chart */
+        get chartTitle() {
+          return ({ day: this.byMonth ? 'Net sales by month' : 'Net sales by day', product: 'Top 10 products by revenue', category: 'Revenue by category', type: 'Revenue by product type', cashier: 'Net sales by cashier', method: 'Payment mix', customer: 'Top 10 customers by value' })[this.tab] || 'Sales';
+        },
+        drawChart() {
+          const el = document.getElementById('reportChart');
+          if (!window.Chart || !el) return;
+          try {
+            const existing = Chart.getChart(el);
+            if (existing) existing.destroy();
+            this.chart = null;
+            const tc = ABM.theme.chart();
+            Chart.defaults.color = tc.tick;
+            Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+            const money = (v) => utils.money(v, { decimals: 0 });
+            const shortNum = (v) => (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v);
+            const rows = this.filtered;
+            if (!rows.length) return;
+            let cfg = null;
+            if (this.tab === 'day' || this.tab === 'cashier') {
+              const data = this.tab === 'day' ? utils.sortBy(rows, 'key', 'asc') : utils.sortBy(rows, 'net', 'desc');
+              cfg = {
+                type: 'bar',
+                data: { labels: data.map((x) => x.label), datasets: [{ label: 'Net sales', data: data.map((x) => x.net), backgroundColor: tc.primary, borderRadius: 4, maxBarThickness: 46 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ' ' + money(c.raw) } } }, scales: { x: { grid: { display: false }, ticks: { color: tc.tick, maxTicksLimit: 14, maxRotation: 0, autoSkip: true } }, y: { beginAtZero: true, grid: { color: tc.grid }, ticks: { color: tc.tick, callback: shortNum } } } },
+              };
+            } else if (this.tab === 'type' || this.tab === 'method' || this.tab === 'category') {
+              const valueKey = this.tab === 'method' ? 'amount' : 'net';
+              const data = utils.sortBy(rows, valueKey, 'desc').slice(0, 8);
+              cfg = {
+                type: 'doughnut',
+                data: { labels: data.map((x) => x.label), datasets: [{ data: data.map((x) => x[valueKey]), backgroundColor: data.map((x, i) => tc.series[i % tc.series.length]), borderWidth: 2, borderColor: 'rgba(0,0,0,0)' }] },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: tc.tick, padding: 12 } }, tooltip: { callbacks: { label: (c) => ' ' + c.label + ': ' + money(c.raw) } } } },
+              };
+            } else {
+              const data = utils.sortBy(rows, 'net', 'desc').slice(0, 10);
+              cfg = {
+                type: 'bar',
+                data: { labels: data.map((x) => (x.label.length > 28 ? x.label.slice(0, 27) + '…' : x.label)), datasets: [{ label: 'Revenue', data: data.map((x) => x.net), backgroundColor: tc.primary, borderRadius: 4, maxBarThickness: 18 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ' ' + money(c.raw) } } }, scales: { x: { beginAtZero: true, grid: { color: tc.grid }, ticks: { color: tc.tick, maxTicksLimit: 6, callback: shortNum } }, y: { grid: { display: false }, ticks: { color: tc.tick, autoSkip: false } } } },
+              };
+            }
+            this.chart = new Chart(el, cfg);
+          } catch (e) { console.warn('Sales report chart could not be drawn', e); }
+        },
+
+        /* ---------------------------------------------------- print / export */
+        printReport() {
+          const prev = this.perPage;
+          this.perPage = 0;
+          this.$nextTick(() => { window.print(); this.perPage = prev; });
+        },
+        exportCsv() {
+          const cols = [{ label: this.labelHeader, key: 'label' }].concat(this.cols.map((c) => ({ label: c.label, value: (r) => (c.fmt === 'pct' ? (r[c.key] || 0) + '%' : (r[c.key] === undefined ? '' : r[c.key])) })));
+          const v = this.range.value;
+          if (!utils.download('sales-by-' + this.tab + '-' + (v.from || 'all') + '-to-' + (v.to || utils.today()) + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' row' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

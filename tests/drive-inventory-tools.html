@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: import &amp; bulk edit</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the CSV importer and the products bulk editor through their real components.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x ? '  [' + x + ']' : '')); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, ui } = ABM;
+      db.reset();
+      ui.toast = () => {}; ui.confirm = async () => true;
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+      const BID = session.branchId();
+
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+
+      await source('products-import.html', 'productImportPage');
+      await source('products.html', 'productsPage');
+
+      /* ========================= 1. reading a CSV ========================= */
+      log('=== TEST 1: reading the file');
+      const imp = mk(productImportPage, '');
+      imp.raw = 'SKU,Name,Category,Brand,Cost,Price,Qty\nIMP-001,"Cable, braided 2m",Cables & Chargers,Generic,300,750,12\nIMP-002,Power Bank 10000mAh,Power Banks,Anker,2500,4200,5\n';
+      imp.parse();
+      eq(imp.parseError, '', 'T1: a clean file parses');
+      eq(imp.headers.length, 7, 'T1: seven columns');
+      eq(imp.rows.length, 2, 'T1: two data rows');
+      eq(imp.rows[0][1], 'Cable, braided 2m', 'T1: a quoted comma stays inside the field');
+      eq(imp.detected, 'Comma', 'T1: the separator is detected');
+      imp.raw = 'SKU;Name;Category;Brand;Cost;Price\nIMP-003;Screen Protector;Screen Protectors & Cases;Generic;80;250\n';
+      imp.parse();
+      eq(imp.detected, 'Semicolon', 'T1: a semicolon file is detected too');
+      eq(imp.rows.length, 1, 'T1: and read');
+      imp.raw = 'SKU,Name\r\nIMP-004,CRLF product\r\n';
+      imp.parse();
+      eq(imp.rows.length, 1, 'T1: CRLF line endings are handled');
+      imp.raw = 'just one line';
+      imp.parse();
+      ok(!!imp.parseError, 'T1: a file with no data rows is refused', imp.parseError);
+
+      /* ========================= 2. matching the columns ========================= */
+      log('=== TEST 2: column matching');
+      imp.raw = 'SKU,Name,Category,Brand,Cost,Price,Qty,Tax\nIMP-010,Test A,Cables & Chargers,Generic,100,300,7,0\n';
+      imp.parse();
+      const mapped = Object.values(imp.map);
+      ok(mapped.includes('sku') && mapped.includes('name'), 'T2: SKU and name are matched');
+      ok(mapped.includes('retail_price'), 'T2: "Price" is matched to the retail price');
+      ok(mapped.includes('cost_price'), 'T2: "Cost" is matched to the cost price');
+      ok(mapped.includes('stock'), 'T2: "Qty" is matched to opening stock');
+      ok(mapped.includes('tax_rate'), 'T2: "Tax" is matched to the tax rate');
+      eq(imp.missingRequired.length, 0, 'T2: nothing required is missing');
+      const saved = imp.map[0];
+      imp.map[0] = '';
+      ok(imp.missingRequired.includes('SKU'), 'T2: unmapping SKU is reported');
+      imp.map[0] = saved;
+
+      /* ========================= 3. what each row would do ========================= */
+      log('=== TEST 3: the preview');
+      const existing = db.all('products').find((p) => !db.isSerialized(p) && p.is_active);
+      imp.raw = [
+        'SKU,Name,Category,Brand,Cost,Price,Qty,Tax',
+        'IMP-NEW-1,Brand New Thing,Cables & Chargers,Generic,300,900,10,0',
+        existing.sku + ',' + existing.name + ',' + db.categoryName(existing.category_id) + ',' + db.brandName(existing.brand_id) + ',' + existing.cost_price + ',' + (Number(existing.retail_price) + 100) + ',4,0',
+        ',No SKU here,Cables & Chargers,Generic,10,20,1,0',
+        'IMP-NEW-1,Duplicate SKU,Cables & Chargers,Generic,1,2,1,0',
+        'IMP-NEW-2,No retail price,Cables & Chargers,Generic,100,,1,0',
+        'IMP-NEW-3,Unknown cat,Nowhere Category,Generic,100,200,1,0',
+        'IMP-NEW-4,Silly tax,Cables & Chargers,Generic,100,200,1,150',
+      ].join('\n');
+      imp.parse();
+      imp.opts.createMissing = false;
+      imp.goPreview();
+      eq(imp.preview.length, 7, 'T3: a row per data line');
+      eq(imp.preview[0].action, 'create', 'T3: an unknown SKU is a new product');
+      eq(imp.preview[1].action, 'update', 'T3: a known SKU is an update');
+      eq(imp.preview[2].action, 'error', 'T3: a row with no SKU is a problem');
+      ok(/SKU/i.test(imp.preview[2].error), 'T3: and says so', imp.preview[2].error);
+      eq(imp.preview[3].action, 'error', 'T3: the same SKU twice in one file is a problem');
+      eq(imp.preview[4].action, 'error', 'T3: a new product with no retail price is a problem');
+      eq(imp.preview[5].action, 'error', 'T3: an unknown category is a problem when not creating them');
+      eq(imp.preview[6].action, 'error', 'T3: a tax rate over 100 is a problem');
+      ok(/[Tt]ax/.test(imp.preview[6].error), 'T3: and says which field', imp.preview[6].error);
+      ok(imp.counts.error === 5 && imp.counts.create === 1 && imp.counts.update === 1, 'T3: the tallies add up',
+        JSON.stringify(imp.counts));
+      imp.opts.createMissing = true;
+      imp.goPreview();
+      eq(imp.preview[5].action, 'create', 'T3: with "create missing" the unknown category is fine');
+      imp.opts.updateExisting = false;
+      imp.goPreview();
+      eq(imp.preview[1].action, 'skip', 'T3: existing products can be skipped instead of updated');
+      imp.opts.updateExisting = true;
+
+      /* ========================= 4. importing ========================= */
+      log('=== TEST 4: the import writes what it promised');
+      imp.raw = [
+        'SKU,Name,Category,Brand,Cost,Price,Wholesale,Qty,Tax,Min stock',
+        'IMP-A,Imported Cable,Cables & Chargers,Generic,300,900,700,12,0,5',
+        'IMP-B,Imported Case,Brand New Category,Fresh Brand,150,500,400,0,0,3',
+        existing.sku + ',' + existing.name + ',' + db.categoryName(existing.category_id) + ',' + db.brandName(existing.brand_id) + ',' + existing.cost_price + ',' + (Number(existing.retail_price) + 250) + ',,0,0,',
+      ].join('\n');
+      imp.parse();
+      imp.opts.createMissing = true; imp.opts.updateExisting = true; imp.opts.openingStock = true;
+      imp.goPreview();
+      const catsBefore = db.all('categories').length, brandsBefore = db.all('brands').length;
+      const oldRetail = Number(existing.retail_price);
+      const productsBefore = db.all('products').length;
+      imp.runImport();
+      eq(imp.step, 4, 'T4: the importer finishes');
+      eq(imp.result.created, 2, 'T4: two products created');
+      eq(imp.result.updated, 1, 'T4: one updated');
+      eq(db.all('products').length, productsBefore + 2, 'T4: the catalog grew by exactly two');
+      eq(db.all('categories').length, catsBefore + 1, 'T4: the missing category was created');
+      eq(db.all('brands').length, brandsBefore + 1, 'T4: and the missing brand');
+      const a = db.all('products').find((p) => p.sku === 'IMP-A');
+      ok(!!a, 'T4: the new product exists');
+      eq(a.name, 'Imported Cable', 'T4: with its name');
+      near(a.retail_price, 900, 'T4: and its retail price');
+      near(a.cost_price, 300, 'T4: and its cost');
+      near(a.wholesale_price, 700, 'T4: and its wholesale price');
+      eq(a.min_stock, 5, 'T4: and its minimum stock');
+      eq(String(db.categoryName(a.category_id)), 'Cables & Chargers', 'T4: in the right category');
+      ok(Number(a.min_sale_price) >= Number(a.cost_price), 'T4: the price ladder holds (min sale >= cost)', a.min_sale_price + ' vs ' + a.cost_price);
+      eq(ABM.stock.qty(BID, a.id), 12, 'T4: the opening stock was booked');
+      ok(db.all('stock_movements').some((m) => String(m.product_id) === String(a.id) && m.movement_type === 'opening'), 'T4: as an opening movement');
+      near(db.find('products', existing.id).retail_price, oldRetail + 250, 'T4: the existing product was repriced');
+      ok(db.all('audit_logs').some((x) => x.action === 'product.import'), 'T4: the import is in the audit log');
+
+      // running the same file again must update, not duplicate
+      imp.reset();
+      imp.raw = 'SKU,Name,Category,Brand,Cost,Price\nIMP-A,Imported Cable v2,Cables & Chargers,Generic,310,950\n';
+      imp.parse(); imp.goPreview();
+      eq(imp.preview[0].action, 'update', 'T4: the second run recognises the product');
+      const countBefore = db.all('products').length;
+      imp.runImport();
+      eq(db.all('products').length, countBefore, 'T4: and creates nothing new');
+      near(db.find('products', a.id).retail_price, 950, 'T4: it just moves the price');
+      eq(db.find('products', a.id).name, 'Imported Cable v2', 'T4: and the name');
+
+      // serialized products are never given opening stock by the importer
+      const serial = db.all('products').find((p) => db.isSerialized(p));
+      const serialQty = ABM.stock.qty(BID, serial.id);
+      imp.reset();
+      imp.raw = 'SKU,Name,Category,Brand,Cost,Price,Qty\n' + serial.sku + ',' + serial.name + ',' + db.categoryName(serial.category_id) + ',' + db.brandName(serial.brand_id) + ',' + serial.cost_price + ',' + serial.retail_price + ',99\n';
+      imp.parse(); imp.opts.openingStock = true; imp.goPreview(); imp.runImport();
+      eq(ABM.stock.qty(BID, serial.id), serialQty, 'T4: a serialized product keeps its unit-by-unit stock');
+
+      /* ========================= 5. bulk edit ========================= */
+      log('=== TEST 5: bulk edit on products.html');
+      const page = mk(productsPage, '');
+      page.openBulk();
+      eq(page.bulk.open, false, 'T5: bulk edit needs a selection');
+      const targets = page.rows.filter((r) => r.product_type === 'accessory' && r.is_active).slice(0, 3);
+      ok(targets.length === 3, 'T5: picked three products to edit');
+      page.selected = targets.map((r) => r.id);
+      page.openBulk();
+      eq(page.bulk.open, true, 'T5: the dialog opens with a selection');
+      eq(page.bulkPreview.changing, 0, 'T5: nothing changes until you ask for something');
+
+      const cat = db.all('categories').find((c) => c.is_active && c.product_type === 'accessory' && String(c.id) !== String(targets[0].category_id));
+      page.bulk.category_id = String(cat.id);
+      page.bulk.min_stock = 7;
+      eq(page.bulkPreview.changing, 3, 'T5: all three would change');
+      ok(page.bulkPreview.rows[0].summary.indexOf('category') >= 0, 'T5: the preview explains what changes', page.bulkPreview.rows[0].summary);
+      page.applyBulk();
+      ok(targets.every((t) => String(db.find('products', t.id).category_id) === String(cat.id)), 'T5: the category was applied');
+      ok(targets.every((t) => Number(db.find('products', t.id).min_stock) === 7), 'T5: so was the minimum stock');
+      eq(page.selected.length, 0, 'T5: the selection clears afterwards');
+      ok(db.all('audit_logs').some((x) => x.action === 'product.bulk_update'), 'T5: it is audited');
+
+      /* ========================= 6. bulk price changes ========================= */
+      log('=== TEST 6: bulk price changes');
+      const p2 = mk(productsPage, '');
+      const one = p2.rows.find((r) => r.product_type === 'accessory' && r.retail_price > 100);
+      const before = Number(db.find('products', one.id).retail_price);
+      p2.selected = [one.id];
+      p2.openBulk();
+      p2.bulk.priceOn = true; p2.bulk.priceField = 'retail_price'; p2.bulk.priceMode = 'inc_pct'; p2.bulk.priceValue = 10; p2.bulk.rounding = 'none';
+      eq(p2.bulkPreview.changing, 1, 'T6: a 10% rise is a change');
+      p2.applyBulk();
+      near(db.find('products', one.id).retail_price, ABM.utils.round2(before * 1.1), 'T6: +10% applied');
+
+      const cur = Number(db.find('products', one.id).retail_price);
+      p2.selected = [one.id];
+      p2.openBulk();
+      p2.bulk.priceOn = true; p2.bulk.priceMode = 'inc_amt'; p2.bulk.priceValue = 33; p2.bulk.rounding = '50';
+      const wanted = Math.round((cur + 33) / 50) * 50;
+      p2.applyBulk();
+      near(db.find('products', one.id).retail_price, wanted, 'T6: rounding to the nearest 50 works');
+
+      p2.selected = [one.id];
+      p2.openBulk();
+      p2.bulk.priceOn = true; p2.bulk.priceMode = 'set'; p2.bulk.priceValue = 5000; p2.bulk.rounding = '99';
+      p2.applyBulk();
+      eq(db.find('products', one.id).retail_price, 4999, 'T6: "end in 99" pricing');
+
+      // a change that would break the catalogue rule is refused, not written
+      const p3 = mk(productsPage, '');
+      const guard = p3.rows.find((r) => r.product_type === 'accessory' && r.cost_price > 0);
+      const keepRetail = Number(db.find('products', guard.id).retail_price);
+      p3.selected = [guard.id];
+      p3.openBulk();
+      p3.bulk.priceOn = true; p3.bulk.priceField = 'retail_price'; p3.bulk.priceMode = 'set'; p3.bulk.priceValue = 1; p3.bulk.rounding = 'none';
+      eq(p3.bulkPreview.skipped, 1, 'T6: dropping retail below cost is flagged');
+      eq(p3.bulkPreview.changing, 0, 'T6: and nothing is left to apply');
+      p3.applyBulk();
+      near(db.find('products', guard.id).retail_price, keepRetail, 'T6: the product is untouched');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 700);
+  </script>
+</body>
+</html>

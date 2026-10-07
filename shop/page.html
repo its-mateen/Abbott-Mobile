@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Information · Abbott Mobiles</title>
+  <meta name="description" content="Policies and information from Abbott Mobile — warranty, returns, privacy and more.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    /* typography for CMS rich text beyond the shared .shop-rich rules */
+    .shop-rich h2:first-child, .shop-rich h3:first-child { margin-top: 0; }
+    .shop-rich h2 { padding-bottom: .35rem; border-bottom: 1px solid rgb(var(--slate-200)); }
+    html[data-shop-mode="dark"] .shop-rich h2 { border-bottom-color: rgb(255 255 255 / .08); }
+    .shop-rich h2, .shop-rich h3, .shop-rich h4 { color: rgb(var(--slate-900)); font-family: var(--shop-display); letter-spacing: -.015em; }
+    .shop-rich hr { border: 0; border-top: 1px solid rgb(var(--slate-200)); margin: 1.5rem 0; }
+    .shop-rich table { width: 100%; border-collapse: collapse; font-size: .875rem; margin: 0 0 1rem; }
+    .shop-rich th, .shop-rich td { padding: .5rem .65rem; text-align: left; border: 1px solid rgb(var(--slate-200)); vertical-align: top; }
+    .shop-rich th { background: rgb(var(--slate-900) / .04); font-weight: 700; }
+    .shop-rich figure { margin: 0 0 1rem; }
+    .shop-rich-wrap { overflow-x: auto; }
+  </style>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-page">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopCmsPage()">
+
+    <!-- ======================================================= NOT FOUND -->
+    <template x-if="!page">
+      <div class="shop-container py-14">
+        <div class="max-w-2xl mx-auto">
+          <div class="shop-card shop-card-pad text-center">
+            <div class="shop-empty">
+              <span x-html="SHOP.icon('document','')"></span>
+              <div class="shop-empty-title">We couldn't find that page</div>
+              <p class="text-sm mt-2">
+                The page may have been renamed or is not published yet. Here is everything we do have —
+                or just ask us, we answer fast.
+              </p>
+            </div>
+            <div class="flex flex-wrap justify-center gap-2" x-show="others.length" x-cloak>
+              <template x-for="p in others" :key="p.id">
+                <a :href="'page.html?slug=' + encodeURIComponent(p.slug)" class="shop-chip" x-text="p.title"></a>
+              </template>
+            </div>
+            <div class="flex flex-col sm:flex-row justify-center gap-2 mt-6">
+              <a href="index.html" class="shop-btn"><span x-html="SHOP.icon('home','')"></span>Back to home</a>
+              <a href="contact.html" class="shop-btn shop-btn-outline"><span x-html="SHOP.icon('mail','')"></span>Contact us</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ============================================================ PAGE -->
+    <template x-if="page">
+      <div>
+        <div class="shop-container pt-5 pb-3">
+          <nav class="shop-crumbs" aria-label="Breadcrumb">
+            <a href="index.html">Home</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <span class="font-semibold text-slate-700 truncate max-w-[14rem] sm:max-w-none" x-text="page.title"></span>
+          </nav>
+        </div>
+
+        <div class="shop-container pb-12">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+
+            <!-- ---------------------------------------------- content -->
+            <article class="lg:col-span-2 min-w-0">
+              <div class="shop-card shop-card-pad sm:!p-8">
+                <span class="shop-eyebrow">Information</span>
+                <h1 class="shop-h2 mt-1.5" x-text="page.title"></h1>
+                <p class="text-xs text-slate-500 mt-2" x-show="page.updated_at" x-cloak
+                   x-text="'Last updated ' + $date(page.updated_at, 'long')"></p>
+                <div class="shop-divider my-5"></div>
+                <div class="shop-rich shop-rich-wrap" x-html="html"></div>
+              </div>
+
+              <!-- ===================== SECTIONS built in the CMS ===================== -->
+              <template x-for="b in blocks" :key="b.id">
+                <section class="mt-6">
+
+                  <!-- product grid -->
+                  <template x-if="b.type === 'products'">
+                    <div>
+                      <div class="shop-section-head !mb-3" x-show="b.title || b.subtitle" x-cloak>
+                        <div class="min-w-0">
+                          <h2 class="shop-h3" x-text="b.title"></h2>
+                          <p class="shop-muted text-sm" x-show="b.subtitle" x-cloak x-text="b.subtitle"></p>
+                        </div>
+                      </div>
+                      <div class="shop-grid-products" x-html="cards(b)"></div>
+                      <p class="shop-muted text-sm" x-show="!blockProducts(b).length" x-cloak>
+                        Nothing in this section yet — check back soon.
+                      </p>
+                    </div>
+                  </template>
+
+                  <!-- banner -->
+                  <template x-if="b.type === 'banner'">
+                    <a :href="b.link || 'products.html'" class="shop-page-banner" :style="bannerStyle(b)">
+                      <span class="min-w-0">
+                        <span class="block text-xl sm:text-2xl font-extrabold tracking-tight" x-text="b.title || 'Special offer'"></span>
+                        <span class="block text-sm text-white/75 mt-1" x-show="b.subtitle" x-cloak x-text="b.subtitle"></span>
+                      </span>
+                      <span class="shop-btn shop-btn-white flex-none" x-text="b.cta_text || 'Shop now'"></span>
+                    </a>
+                  </template>
+
+                  <!-- call to action -->
+                  <template x-if="b.type === 'cta'">
+                    <div class="shop-card shop-card-pad flex flex-wrap items-center gap-4 justify-between">
+                      <div class="min-w-0">
+                        <h2 class="shop-h3" x-text="b.title || 'Need a hand?'"></h2>
+                        <p class="shop-muted text-sm" x-show="b.subtitle" x-cloak x-text="b.subtitle"></p>
+                      </div>
+                      <a :href="b.link || 'contact.html'" class="shop-btn flex-none" x-text="b.cta_text || 'Contact us'"></a>
+                    </div>
+                  </template>
+
+                  <!-- extra text -->
+                  <template x-if="b.type === 'richtext'">
+                    <div class="shop-card shop-card-pad">
+                      <h2 class="shop-h3" x-show="b.title" x-cloak x-text="b.title"></h2>
+                      <div class="shop-rich shop-rich-wrap" :class="b.title && 'mt-3'" x-html="SHOP.sanitize(b.html || '')"></div>
+                    </div>
+                  </template>
+                </section>
+              </template>
+
+              <div class="flex flex-wrap items-center gap-2 mt-4">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-400">Share</span>
+                <a :href="SHOP.waLink(page.title + ' — ' + pageUrl)" target="_blank" rel="noopener"
+                   class="shop-icon-btn bg-slate-900/5" aria-label="Share on WhatsApp"><span x-html="SHOP.socialIcon('whatsapp','')"></span></a>
+                <a :href="'https://www.facebook.com/sharer/sharer.php?u=' + encodeURIComponent(pageUrl)" target="_blank" rel="noopener"
+                   class="shop-icon-btn bg-slate-900/5" aria-label="Share on Facebook"><span x-html="SHOP.socialIcon('facebook','')"></span></a>
+                <button type="button" class="shop-icon-btn bg-slate-900/5" @click="printPage()" aria-label="Print this page" title="Print">
+                  <span x-html="SHOP.icon('printer','')"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- ---------------------------------------------- sidebar -->
+            <aside class="min-w-0 space-y-4 lg:sticky lg:top-24">
+              <div class="shop-card shop-card-pad" x-show="others.length" x-cloak>
+                <h2 class="shop-h3">More information</h2>
+                <ul class="mt-3 space-y-1">
+                  <template x-for="p in others" :key="p.id">
+                    <li>
+                      <a :href="'page.html?slug=' + encodeURIComponent(p.slug)"
+                         class="flex items-center gap-2 px-2 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-900/5 hover:text-slate-900 min-w-0">
+                        <span class="flex-none text-slate-400" x-html="SHOP.icon('document','w-4 h-4')"></span>
+                        <span class="min-w-0 flex-1 truncate" x-text="p.title"></span>
+                        <span class="flex-none text-slate-300" x-html="SHOP.icon('chevron-right','w-4 h-4')"></span>
+                      </a>
+                    </li>
+                  </template>
+                </ul>
+              </div>
+
+              <div class="shop-card overflow-hidden">
+                <div class="p-5 text-white shop-on-dark"
+                     style="background:linear-gradient(150deg, rgb(var(--shop-primary-700)), rgb(var(--shop-primary-950)))">
+                  <h2 class="shop-h3 text-white">Still have a question?</h2>
+                  <p class="text-sm text-white/70 mt-2 leading-relaxed">
+                    Our team answers on WhatsApp within minutes during shop hours.
+                  </p>
+                  <div class="mt-4 space-y-2">
+                    <a :href="SHOP.waLink('Hello, I have a question about ' + page.title + '.')" target="_blank" rel="noopener"
+                       class="shop-btn shop-btn-accent shop-btn-block" x-show="SHOP.waNumber()" x-cloak>
+                      <span x-html="SHOP.socialIcon('whatsapp','')"></span>Chat on WhatsApp
+                    </a>
+                    <a :href="'tel:' + SHOP.digits(contact.phone || '')" class="shop-btn shop-btn-glass shop-btn-block"
+                       x-show="contact.phone" x-cloak>
+                      <span x-html="SHOP.icon('phone-call','')"></span><span x-text="contact.phone"></span>
+                    </a>
+                    <a href="contact.html" class="shop-btn shop-btn-glass shop-btn-block">
+                      <span x-html="SHOP.icon('mail','')"></span>Send us a message
+                    </a>
+                  </div>
+                </div>
+                <div class="p-5 text-xs text-slate-500 leading-relaxed" x-show="contact.hours || contact.address" x-cloak>
+                  <p class="break-words" x-show="contact.address" x-cloak x-text="contact.address"></p>
+                  <p x-show="contact.hours" x-cloak x-text="contact.hours"></p>
+                </div>
+              </div>
+
+              <div class="shop-card shop-card-pad">
+                <h2 class="shop-h3">Shop &amp; services</h2>
+                <div class="mt-3 space-y-2">
+                  <a href="products.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                    <span x-html="SHOP.icon('bag','')"></span>Browse products
+                  </a>
+                  <a href="repair.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                    <span x-html="SHOP.icon('wrench','')"></span>Book a repair
+                  </a>
+                  <a href="order.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                    <span x-html="SHOP.icon('truck','')"></span>Track an order
+                  </a>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </template>
+
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopCmsPage() {
+      const { utils } = ABM;
+      return {
+        page: null, html: '', others: [], contact: {}, pageUrl: '', blocks: [],
+
+        /* ---- CMS sections (product grids, banners, CTAs) built in website.html ---- */
+        blockProducts(b) {
+          const active = SHOP.products().filter((p) => ABM.db.productType(p) !== 'service');
+          let list = [];
+          if (b.mode === 'category') list = active.filter((p) => String(p.category_id) === String(b.category_id));
+          else if (b.mode === 'tag') list = active.filter((p) => (p.tags || []).includes(String(b.tag || '').toLowerCase()));
+          else if (b.mode === 'newest') list = [...active].sort((a, c) => String(c.created_at).localeCompare(String(a.created_at)));
+          else list = (b.product_ids || []).map((id) => active.find((p) => p.id === id)).filter(Boolean);
+          return list.slice(0, Math.max(1, Number(b.limit) || 8));
+        },
+        cards(b) { return this.blockProducts(b).map((p) => this.cardHtml(p)).join(''); },
+        cardHtml(p) {
+          const e = utils.escape, inStock = SHOP.inStock(p);
+          return `<a href="product.html?id=${p.id}" class="shop-card shop-card-hover shop-product">
+            <span class="shop-media block">${SHOP.image(p)}</span>
+            <span class="shop-product-body">
+              <span class="shop-product-brand truncate">${e(ABM.db.brandName(p.brand_id))}</span>
+              <span class="shop-product-title">${e(SHOP.title(p))}</span>
+              <span class="mt-auto pt-2 flex items-end justify-between gap-2 min-w-0">
+                <span class="min-w-0"><span class="shop-price block truncate">${utils.money(p.retail_price, { decimals: 0 })}</span>
+                <span class="text-[11px] font-semibold ${inStock ? 'text-emerald-600' : 'text-rose-600'}">${e(SHOP.stockLabel(p))}</span></span>
+              </span>
+            </span>
+          </a>`;
+        },
+        bannerStyle(b) {
+          const c = /^#[0-9a-f]{3,8}$/i.test(String(b.color || '')) ? b.color : '#1a336a';
+          return `background-image:linear-gradient(110deg, ${c} 0%, rgb(var(--shop-primary-950)) 85%)`;
+        },
+
+        init() {
+          this.contact = SHOP.contact();
+          this.pageUrl = location.href;
+          const slug = utils.qs('slug');
+          const found = slug ? SHOP.page(slug) : null;
+          const site = SHOP.site().name || 'Abbott Mobile';
+
+          if (found) {
+            this.page = found;
+            // SHOP.sanitize() is the ONE sanctioned x-html of stored HTML (strips script/style/iframe,
+            // on*= handlers and javascript: URLs) — see the shop.js header.
+            this.html = SHOP.sanitize(found.content_html || '<p>This page has no content yet.</p>');
+            this.blocks = Array.isArray(found.blocks) ? found.blocks : [];
+            document.title = found.title + ' · ' + site;
+            this.others = SHOP.pages().filter((p) => p.id !== found.id);
+          } else {
+            document.title = 'Page not found · ' + site;
+            this.others = SHOP.pages();
+          }
+        },
+
+        printPage() { try { window.print(); } catch (e) { SHOP.toast('Use your browser menu to print this page.', 'info'); } },
+      };
+    }
+  </script>
+</body>
+</html>

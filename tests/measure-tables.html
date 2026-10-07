@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Measure: table overflow at 400px</title></head>
+<body style="font:13px monospace">
+  <pre id="out">measuring…</pre>
+  <script>
+    // Loads pages in a 400px-wide iframe and reports, for every .table-wrap, how much the table
+    // overflows its scroll container — i.e. what a phone user cannot see without scrolling sideways.
+    const PAGES = [
+      'purchase-order-create.html?id=5',
+      'purchase-order-view.html?id=2',
+      'purchase-orders.html?range=all',
+      'stock-count-view.html?id=2',
+      'stock-counts.html?range=all',
+      'purchases.html?range=all',
+    ];
+    const out = [];
+    const frame = document.createElement('iframe');
+    frame.width = 400; frame.height = 900;
+    frame.style.cssText = 'border:1px solid #ccc;width:400px;height:900px';
+    document.body.appendChild(frame);
+
+    function measure(page) {
+      return new Promise((resolve) => {
+        frame.onload = () => setTimeout(() => {
+          try {
+            const d = frame.contentDocument;
+            const wraps = [...d.querySelectorAll('.table-wrap')];
+            const lines = wraps.map((w, i) => {
+              const t = w.querySelector('table');
+              const hidden = t ? Math.max(0, t.scrollWidth - w.clientWidth) : 0;
+              const heads = t ? [...t.querySelectorAll('thead th')].filter((th) => th.offsetParent !== null).map((th) => th.textContent.trim() || '·') : [];
+              const visible = t ? heads.filter((h, hi) => {
+                const th = [...t.querySelectorAll('thead th')].filter((x) => x.offsetParent !== null)[hi];
+                return th && th.getBoundingClientRect().right <= w.getBoundingClientRect().right + 1;
+              }) : [];
+              return `  table ${i + 1}: wrap=${w.clientWidth} table=${t ? t.scrollWidth : 0} hidden=${hidden}px | columns ${heads.length}, fully visible ${visible.length}: ${visible.join(', ')}`;
+            });
+            out.push(page + (wraps.length ? '\n' + lines.join('\n') : '  (no .table-wrap)'));
+          } catch (e) { out.push(page + '  ERROR ' + e.message); }
+          resolve();
+        }, 1400);
+        frame.src = '../' + page;
+      });
+    }
+
+    (async () => {
+      for (const p of PAGES) await measure(p);
+      document.getElementById('out').textContent = out.join('\n\n');
+      out.forEach((l) => l.split('\n').forEach((x) => console.log('MEASURE ' + x)));
+      console.log('MEASURE done');
+    })();
+  </script>
+</body>
+</html>

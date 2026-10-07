@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: purchase orders</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the purchase-order lifecycle (order -> partial delivery -> completion -> cancelled receipt)
+    // through the real ABM services, mirroring exactly what purchase-create.html / purchase-view.html do.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || match.test(e.message), e.message); } }
+      var db = ABM.db, stock = ABM.stock, ledger = ABM.ledger, utils = ABM.utils;
+
+      /* ---- valid units to scan in, the way the receiving page would ---- */
+      var unitSeq = 0;
+      function luhn(d14) { var sum = 0; for (var i = 0; i < 14; i++) { var d = +d14[i]; if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; } sum += d; } return String((10 - (sum % 10)) % 10); }
+      function newUnit(product) {
+        unitSeq++;
+        if (db.serialType(product) === 'serial') return 'POTEST' + String(unitSeq).padStart(4, '0');
+        var base = '35' + String(700000000000 + unitSeq).slice(0, 12);
+        return base + luhn(base);
+      }
+      function unitsFor(item, qty) { var p = db.find('products', item.product_id), out = []; if (!db.isSerialized(p)) return []; for (var i = 0; i < qty; i++) out.push(newUnit(p)); return out; }
+
+      /* ---- the receiving routine from purchase-create.html, in one place ---- */
+      function receive(poId, qtyByItemId) {
+        var po = db.find('purchase_orders', poId);
+        if (!po) throw new Error('order not found');
+        if (['ordered', 'partial'].indexOf(po.status) < 0) throw new Error('order ' + po.po_no + ' is not open for delivery');
+        var branchId = po.branch_id, no = db.nextNumber('PUR', db.branchCode(branchId));
+        var poItems = db.where('purchase_order_items', { po_id: po.id });
+        var subtotal = 0, units = 0;
+        poItems.forEach(function (it) { var q = Number(qtyByItemId[it.id]) || 0; subtotal += q * it.unit_cost; units += q; });
+        subtotal = utils.round2(subtotal);
+        var purchase = db.insert('purchases', {
+          purchase_no: no, branch_id: branchId, supplier_id: po.supplier_id, supplier_invoice_no: '', purchase_date: utils.today(),
+          subtotal: subtotal, discount_amount: 0, tax_amount: 0, total: subtotal, paid_amount: 0, status: 'received',
+          purchase_order_id: po.id, notes: po.po_no, created_by: 1,
+        });
+        var serials = {};
+        poItems.forEach(function (it) {
+          var qty = Number(qtyByItemId[it.id]) || 0;
+          if (!qty) return;
+          var product = db.find('products', it.product_id);
+          var list = unitsFor(it, qty);
+          serials[it.id] = list;
+          var item = db.insert('purchase_items', { purchase_id: purchase.id, product_id: it.product_id, quantity: qty, unit_cost: it.unit_cost, total: utils.round2(qty * it.unit_cost), imeis: list });
+          if (db.isSerialized(product)) stock.addImeis(branchId, it.product_id, list, it.unit_cost, 'purchase', { type: 'purchase', id: purchase.id, purchaseItemId: item.id });
+          else stock.add(branchId, it.product_id, qty, it.unit_cost, 'purchase', { type: 'purchase', id: purchase.id }, null, 'Purchase ' + no);
+          db.update('purchase_order_items', it.id, { received_quantity: Math.max(0, Number(it.received_quantity) || 0) + qty });
+        });
+        var after = db.where('purchase_order_items', { po_id: po.id });
+        var outstanding = after.reduce(function (a, i) { return a + Math.max(0, i.quantity - i.received_quantity); }, 0);
+        var status = outstanding > 0 ? 'partial' : 'completed';
+        db.update('purchase_orders', po.id, { status: status, closed_at: status === 'completed' ? utils.now() : null });
+        ledger.supplier(po.supplier_id, branchId, 'purchase', 0, subtotal, { referenceType: 'purchase', referenceId: purchase.id, notes: 'Purchase ' + no + ' against ' + po.po_no });
+        return { purchase: purchase, units: units, outstanding: outstanding, status: status, serials: serials };
+      }
+
+      /* ---- the reopen routine from purchase-view.html cancelPurchase() ---- */
+      function reopen(purchaseId) {
+        var cur = db.find('purchases', purchaseId);
+        var order = db.find('purchase_orders', cur.purchase_order_id);
+        var poItems = db.where('purchase_order_items', { po_id: order.id });
+        db.where('purchase_items', { purchase_id: cur.id }).forEach(function (it) {
+          var poIt = poItems.filter(function (i) { return String(i.product_id) === String(it.product_id); })[0];
+          if (!poIt) return;
+          db.update('purchase_order_items', poIt.id, { received_quantity: Math.max(0, (Number(poIt.received_quantity) || 0) - it.quantity) });
+        });
+        db.update('purchases', cur.id, { status: 'cancelled' });
+        if (order.status === 'cancelled') return order;
+        var after = db.where('purchase_order_items', { po_id: order.id });
+        var receivedTotal = after.reduce(function (a, i) { return a + (Number(i.received_quantity) || 0); }, 0);
+        var outstanding = after.reduce(function (a, i) { return a + Math.max(0, i.quantity - i.received_quantity); }, 0);
+        var status = outstanding <= 0 ? 'completed' : receivedTotal > 0 ? 'partial' : 'ordered';
+        return db.update('purchase_orders', order.id, { status: status, closed_at: status === 'completed' ? order.closed_at : null });
+      }
+
+      var lines = function (p) { return db.where('purchase_order_items', { po_id: p.id }); };
+      var rec = function (p) { return lines(p).reduce(function (a, i) { return a + i.received_quantity; }, 0); };
+      var ord = function (p) { return lines(p).reduce(function (a, i) { return a + i.quantity; }, 0); };
+      var remaining = function (p) { var q = {}; lines(p).forEach(function (i) { var r = Math.max(0, i.quantity - i.received_quantity); if (r) q[i.id] = r; }); return q; };
+
+      try {
+        db.reset();
+
+        /* ---------------- seed ---------------- */
+        var pos = db.all('purchase_orders');
+        ok('seed ships purchase orders', pos.length >= 5, pos.length + ' orders');
+        ok('every order has a number', pos.every(function (p) { return /^PO-[A-Z0-9]+-\d{6}$/.test(p.po_no); }));
+        ok('every order has lines', pos.every(function (p) { return lines(p).length > 0; }));
+        ok('order totals match their lines', pos.every(function (p) {
+          var sum = utils.round2(lines(p).reduce(function (a, i) { return a + i.total; }, 0));
+          return Math.abs(sum - p.subtotal) < 0.01 && Math.abs(p.total - utils.round2(p.subtotal - p.discount_amount + p.tax_amount)) < 0.01;
+        }));
+        ['draft', 'ordered', 'partial', 'completed', 'cancelled'].forEach(function (s) {
+          ok('seed covers the ' + s + ' state', pos.some(function (p) { return p.status === s; }));
+        });
+
+        var completed = pos.filter(function (p) { return p.status === 'completed'; })[0];
+        var partial = pos.filter(function (p) { return p.status === 'partial'; })[0];
+        var open = pos.filter(function (p) { return p.status === 'ordered'; })[0];
+        var draft = pos.filter(function (p) { return p.status === 'draft'; })[0];
+        var cancelled = pos.filter(function (p) { return p.status === 'cancelled'; })[0];
+
+        ok('a completed order is fully received', rec(completed) === ord(completed), rec(completed) + '/' + ord(completed));
+        ok('a partial order is part received', rec(partial) > 0 && rec(partial) < ord(partial), rec(partial) + '/' + ord(partial));
+        ok('an open order has nothing received', rec(open) === 0);
+        ok('a draft has nothing received and was never sent', rec(draft) === 0 && !draft.ordered_at);
+        ok('a cancelled order keeps its lines', lines(cancelled).length > 0);
+        ok('received orders link to their goods received note', db.all('purchases').some(function (p) { return String(p.purchase_order_id) === String(completed.id); }));
+        ok('a partially delivered order links to its first delivery', db.all('purchases').some(function (p) { return String(p.purchase_order_id) === String(partial.id); }));
+        ok('an overdue order exists for the dashboard', pos.some(function (p) {
+          return (p.status === 'ordered' || p.status === 'partial') && p.expected_date && p.expected_date < utils.today();
+        }));
+        ok('drafts and cancelled orders never carry a closed stamp', pos.every(function (p) {
+          return !(p.status === 'draft' || p.status === 'cancelled') || !p.closed_at;
+        }));
+
+        /* ---------------- document numbering ---------------- */
+        var nextPo = db.nextNumber('PO', db.branchCode(1));
+        ok('a new PO number never collides with a seeded one', !pos.some(function (p) { return p.po_no === nextPo; }), nextPo);
+        var nextSrt = db.nextNumber('SRT', db.branchCode(1));
+        ok('a new supplier-return number never collides either', !db.all('supplier_returns').some(function (r) { return r.return_no === nextSrt; }), nextSrt);
+
+        /* ---------------- partial delivery against an open order ---------------- */
+        var target = db.find('purchase_orders', open.id);
+        var its = lines(target);
+        var serialLine = its.filter(function (i) { return db.isSerialized(db.find('products', i.product_id)); })[0];
+        var bulkLine = its.filter(function (i) { return !db.isSerialized(db.find('products', i.product_id)); })[0];
+        ok('the open order mixes serialized and bulk lines', !!serialLine && !!bulkLine);
+
+        var supplierBefore = db.find('suppliers', target.supplier_id).balance;
+        var bulkQtyBefore = db.stockQty(target.branch_id, bulkLine.product_id);
+        var serialQtyBefore = db.stockQty(target.branch_id, serialLine.product_id);
+        var orderedTotal = ord(target);
+
+        var q1 = {}; q1[serialLine.id] = 2; q1[bulkLine.id] = 1;
+        var first = receive(target.id, q1);
+
+        ok('a part delivery leaves the order partial', first.status === 'partial', first.status);
+        ok('units still outstanding are counted', first.outstanding === orderedTotal - 3, 'outstanding=' + first.outstanding);
+        ok('bulk stock went up by what arrived', db.stockQty(target.branch_id, bulkLine.product_id) === bulkQtyBefore + 1);
+        ok('serialized stock went up by what arrived', db.stockQty(target.branch_id, serialLine.product_id) === serialQtyBefore + 2);
+        ok('each scanned unit is registered and sellable', first.serials[serialLine.id].every(function (s) { return !!stock.findSellable(s, target.branch_id); }));
+        ok('the order line records what was received', db.find('purchase_order_items', serialLine.id).received_quantity === 2);
+        ok('untouched lines stay at zero', its.filter(function (i) { return i.id !== serialLine.id && i.id !== bulkLine.id; })
+          .every(function (i) { return db.find('purchase_order_items', i.id).received_quantity === 0; }));
+        ok('the delivery is booked to the supplier ledger once', db.all('supplier_transactions').filter(function (t) {
+          return t.reference_type === 'purchase' && String(t.reference_id) === String(first.purchase.id) && t.type === 'purchase';
+        }).length === 1);
+        ok('the supplier is owed the delivered value', Math.abs(db.find('suppliers', target.supplier_id).balance - (supplierBefore + first.purchase.total)) < 0.01,
+          supplierBefore + ' -> ' + db.find('suppliers', target.supplier_id).balance);
+        ok('the delivery is valued at the agreed order cost', Math.abs(first.purchase.total - utils.round2(serialLine.unit_cost * 2 + bulkLine.unit_cost)) < 0.01);
+        ok('the receipt points back at the order', db.find('purchases', first.purchase.id).purchase_order_id === target.id);
+        ok('the order is not closed while units are outstanding', !db.find('purchase_orders', target.id).closed_at);
+
+        /* ---------------- balance delivery closes the order ---------------- */
+        var second = receive(target.id, remaining(target));
+        ok('the balance delivery closes the order', db.find('purchase_orders', target.id).status === 'completed', second.status);
+        ok('a completed order is stamped closed', !!db.find('purchase_orders', target.id).closed_at);
+        ok('nothing is left outstanding', second.outstanding === 0 && rec(target) === orderedTotal, rec(target) + '/' + orderedTotal);
+        ok('the whole order arrived in two deliveries', db.all('purchases').filter(function (p) { return String(p.purchase_order_id) === String(target.id); }).length === 2);
+        throws('a closed order cannot be received again', function () { receive(target.id, { 1: 1 }); }, /not open/);
+
+        /* ---------------- cancelling a delivery reopens the order ---------------- */
+        var reopened = reopen(second.purchase.id);
+        ok('cancelling a delivery puts the order back to partial', reopened.status === 'partial', reopened.status);
+        ok('reopening clears the closed stamp', !reopened.closed_at);
+        ok('the cancelled delivery no longer counts as received', rec(db.find('purchase_orders', target.id)) === 3, rec(db.find('purchase_orders', target.id)) + ' units');
+        ok('the order is receivable again', ['ordered', 'partial'].indexOf(db.find('purchase_orders', target.id).status) >= 0);
+        var again = receive(target.id, remaining(target));
+        ok('the balance can be delivered a second time', db.find('purchase_orders', target.id).status === 'completed', again.status);
+
+        /* ---------------- guards ---------------- */
+        throws('a draft cannot be received against', function () { receive(draft.id, {}); }, /not open/);
+        throws('a cancelled order cannot be received against', function () { receive(cancelled.id, {}); }, /not open/);
+
+        /* ---------------- sending a draft, then closing it short ---------------- */
+        db.update('purchase_orders', draft.id, { status: 'ordered', ordered_at: utils.now() });
+        ok('a sent draft becomes receivable', db.find('purchase_orders', draft.id).status === 'ordered');
+        var draftLine = lines(draft)[0];
+        var one = {}; one[draftLine.id] = 1;
+        var partialDraft = receive(draft.id, one);
+        ok('receiving one line of a fresh order marks it partial', partialDraft.status === 'partial', partialDraft.status);
+        ok('the short-delivered line is tracked', db.find('purchase_order_items', draftLine.id).received_quantity === 1);
+        db.update('purchase_orders', draft.id, { status: 'completed', closed_at: utils.now() });   // "Close order" on purchase-order-view
+        ok('closing short leaves the undelivered units unreceived', lines(draft).some(function (i) { return i.received_quantity < i.quantity; }));
+        throws('a short-closed order is no longer receivable', function () { receive(draft.id, one); }, /not open/);
+
+        /* ---------------- reporting consistency ---------------- */
+        ok('no order line ever goes negative', db.all('purchase_order_items').every(function (i) { return i.received_quantity >= 0; }));
+        ok('every receipt links to an order that exists', db.all('purchases').every(function (p) {
+          return !p.purchase_order_id || !!db.find('purchase_orders', p.purchase_order_id);
+        }));
+        ok('stock movements were written for each delivery', db.all('stock_movements').some(function (m) {
+          return m.movement_type === 'purchase' && String(m.reference_id) === String(first.purchase.id);
+        }));
+        ok('completed orders always have every line satisfied or were closed by hand', db.all('purchase_orders')
+          .filter(function (p) { return p.status === 'completed'; })
+          .every(function (p) { return !!p.closed_at; }));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

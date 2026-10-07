@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test: Alpine select fix</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body data-public>
+  <!-- Reproduces the reported bug: a select whose options come from x-for, bound to a non-first value. -->
+  <div x-data="{ branch: '2', method: 'jazzcash', branches: [{id:1,name:'Main Branch'},{id:2,name:'Branch 2'},{id:3,name:'Branch 3'}], methods: ['cash','card','jazzcash','easypaisa'] }">
+    <select id="s1" x-model="branch">
+      <option value="all">All branches</option>
+      <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+    </select>
+    <select id="s2" x-model="method">
+      <template x-for="m in methods" :key="m"><option :value="m" x-text="m"></option></template>
+    </select>
+    <select id="s3" x-model="branch">
+      <option value="all">All branches</option>
+      <option value="1">Main Branch</option>
+      <option value="2">Branch 2</option>
+    </select>
+  </div>
+  <pre id="out">…</pre>
+  <script>
+    setTimeout(() => {
+      const r = ['s1 (x-for, value 2) = ' + document.getElementById('s1').value,
+                 's2 (x-for only, value jazzcash) = ' + document.getElementById('s2').value,
+                 's3 (static, value 2) = ' + document.getElementById('s3').value];
+      const ok = document.getElementById('s1').value === '2' && document.getElementById('s2').value === 'jazzcash' && document.getElementById('s3').value === '2';
+      r.push(ok ? 'RESULT: PASS' : 'RESULT: FAIL');
+      document.getElementById('out').textContent = r.join('\n');
+      console.log('SELECTFIX ' + r.join(' | '));
+    }, 1500);
+  </script>
+</body>
+</html>

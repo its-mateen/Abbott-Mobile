@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Supplier · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block !important; }
+      .no-print { display: none !important; }
+      .stmt table { border-collapse: collapse; width: 100%; }
+      .stmt th, .stmt td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; vertical-align: top; }
+      .stmt th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+      .stmt .num { text-align: right; font-variant-numeric: tabular-nums; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="supplier-view" data-title="Supplier" data-perm="suppliers.view">
+  <main x-data="supplierViewPage()" @keydown.escape.window="closeModals()">
+
+    <!-- Not found -->
+    <template x-if="!s">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('store','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Supplier not found</h2>
+          <p class="text-sm text-slate-600 mt-2">No supplier matches id <span class="mono" x-text="requestedId || '(none)'"></span>. It may have been deleted or the link is wrong.</p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap">
+            <a href="suppliers.html" class="btn btn-primary"><span x-html="ABM.icon('store')"></span>Back to suppliers</a>
+            <a href="purchases.html" class="btn btn-secondary"><span x-html="ABM.icon('truck')"></span>Purchases</a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="s">
+      <div>
+        <div class="no-print">
+          <!-- Page header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="suppliers.html" class="hover:text-navy-700">Suppliers</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>Account</span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title truncate" x-text="s.name"></h2>
+                <span class="badge badge-red" x-show="!s.is_active">Inactive</span>
+                <span class="badge" :class="s.balance > 0 ? 'badge-red' : s.balance < 0 ? 'badge-purple' : 'badge-green'" x-text="s.balance > 0 ? 'Payable ' + $money(s.balance, {decimals:0}) : s.balance < 0 ? 'Advance ' + $money(-s.balance, {decimals:0}) : 'Settled'"></span>
+              </div>
+              <p class="page-subtitle">
+                <span x-show="s.contact_person"><b class="text-slate-700" x-text="s.contact_person"></b> · </span><span x-show="s.phone"><span x-text="s.phone"></span> · </span><span x-text="allPurchases.length"></span> lifetime purchase<span x-text="allPurchases.length === 1 ? '' : 's'"></span> worth <b class="text-slate-700" x-text="$money(lifetimeValue, {decimals:0})"></b>
+              </p>
+            </div>
+            <div class="page-actions">
+              <a :href="'purchase-create.html?supplier=' + s.id" class="btn btn-primary" x-show="canPurchase && s.is_active"><span x-html="ABM.icon('truck')"></span>New purchase</a>
+              <button type="button" class="btn btn-money" x-show="canPay && s.balance > 0" @click="openPay()"><span x-html="ABM.icon('banknotes')"></span>Pay supplier</button>
+              <button type="button" class="btn btn-secondary" @click="printStatement()"><span x-html="ABM.icon('printer')"></span>Print statement</button>
+              <a :href="'suppliers.html?edit=' + s.id" class="btn btn-secondary" x-show="canManage"><span x-html="ABM.icon('edit')"></span>Edit</a>
+            </div>
+          </div>
+
+          <!-- Profile + payable -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Profile -->
+            <div class="card min-w-0">
+              <div class="card-header"><div class="card-title">Profile</div><span class="badge" :class="s.is_active ? 'badge-green' : 'badge-red'" x-text="s.is_active ? 'Active' : 'Inactive'"></span></div>
+              <div class="card-body">
+                <div class="flex items-center gap-3 mb-4 min-w-0">
+                  <div class="chip chip-navy !w-12 !h-12 flex-none" x-html="ABM.icon('store','w-6 h-6')"></div>
+                  <div class="min-w-0">
+                    <div class="font-bold text-slate-900 truncate" x-text="s.name"></div>
+                    <div class="text-xs text-slate-500 truncate" x-text="s.contact_person || 'No contact person'"></div>
+                  </div>
+                </div>
+                <dl class="space-y-2.5 text-sm">
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('phone','w-4 h-4')"></span>
+                    <dd class="min-w-0"><a :href="'tel:' + s.phone" class="font-medium text-slate-800 hover:text-navy-700 break-all" x-show="s.phone" x-text="s.phone"></a><span class="text-slate-400" x-show="!s.phone">No phone on file</span></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('mail','w-4 h-4')"></span>
+                    <dd class="min-w-0"><a :href="'mailto:' + s.email" class="text-slate-700 hover:text-navy-700 break-all" x-show="s.email" x-text="s.email"></a><span class="text-slate-400" x-show="!s.email">No email</span></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('map-pin','w-4 h-4')"></span>
+                    <dd class="min-w-0 text-slate-700" x-text="s.address || 'No address'"></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('document','w-4 h-4')"></span>
+                    <dd class="min-w-0 mono text-slate-700" x-text="s.tax_id || 'No tax id'"></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('calendar','w-4 h-4')"></span>
+                    <dd class="min-w-0 text-slate-700">Added <span x-text="$date(s.created_at)"></span></dd>
+                  </div>
+                </dl>
+                <div class="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600" x-show="s.notes">
+                  <div class="font-bold uppercase tracking-wider text-[10px] text-slate-500 mb-1">Notes</div>
+                  <div class="whitespace-pre-line" x-text="s.notes"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Payables -->
+            <div class="card lg:col-span-2 min-w-0">
+              <div class="card-header">
+                <div><div class="card-title">Payables</div><div class="card-subtitle">What we owe this supplier · all branches</div></div>
+                <a href="report-payables.html" class="text-xs font-semibold text-navy-700 hover:underline">Payables report</a>
+              </div>
+              <div class="card-body">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div class="rounded-xl border p-3 min-w-0" :class="outstanding > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'">
+                    <div class="text-[11px] font-bold uppercase tracking-wider" :class="outstanding > 0 ? 'text-rose-600' : 'text-slate-500'">Outstanding</div>
+                    <div class="text-lg font-extrabold tabular break-words" :class="outstanding > 0 ? 'text-rose-600' : 'text-slate-700'" x-text="$money(outstanding, {decimals:0})"></div>
+                    <div class="text-[11px] text-slate-500" x-text="openPurchases.length + ' unpaid purchase' + (openPurchases.length === 1 ? '' : 's')"></div>
+                  </div>
+                  <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Paid this month</div>
+                    <div class="text-lg font-extrabold tabular text-emerald-700 break-words" x-text="$money(month.paid, {decimals:0})"></div>
+                    <div class="text-[11px] text-slate-500" x-text="month.payments + ' payment' + (month.payments === 1 ? '' : 's')"></div>
+                  </div>
+                  <div class="rounded-xl border border-navy-200 bg-navy-50 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-navy-700">Purchases this month</div>
+                    <div class="text-lg font-extrabold tabular text-navy-800 break-words" x-text="$money(month.purchased, {decimals:0})"></div>
+                    <div class="text-[11px] text-slate-500" x-text="month.purchases + ' purchase' + (month.purchases === 1 ? '' : 's')"></div>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Advance / credit</div>
+                    <div class="text-lg font-extrabold tabular text-slate-800 break-words" x-text="$money(advance, {decimals:0})"></div>
+                    <div class="text-[11px] text-slate-500">paid ahead of invoices</div>
+                  </div>
+                </div>
+                <div class="mt-4" x-show="lifetimeValue > 0">
+                  <div class="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+                    <span>Lifetime settled</span>
+                    <span><b class="text-emerald-700" x-text="settledPct + '%'"></b> of <span x-text="$money(lifetimeValue, {decimals:0})"></span> billed</span>
+                  </div>
+                  <div class="progress progress-money"><div :style="'width:' + Math.min(100, settledPct) + '%'"></div></div>
+                </div>
+                <div class="alert alert-warning mt-4" x-show="outstanding > 0 && openPurchases.length"><span x-html="ABM.icon('clock')"></span><div>Oldest unpaid purchase: <b x-text="oldestLabel"></b>. Payments are applied to the oldest purchases first.</div></div>
+                <div class="alert alert-info mt-4" x-show="outstanding > 0 && !openPurchases.length" x-cloak><span x-html="ABM.icon('info')"></span><div>Every purchase you can see here is paid, but the ledger still shows a payable<span x-show="!isSuperAdmin"> — it belongs to another branch's purchases</span>. A payment recorded here is posted to the ledger on account.</div></div>
+                <div class="alert alert-success mt-4" x-show="outstanding <= 0"><span x-html="ABM.icon('check-circle')"></span><div>All invoices from this supplier are settled.</div></div>
+              </div>
+              <div class="card-footer flex flex-wrap gap-2">
+                <button type="button" class="btn btn-money btn-sm" x-show="canPay" @click="openPay()"><span x-html="ABM.icon('banknotes')"></span>Pay supplier</button>
+                <a :href="'purchase-create.html?supplier=' + s.id" class="btn btn-secondary btn-sm" x-show="canPurchase && s.is_active"><span x-html="ABM.icon('truck')"></span>New purchase</a>
+                <button type="button" class="btn btn-secondary btn-sm" data-open-adjust x-show="canManage" @click="openAdjust()"><span x-html="ABM.icon('scale')"></span>Adjustment</button>
+                <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="printStatement()"><span x-html="ABM.icon('printer')"></span>Statement</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="card mt-4">
+            <div class="px-4 sm:px-5 pt-3">
+              <div class="tabs">
+                <template x-for="t in tabs" :key="t.key">
+                  <button type="button" class="tab" :class="tab === t.key && 'active'" @click="tab = t.key">
+                    <span x-text="t.label"></span><span class="count" x-text="tabCounts[t.key]"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+            <div class="card-body !py-3 border-b border-slate-200">
+              <div class="range-bar">
+                <div class="tabs-pill">
+                  <template x-for="p in range.presets" :key="p.key">
+                    <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+                  </template>
+                </div>
+                <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+                  <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+                  <span class="text-xs text-slate-500">to</span>
+                  <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+                </div>
+                <span class="range-label" x-text="range.label"></span>
+                <span class="text-xs text-slate-400 hidden md:inline" x-show="tab === 'products'">Products tab is not date filtered</span>
+                <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-ghost btn-sm ml-auto" @click="exportCsv()"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+              </div>
+            </div>
+
+            <!-- LEDGER -->
+            <div x-show="tab === 'ledger'">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th class="hidden md:table-cell">Reference</th>
+                      <th class="hidden xl:table-cell" x-show="showBranch">Branch</th>
+                      <th class="hidden lg:table-cell">Method</th>
+                      <th class="hidden 2xl:table-cell">Notes</th>
+                      <th class="num">Paid</th>
+                      <th class="num">Billed</th>
+                      <th class="num">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="bg-slate-50">
+                      <td class="font-semibold text-slate-700" x-text="range.value.from ? $date(range.value.from) : 'Start'"></td>
+                      <td colspan="2" class="font-semibold text-slate-700">Opening balance</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="hidden lg:table-cell"></td>
+                      <td class="hidden 2xl:table-cell"></td>
+                      <td class="num text-slate-400">—</td>
+                      <td class="num text-slate-400">—</td>
+                      <td class="num font-bold" :class="opening > 0 ? 'text-rose-600' : opening < 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="$money(opening)"></td>
+                    </tr>
+                    <template x-for="t in ledger" :key="t.id">
+                      <tr>
+                        <td class="whitespace-nowrap">
+                          <div class="text-slate-800" x-text="$date(t.created_at)"></div>
+                          <div class="text-[11px] text-slate-400" x-text="ABM.utils.time(t.created_at)"></div>
+                        </td>
+                        <td><span x-html="$badge(t.type)"></span></td>
+                        <td class="hidden md:table-cell whitespace-nowrap">
+                          <template x-if="t.link"><a :href="t.link" class="mono text-navy-700 hover:underline" x-text="t.refLabel"></a></template>
+                          <template x-if="!t.link"><span class="text-slate-400" x-text="t.refLabel || '—'"></span></template>
+                        </td>
+                        <td class="hidden xl:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="ABM.db.branchCode(t.branch_id)"></span></td>
+                        <td class="hidden lg:table-cell"><span x-show="t.payment_method" x-html="$badge(t.payment_method)"></span><span class="text-slate-400" x-show="!t.payment_method">—</span></td>
+                        <td class="hidden 2xl:table-cell"><div class="max-w-[16rem] truncate text-slate-500" x-text="t.notes || '—'"></div></td>
+                        <td class="num whitespace-nowrap" :class="t.debit ? 'text-emerald-700 font-semibold' : 'text-slate-300'" x-text="t.debit ? $money(t.debit) : '—'"></td>
+                        <td class="num whitespace-nowrap" :class="t.credit ? 'text-rose-600 font-semibold' : 'text-slate-300'" x-text="t.credit ? $money(t.credit) : '—'"></td>
+                        <td class="num whitespace-nowrap font-semibold" :class="t.running > 0 ? 'text-rose-600' : t.running < 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="$money(t.running)"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!ledger.length">
+                      <tr><td colspan="9"><div class="empty"><span x-html="ABM.icon('document')"></span><div class="empty-title">No ledger entries in this period</div><div class="text-sm mt-1">Purchases, payments, returns and adjustments appear here.</div><button type="button" class="btn btn-secondary btn-sm mt-4" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button></div></td></tr>
+                    </template>
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colspan="3">Period totals</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="hidden lg:table-cell"></td>
+                      <td class="hidden 2xl:table-cell"></td>
+                      <td class="num text-emerald-700 whitespace-nowrap" x-text="$money(totals.debit)"></td>
+                      <td class="num text-rose-600 whitespace-nowrap" x-text="$money(totals.credit)"></td>
+                      <td class="num whitespace-nowrap" :class="closing > 0 ? 'text-rose-600' : closing < 0 ? 'text-emerald-700' : ''" x-text="$money(closing)"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div class="card-footer text-xs text-slate-500">Billed (credit) increases what we owe · paid (debit) reduces it. Closing balance <b :class="closing > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(closing)"></b> <span x-text="closing > 0 ? '(payable)' : closing < 0 ? '(advance)' : ''"></span></div>
+            </div>
+
+            <!-- PURCHASES -->
+            <div x-show="tab === 'purchases'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Purchase</th><th class="hidden sm:table-cell">Date</th><th class="hidden xl:table-cell" x-show="showBranch">Branch</th><th class="num hidden lg:table-cell">Lines</th><th class="num hidden lg:table-cell">Units</th><th class="num">Total</th><th class="num hidden md:table-cell">Paid</th><th class="num">Due</th><th class="hidden sm:table-cell">Status</th><th class="actions">Actions</th></tr></thead>
+                  <tbody>
+                    <template x-for="p in purchases" :key="p.id">
+                      <tr :class="p.status === 'cancelled' && 'opacity-60'">
+                        <td>
+                          <a :href="'purchase-view.html?id=' + p.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="p.purchase_no"></a>
+                          <div class="text-[11px] text-slate-400 sm:hidden" x-text="$date(p.purchase_date)"></div>
+                          <div class="text-[11px] text-slate-400 truncate max-w-[9rem]" x-show="p.supplier_invoice_no">Inv. <span x-text="p.supplier_invoice_no"></span></div>
+                        </td>
+                        <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(p.purchase_date)"></td>
+                        <td class="hidden xl:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="ABM.db.branchCode(p.branch_id)"></span></td>
+                        <td class="num hidden lg:table-cell text-slate-600" x-text="p.lines"></td>
+                        <td class="num hidden lg:table-cell text-slate-600" x-text="ABM.utils.num(p.units)"></td>
+                        <td class="num font-semibold whitespace-nowrap" x-text="$money(p.total, {decimals:0})"></td>
+                        <td class="num hidden md:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(p.paid_amount, {decimals:0})"></td>
+                        <td class="num whitespace-nowrap" :class="p.due > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-text="p.due > 0 ? $money(p.due, {decimals:0}) : '—'"></td>
+                        <td class="hidden sm:table-cell"><span x-html="$badge(p.status)"></span></td>
+                        <td class="actions"><div class="inline-flex items-center gap-0.5">
+                          <a :href="'purchase-view.html?id=' + p.id" class="btn btn-ghost btn-sm btn-icon" title="Open purchase" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                          <a :href="'purchase-view.html?id=' + p.id + '&print=1'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print goods received note" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                        </div></td>
+                      </tr>
+                    </template>
+                    <template x-if="!purchases.length"><tr><td colspan="10"><div class="empty"><span x-html="ABM.icon('truck')"></span><div class="empty-title">No purchases in this period</div><div class="mt-4 flex justify-center gap-2 flex-wrap"><button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button><a :href="'purchase-create.html?supplier=' + s.id" class="btn btn-primary btn-sm" x-show="canPurchase && s.is_active">Receive stock</a></div></div></td></tr></template>
+                  </tbody>
+                  <tfoot x-show="purchases.length">
+                    <tr>
+                      <td colspan="2">Totals</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="num hidden lg:table-cell" x-text="purchaseTotals.lines"></td>
+                      <td class="num hidden lg:table-cell" x-text="ABM.utils.num(purchaseTotals.units)"></td>
+                      <td class="num whitespace-nowrap" x-text="$money(purchaseTotals.total, {decimals:0})"></td>
+                      <td class="num hidden md:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(purchaseTotals.paid, {decimals:0})"></td>
+                      <td class="num text-rose-600 whitespace-nowrap" x-text="$money(purchaseTotals.due, {decimals:0})"></td>
+                      <td class="hidden sm:table-cell"></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- PAYMENTS -->
+            <div x-show="tab === 'payments'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Date</th><th class="hidden md:table-cell">Against</th><th>Method</th><th class="hidden lg:table-cell">Reference</th><th class="hidden xl:table-cell" x-show="showBranch">Branch</th><th class="hidden xl:table-cell">Recorded by</th><th class="num">Amount</th></tr></thead>
+                  <tbody>
+                    <template x-for="p in payments" :key="p.id">
+                      <tr>
+                        <td class="whitespace-nowrap"><div class="text-slate-800" x-text="$date(p.created_at)"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(p.created_at)"></div></td>
+                        <td class="hidden md:table-cell whitespace-nowrap">
+                          <template x-if="p.link"><a :href="p.link" class="mono text-navy-700 hover:underline" x-text="p.refLabel"></a></template>
+                          <template x-if="!p.link"><span class="text-slate-400" x-text="p.refLabel || 'On account'"></span></template>
+                        </td>
+                        <td><span x-html="$badge(p.payment_method || 'cash')"></span></td>
+                        <td class="hidden lg:table-cell mono text-xs text-slate-500" x-text="p.payment_reference || '—'"></td>
+                        <td class="hidden xl:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="ABM.db.branchCode(p.branch_id)"></span></td>
+                        <td class="hidden xl:table-cell text-slate-600" x-text="p.created_by ? ABM.db.userName(p.created_by) : '—'"></td>
+                        <td class="num font-semibold text-emerald-700 whitespace-nowrap" x-text="$money(p.debit, {decimals:0})"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!payments.length"><tr><td colspan="7"><div class="empty"><span x-html="ABM.icon('banknotes')"></span><div class="empty-title">No payments in this period</div><div class="mt-4 flex justify-center gap-2 flex-wrap"><button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button><button type="button" class="btn btn-money btn-sm" x-show="canPay && s.balance > 0" @click="openPay()">Pay supplier</button></div></div></td></tr></template>
+                  </tbody>
+                  <tfoot x-show="payments.length">
+                    <tr>
+                      <td>Total paid</td>
+                      <td class="hidden md:table-cell"></td>
+                      <td></td>
+                      <td class="hidden lg:table-cell"></td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="hidden xl:table-cell"></td>
+                      <td class="num text-emerald-700 whitespace-nowrap" x-text="$money(ABM.utils.sum(payments, 'debit'), {decimals:0})"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- PRODUCTS SUPPLIED -->
+            <div x-show="tab === 'products'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Product</th><th class="hidden lg:table-cell">SKU</th><th class="hidden md:table-cell">Type</th><th class="num hidden xl:table-cell">Cost</th><th class="num hidden sm:table-cell">Retail</th><th class="num">Stock</th><th class="actions">Actions</th></tr></thead>
+                  <tbody>
+                    <template x-for="p in products" :key="p.id">
+                      <tr :class="!p.is_active && 'opacity-60'">
+                        <td>
+                          <div class="min-w-0 max-w-[14rem] sm:max-w-[20rem]">
+                            <a :href="'product-view.html?id=' + p.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate" x-text="p.label"></a>
+                            <div class="text-[11px] text-slate-400 truncate"><span x-text="ABM.db.brandName(p.brand_id)"></span> · <span x-text="ABM.db.categoryName(p.category_id)"></span><span class="lg:hidden" x-show="p.sku"> · <span class="mono" x-text="p.sku"></span></span></div>
+                          </div>
+                        </td>
+                        <td class="hidden lg:table-cell mono text-xs text-slate-500" x-text="p.sku || '—'"></td>
+                        <td class="hidden md:table-cell"><span x-html="$badge(p.ptype)"></span></td>
+                        <td class="num hidden xl:table-cell whitespace-nowrap text-slate-600" x-text="$money(p.cost_price, {decimals:0})"></td>
+                        <td class="num hidden sm:table-cell whitespace-nowrap font-semibold" x-text="$money(p.retail_price, {decimals:0})"></td>
+                        <td class="num whitespace-nowrap">
+                          <template x-if="p.tracked">
+                            <span class="badge" :class="p.qty === 0 ? 'badge-red' : p.qty <= p.min_stock ? 'badge-amber' : 'badge-green'" x-text="p.qty"></span>
+                          </template>
+                          <template x-if="!p.tracked"><span class="text-slate-400">—</span></template>
+                        </td>
+                        <td class="actions"><div class="inline-flex items-center gap-0.5">
+                          <a :href="'product-view.html?id=' + p.id" class="btn btn-ghost btn-sm btn-icon" title="Open product" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                          <template x-if="canPurchase && p.tracked && s.is_active">
+                            <a :href="'purchase-create.html?supplier=' + s.id + '&product=' + p.id" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Order this product" x-html="ABM.icon('truck','w-4 h-4')"></a>
+                          </template>
+                        </div></td>
+                      </tr>
+                    </template>
+                    <template x-if="!products.length"><tr><td colspan="7"><div class="empty"><span x-html="ABM.icon('cube')"></span><div class="empty-title">No products linked to this supplier</div><div class="text-sm mt-1">Set the default supplier on a product to see it here.</div><a href="products.html" class="btn btn-secondary btn-sm mt-4">Open catalog</a></div></td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ PRINT STATEMENT -->
+        <div class="print-only print-area stmt text-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-extrabold" x-text="company.name"></div>
+              <div class="text-sm" x-text="branchLine"></div>
+              <div class="text-xs" x-show="company.tax">NTN / Tax ID: <span x-text="company.tax"></span></div>
+            </div>
+            <div class="text-right">
+              <div class="text-lg font-bold">SUPPLIER STATEMENT</div>
+              <div class="text-sm" x-text="range.label"></div>
+              <div class="text-xs" x-text="'Printed ' + ABM.utils.datetime(new Date()) + ' by ' + userName"></div>
+            </div>
+          </div>
+          <div class="border-b border-slate-300 my-3"></div>
+          <div class="flex items-start justify-between gap-6 text-sm">
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Statement for</div>
+              <div class="font-bold" x-text="s.name"></div>
+              <div x-show="s.contact_person" x-text="'Attn: ' + s.contact_person"></div>
+              <div x-show="s.phone" x-text="s.phone"></div>
+              <div x-show="s.address" x-text="s.address"></div>
+              <div x-show="s.tax_id" x-text="s.tax_id"></div>
+            </div>
+            <div class="text-right">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Closing balance</div>
+              <div class="text-lg font-extrabold" x-text="$money(closing)"></div>
+              <div class="text-xs" x-text="closing > 0 ? 'Payable to supplier' : closing < 0 ? 'Advance paid to supplier' : 'Account settled'"></div>
+            </div>
+          </div>
+          <table class="mt-3">
+            <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Notes</th><th class="num">Paid</th><th class="num">Billed</th><th class="num">Balance</th></tr></thead>
+            <tbody>
+              <tr>
+                <td x-text="range.value.from ? ABM.utils.date(range.value.from) : '—'"></td>
+                <td colspan="3"><b>Opening balance</b></td>
+                <td class="num"></td><td class="num"></td>
+                <td class="num" x-text="ABM.utils.money(opening, {symbol:false})"></td>
+              </tr>
+              <template x-for="t in ledger" :key="'p' + t.id">
+                <tr>
+                  <td x-text="$date(t.created_at)"></td>
+                  <td x-text="ABM.ui.statusLabel(t.type)"></td>
+                  <td x-text="t.refLabel || '—'"></td>
+                  <td x-text="t.notes || ''"></td>
+                  <td class="num" x-text="t.debit ? ABM.utils.money(t.debit, {symbol:false}) : ''"></td>
+                  <td class="num" x-text="t.credit ? ABM.utils.money(t.credit, {symbol:false}) : ''"></td>
+                  <td class="num" x-text="ABM.utils.money(t.running, {symbol:false})"></td>
+                </tr>
+              </template>
+              <tr>
+                <td colspan="4"><b>Closing balance</b></td>
+                <td class="num" x-text="ABM.utils.money(totals.debit, {symbol:false})"></td>
+                <td class="num" x-text="ABM.utils.money(totals.credit, {symbol:false})"></td>
+                <td class="num"><b x-text="ABM.utils.money(closing, {symbol:false})"></b></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="text-[10px] mt-4 text-slate-600">
+            Billed amounts increase our payable; payments reduce it. Please confirm this statement and report any discrepancy within 7 days.
+            This statement is computer generated and valid without a signature.
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ PAY SUPPLIER -->
+        <div x-show="pay.open" x-cloak class="modal-backdrop" @click.self="closePay()">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="payTitle">
+            <form @submit.prevent="savePay()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="payTitle">Pay supplier</div>
+                  <div class="text-xs text-slate-500 truncate" x-text="s.name + ' · ' + branchName"></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="closePay()" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="flex flex-wrap gap-2">
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-rose-600">Payable</div><div class="text-sm font-bold text-rose-600 tabular" x-text="$money(outstanding)"></div></div>
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-slate-50 border border-slate-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Unpaid purchases</div><div class="text-sm font-bold text-slate-800 tabular" x-text="openPurchases.length"></div></div>
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Invoice due</div><div class="text-sm font-bold text-emerald-700 tabular" x-text="$money(purchaseDue)"></div></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="sp-amount">Amount <span class="req">*</span></label>
+                    <div class="input-group"><span class="addon addon-left">Rs.</span><input id="sp-amount" x-ref="payAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="pay.amount" :class="pay.errors.amount && 'is-invalid'"></div>
+                    <p class="field-error" x-show="pay.errors.amount" x-text="pay.errors.amount"></p>
+                    <button type="button" class="help text-navy-700 font-semibold hover:underline" x-show="outstanding > 0" @click="pay.amount = outstanding">Pay full balance (<span x-text="$money(outstanding, {decimals:0})"></span>)</button>
+                  </div>
+                  <div>
+                    <label class="label" for="sp-method">Method <span class="req">*</span></label>
+                    <select id="sp-method" class="select" x-model="pay.method" :class="pay.errors.method && 'is-invalid'">
+                      <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+                    </select>
+                    <p class="field-error" x-show="pay.errors.method" x-text="pay.errors.method"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="sp-ref">Reference <span class="text-slate-400 font-normal" x-show="pay.method === 'cash'">(optional)</span><span class="req" x-show="pay.method !== 'cash'">*</span></label>
+                    <input id="sp-ref" type="text" class="input" x-model="pay.reference" :class="pay.errors.reference && 'is-invalid'" placeholder="Cheque no, transaction id…" maxlength="60">
+                    <p class="field-error" x-show="pay.errors.reference" x-text="pay.errors.reference"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="sp-notes">Notes</label>
+                    <input id="sp-notes" type="text" class="input" x-model="pay.notes" placeholder="Optional" maxlength="200">
+                  </div>
+                  <div class="sm:col-span-2" x-show="openPurchases.length">
+                    <label class="flex items-start gap-3 cursor-pointer select-none">
+                      <input type="checkbox" class="checkbox mt-0.5" x-model="pay.allocate">
+                      <span class="min-w-0"><span class="text-sm font-semibold text-slate-800">Allocate to oldest unpaid purchases</span><span class="block text-xs text-slate-500">Settles <span x-text="openPurchases.length"></span> purchase<span x-text="openPurchases.length === 1 ? '' : 's'"></span> (<span x-text="$money(purchaseDue, {decimals:0})"></span> due) starting with <b x-text="oldestLabel"></b>.</span></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="alert alert-success" x-show="Number(pay.amount) > 0 && Number(pay.amount) <= outstanding + 0.005"><span x-html="ABM.icon('check-circle')"></span><div>Remaining payable after this payment: <b x-text="$money(ABM.utils.round2(outstanding - Number(pay.amount || 0)))"></b>.</div></div>
+                <div class="alert alert-warning" x-show="Number(pay.amount) > outstanding + 0.005"><span x-html="ABM.icon('info')"></span><div><b x-text="$money(ABM.utils.round2(Number(pay.amount || 0) - outstanding))"></b> more than the payable — the excess is recorded as an <b>advance</b> against future purchases.</div></div>
+                <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><div>Posted to the supplier ledger for <b x-text="branchName"></b>. Cash payments reduce that branch's drawer at day-end.</div></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="closePay()">Cancel</button>
+                <button type="submit" class="btn btn-money" :disabled="pay.busy"><span x-html="ABM.icon('banknotes')"></span>Record payment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ ADJUSTMENT -->
+        <div x-show="adj.open" x-cloak class="modal-backdrop" @click.self="closeAdjust()">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="sadjTitle">
+            <form @submit.prevent="saveAdjust()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="sadjTitle">Ledger adjustment</div>
+                  <div class="text-xs text-slate-500 truncate" x-text="s.name + ' · current payable ' + $money(s.balance)"></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="closeAdjust()" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div>
+                  <span class="label">Direction <span class="req">*</span></span>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" class="rounded-xl border p-3 text-left" :class="adj.dir === 'increase' ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-slate-300'" @click="adj.dir = 'increase'">
+                      <div class="text-sm font-bold" :class="adj.dir === 'increase' ? 'text-rose-700' : 'text-slate-700'">Increase payable</div>
+                      <div class="text-xs text-slate-500">Credit — we owe more (freight, late fee)</div>
+                    </button>
+                    <button type="button" class="rounded-xl border p-3 text-left" :class="adj.dir === 'decrease' ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'" @click="adj.dir = 'decrease'">
+                      <div class="text-sm font-bold" :class="adj.dir === 'decrease' ? 'text-emerald-700' : 'text-slate-700'">Decrease payable</div>
+                      <div class="text-xs text-slate-500">Debit — discount, credit note, write-off</div>
+                    </button>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="sadj-amount">Amount <span class="req">*</span></label>
+                    <div class="input-group"><span class="addon addon-left">Rs.</span><input id="sadj-amount" x-ref="adjAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="adj.amount" :class="adj.errors.amount && 'is-invalid'"></div>
+                    <p class="field-error" x-show="adj.errors.amount" x-text="adj.errors.amount"></p>
+                  </div>
+                  <div>
+                    <label class="label">New payable</label>
+                    <div class="input bg-slate-50 tabular" :class="projected > 0 ? 'text-rose-600' : projected < 0 ? 'text-emerald-700' : ''" x-text="$money(projected)"></div>
+                    <p class="help" x-text="projected > 0 ? 'Payable' : projected < 0 ? 'Advance paid' : 'Settled'"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="sadj-reason">Reason <span class="req">*</span></label>
+                    <textarea id="sadj-reason" class="textarea" rows="2" maxlength="200" x-model="adj.reason" :class="adj.errors.reason && 'is-invalid'" placeholder="e.g. Credit note CN-1182 for damaged units"></textarea>
+                    <p class="field-error" x-show="adj.errors.reason" x-text="adj.errors.reason"></p>
+                  </div>
+                </div>
+                <div class="alert alert-warning"><span x-html="ABM.icon('warning')"></span><div>Adjustments change the payable without a purchase or payment. They are written to the audit log with your name.</div></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="closeAdjust()">Cancel</button>
+                <button type="submit" class="btn btn-primary" :disabled="adj.busy"><span x-html="ABM.icon('check')"></span>Post adjustment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function supplierViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const METHODS = ['cash', 'bank_transfer', 'card', 'jazzcash', 'easypaisa'];
+      return {
+        requestedId: utils.qs('id', ''),
+        s: null,
+        isSuperAdmin: session.isSuperAdmin(),
+        canManage: session.can('suppliers.edit'),
+        canPay: session.can('suppliers.payments'),
+        canPurchase: session.can('purchases.add'),
+        userName: (session.user() || {}).name || '',
+        branchName: (session.branch() || {}).name || '',
+        methods: METHODS,
+        tabs: [{ key: 'ledger', label: 'Ledger' }, { key: 'purchases', label: 'Purchases' }, { key: 'payments', label: 'Payments' }, { key: 'products', label: 'Products supplied' }],
+        tab: 'ledger', range: null,
+        ledger: [], purchases: [], payments: [], products: [], allPurchases: [], openPurchases: [],
+        opening: 0, closing: 0, totals: { debit: 0, credit: 0 }, month: { paid: 0, payments: 0, purchased: 0, purchases: 0 },
+        company: { name: 'Abbott Mobile', tax: '' }, branchLine: '',
+        pay: { open: false, amount: '', method: 'cash', reference: '', notes: '', allocate: true, errors: {}, busy: false },
+        adj: { open: false, dir: 'increase', amount: '', reason: '', errors: {}, busy: false },
+
+        get showBranch() { return this.isSuperAdmin; },
+        get outstanding() { return this.s && this.s.balance > 0 ? utils.round2(this.s.balance) : 0; },
+        get advance() { return this.s && this.s.balance < 0 ? utils.round2(-this.s.balance) : 0; },
+        get lifetimeValue() { return utils.sum(this.allPurchases.filter((p) => p.status !== 'cancelled'), 'total'); },
+        get lifetimePaid() { return utils.sum(this.allPurchases.filter((p) => p.status !== 'cancelled'), 'paid_amount'); },
+        get settledPct() { const v = this.lifetimeValue; return v > 0 ? Math.round(this.lifetimePaid / v * 100) : 0; },
+        get purchaseDue() { return utils.sum(this.openPurchases, 'due'); },
+        get oldestLabel() { const o = this.openPurchases[0]; return o ? o.purchase_no + ' · ' + utils.date(o.purchase_date) : '—'; },
+        get purchaseTotals() { const live = this.purchases.filter((p) => p.status !== 'cancelled'); return { lines: live.reduce((a, p) => a + p.lines, 0), units: live.reduce((a, p) => a + p.units, 0), total: utils.sum(live, 'total'), paid: utils.sum(live, 'paid_amount'), due: utils.sum(live, 'due') }; },
+        get projected() { const amt = Number(this.adj.amount) || 0; const b = Number(this.s.balance) || 0; return utils.round2(this.adj.dir === 'increase' ? b + amt : b - amt); },
+        get tabCounts() { return { ledger: this.ledger.length, purchases: this.purchases.length, payments: this.payments.length, products: this.products.length }; },
+
+        init() {
+          const s = db.find('suppliers', this.requestedId);
+          if (!s) { this.range = ABM.range('all', null, null); return; }
+          this.s = s;
+          const b = session.branch() || {};
+          this.company = { name: db.setting('company_name') || 'Abbott Mobile', tax: b.tax_id || '' };
+          this.branchLine = [b.name, b.address, b.phone].filter(Boolean).join(' · ');
+          const t = utils.qs('tab', ''); if (this.tabs.some((x) => x.key === t)) this.tab = t;
+          this.range = ABM.range('all', () => this.compute(), 'supplier-ledger');
+          this.compute();
+          document.title = s.name + ' · Abbott Mobile';
+          if (utils.qs('pay') && this.canPay) this.$nextTick(() => this.openPay());
+        },
+
+        /* --------------------------------------------------------- data */
+        inBranch(row) { return this.isSuperAdmin || String(row.branch_id) === String(session.branchId()); },
+        refLink(t) {
+          if (!t.reference_id) return { link: '', label: '' };
+          if (t.reference_type === 'purchase') { const p = db.find('purchases', t.reference_id); return { link: 'purchase-view.html?id=' + t.reference_id, label: p ? p.purchase_no : 'Purchase #' + t.reference_id }; }
+          return { link: '', label: '' };
+        },
+        decorate(p, itemsBy) {
+          const its = itemsBy[p.id] || [];
+          const due = p.status === 'cancelled' ? 0 : utils.round2(Math.max(0, (Number(p.total) || 0) - (Number(p.paid_amount) || 0)));
+          return { ...p, lines: its.length, units: its.reduce((a, i) => a + (Number(i.quantity) || 0), 0), due };
+        },
+        compute() {
+          const id = this.s.id, r = this.range;
+          const itemsBy = {};
+          db.all('purchase_items').forEach((i) => { (itemsBy[i.purchase_id] = itemsBy[i.purchase_id] || []).push(i); });
+
+          const tx = utils.sortBy(db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(id) && this.inBranch(t)), (t) => String(t.created_at) + '|' + String(t.id).padStart(8, '0'));
+          const from = r.value.from;
+          let running = 0;
+          (from ? tx.filter((t) => String(t.created_at).slice(0, 10) < from) : []).forEach((t) => { running = utils.round2(running + (Number(t.credit) || 0) - (Number(t.debit) || 0)); });
+          this.opening = running;
+          const inRange = tx.filter((t) => r.contains(t.created_at));
+          this.ledger = inRange.map((t) => {
+            running = utils.round2(running + (Number(t.credit) || 0) - (Number(t.debit) || 0));
+            const ref = this.refLink(t);
+            return { ...t, running, link: ref.link, refLabel: ref.label };
+          });
+          this.closing = running;
+          this.totals = { debit: utils.sum(inRange, 'debit'), credit: utils.sum(inRange, 'credit') };
+          this.payments = utils.sortBy(this.ledger.filter((t) => t.type === 'payment'), 'created_at', 'desc');
+
+          this.allPurchases = db.all('purchases').filter((p) => String(p.supplier_id) === String(id) && this.inBranch(p)).map((p) => this.decorate(p, itemsBy));
+          this.purchases = utils.sortBy(this.allPurchases.filter((p) => r.contains(p.purchase_date)), (p) => String(p.purchase_date).slice(0, 10) + '|' + String(p.id).padStart(8, '0'), 'desc');
+          this.openPurchases = utils.sortBy(this.allPurchases.filter((p) => p.status !== 'cancelled' && p.due > 0.005), (p) => String(p.purchase_date).slice(0, 10) + '|' + String(p.id).padStart(8, '0'));
+
+          // this calendar month
+          const mFrom = utils.today().slice(0, 7);
+          const mPurch = this.allPurchases.filter((p) => p.status !== 'cancelled' && String(p.purchase_date).slice(0, 7) === mFrom);
+          const mPays = tx.filter((t) => t.type === 'payment' && String(t.created_at).slice(0, 7) === mFrom);
+          this.month = { paid: utils.sum(mPays, 'debit'), payments: mPays.length, purchased: utils.sum(mPurch, 'total'), purchases: mPurch.length };
+
+          const bid = session.branchId();
+          this.products = utils.sortBy(db.all('products').filter((p) => String(p.supplier_id) === String(id)).map((p) => ({
+            ...p, label: db.productLabel(p.id), ptype: db.productType(p), tracked: db.isStockTracked(p), qty: db.stockQty(bid, p.id),
+          })), (p) => String(p.label).toLowerCase());
+        },
+        exportCsv() {
+          const name = String(this.s.name).replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
+          if (this.tab === 'ledger') {
+            const cols = [{ label: 'Date', value: (t) => String(t.created_at).slice(0, 10) }, { label: 'Type', value: (t) => ui.statusLabel(t.type) }, { label: 'Reference', key: 'refLabel' }, { label: 'Branch', value: (t) => db.branchCode(t.branch_id) }, { label: 'Method', value: (t) => (t.payment_method ? ui.statusLabel(t.payment_method) : '') }, { label: 'Notes', key: 'notes' }, { label: 'Paid', key: 'debit' }, { label: 'Billed', key: 'credit' }, { label: 'Balance', key: 'running' }];
+            if (!utils.download('supplier-statement-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.ledger, cols))) return;
+          } else if (this.tab === 'purchases') {
+            const cols = [{ label: 'Purchase No', key: 'purchase_no' }, { label: 'Date', value: (p) => String(p.purchase_date).slice(0, 10) }, { label: 'Supplier Invoice', key: 'supplier_invoice_no' }, { label: 'Branch', value: (p) => db.branchCode(p.branch_id) }, { label: 'Lines', key: 'lines' }, { label: 'Units', key: 'units' }, { label: 'Total', key: 'total' }, { label: 'Paid', key: 'paid_amount' }, { label: 'Due', key: 'due' }, { label: 'Status', value: (p) => ui.statusLabel(p.status) }];
+            if (!utils.download('purchases-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.purchases, cols))) return;
+          } else if (this.tab === 'payments') {
+            const cols = [{ label: 'Date', value: (p) => String(p.created_at).slice(0, 10) }, { label: 'Against', key: 'refLabel' }, { label: 'Method', value: (p) => ui.statusLabel(p.payment_method || 'cash') }, { label: 'Reference', key: 'payment_reference' }, { label: 'Branch', value: (p) => db.branchCode(p.branch_id) }, { label: 'Recorded By', value: (p) => (p.created_by ? db.userName(p.created_by) : '') }, { label: 'Amount', key: 'debit' }];
+            if (!utils.download('supplier-payments-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.payments, cols))) return;
+          } else {
+            const cols = [{ label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Type', value: (p) => db.productTypeLabel(p.ptype) }, { label: 'Cost', key: 'cost_price' }, { label: 'Retail', key: 'retail_price' }, { label: 'Stock', value: (p) => (p.tracked ? p.qty : '') }, { label: 'Active', value: (p) => (p.is_active ? 'Yes' : 'No') }];
+            if (!utils.download('supplier-products-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.products, cols))) return;
+          }
+          ui.success('Export ready.');
+        },
+        printStatement() { this.tab = 'ledger'; this.$nextTick(() => window.print()); },
+        closeModals() { this.closePay(); this.closeAdjust(); },
+
+        /* ------------------------------------------------------ pay */
+        openPay() {
+          if (!this.canPay) { ui.error('You do not have permission to pay suppliers.'); return; }
+          this.pay = { open: true, amount: this.outstanding > 0 ? this.outstanding : '', method: 'cash', reference: '', notes: '', allocate: true, errors: {}, busy: false };
+          this.$nextTick(() => { if (this.$refs.payAmount) { this.$refs.payAmount.focus(); this.$refs.payAmount.select(); } });
+        },
+        closePay() { if (this.pay.open) this.pay.open = false; },
+        savePay() {
+          const p = this.pay, e = {};
+          const amt = Number(p.amount);
+          if (p.amount === '' || p.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          else if (amt > 100000000) e.amount = 'That amount looks wrong — please check.';
+          if (!METHODS.includes(p.method)) e.method = 'Select a payment method.';
+          if (p.method !== 'cash' && !String(p.reference || '').trim()) e.reference = 'Enter the transaction or cheque reference.';
+          p.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          p.busy = true;
+          try {
+            const amount = utils.round2(amt);
+            const bid = session.branchId();
+            let allocated = [];
+            if (p.allocate) allocated = this.allocate(amount);
+            const noteParts = [String(p.notes || '').trim() || 'Payment to supplier'];
+            if (allocated.length) noteParts.push('applied to ' + allocated.map((x) => x.purchase_no).join(', '));
+            ABM.ledger.supplier(this.s.id, bid, 'payment', amount, 0, {
+              referenceType: allocated.length === 1 ? 'purchase' : null, referenceId: allocated.length === 1 ? allocated[0].id : null,
+              paymentMethod: p.method, paymentReference: String(p.reference || '').trim() || null,
+              notes: noteParts.filter(Boolean).join(' · '),
+            });
+            db.audit('supplier.payment', 'supplier', this.s.id, `${utils.money(amount)} paid to ${this.s.name} (${ui.statusLabel(p.method)})${allocated.length ? ' against ' + allocated.map((x) => x.purchase_no).join(', ') : ''}`);
+            this.s = db.find('suppliers', this.s.id);
+            ui.success('Payment of ' + utils.money(amount) + ' recorded.');
+            if (this.s.balance < 0) ui.toast('This supplier now holds an advance of ' + utils.money(-this.s.balance) + '.', 'info');
+            p.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not record the payment.');
+          } finally {
+            p.busy = false;
+          }
+        },
+        /** Apply a payment to the oldest unpaid purchases (keeps purchase.paid_amount in sync with the ledger). */
+        allocate(amount) {
+          let left = amount;
+          const done = [];
+          for (const op of this.openPurchases) {
+            if (left <= 0.005) break;
+            const cur = db.find('purchases', op.id);
+            if (!cur || cur.status === 'cancelled') continue;
+            const due = utils.round2(Math.max(0, (Number(cur.total) || 0) - (Number(cur.paid_amount) || 0)));
+            if (due <= 0.005) continue;
+            const part = Math.min(left, due);
+            db.update('purchases', cur.id, { paid_amount: utils.round2((Number(cur.paid_amount) || 0) + part) });
+            left = utils.round2(left - part);
+            done.push({ id: cur.id, purchase_no: cur.purchase_no });
+          }
+          return done;
+        },
+
+        /* ---------------------------------------------------- adjustment */
+        openAdjust() {
+          if (!this.canManage) { ui.error('You do not have permission to post adjustments.'); return; }
+          this.adj = { open: true, dir: 'increase', amount: '', reason: '', errors: {}, busy: false };
+          this.$nextTick(() => this.$refs.adjAmount && this.$refs.adjAmount.focus());
+        },
+        closeAdjust() { if (this.adj.open) this.adj.open = false; },
+        saveAdjust() {
+          const a = this.adj, e = {};
+          const amt = Number(a.amount);
+          if (a.amount === '' || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          if (String(a.reason || '').trim().length < 4) e.reason = 'A reason is required for every adjustment.';
+          a.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          a.busy = true;
+          try {
+            const amount = utils.round2(amt);
+            const reason = String(a.reason).trim();
+            ABM.ledger.supplier(this.s.id, session.branchId(), 'adjustment', a.dir === 'decrease' ? amount : 0, a.dir === 'increase' ? amount : 0, { notes: reason });
+            db.audit('supplier.adjustment', 'supplier', this.s.id, `${a.dir === 'increase' ? 'Increased' : 'Decreased'} payable to ${this.s.name} by ${utils.money(amount)} — ${reason}`);
+            this.s = db.find('suppliers', this.s.id);
+            ui.success('Adjustment posted. New payable ' + utils.money(this.s.balance) + '.');
+            a.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not post the adjustment.');
+          } finally {
+            a.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

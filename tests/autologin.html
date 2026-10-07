@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Test helper: auto login</title></head>
+<body data-public>
+  <pre id="out">…</pre>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/shop.js"></script>
+  <script>
+    // Test-only helper: ?as=admin|manager|cashier|sana|usman  &reset=1 to reseed demo data
+    (function () {
+      const q = new URLSearchParams(location.search);
+      if (q.get('reset')) ABM.db.reset();
+      const user = ABM.db.all('users').find((u) => u.username === (q.get('as') || 'admin'));
+      ABM.session.logout();
+      ABM.session.login(user);
+      if (q.get('branch')) ABM.session.setBranch(q.get('branch'));
+      // optional theme for screenshot runs: &theme=dark|light|system &accent=navy|indigo|violet|teal|ocean
+      if (q.get('theme') || q.get('accent') || q.get('custom')) {
+        var t = ABM.theme.get();
+        localStorage.setItem('abm.theme.v1', JSON.stringify({ mode: q.get('theme') || t.mode, accent: q.get('custom') ? 'custom' : (q.get('accent') || t.accent), custom: q.get('custom') || t.custom }));
+      }
+      var extra = '';
+      // &shop=<email|first> also signs in a STOREFRONT customer account (password demo1234)
+      if (q.get('shop') && window.SHOP) {
+        try {
+          var email = q.get('shop');
+          if (email === '1' || email === 'first') {
+            var c = ABM.db.all('customers').filter(function (x) { return x.has_account && x.email; })[0];
+            email = c ? c.email : '';
+          }
+          var shopper = SHOP.auth.login(email, q.get('shoppw') || 'demo1234');
+          extra = ' | SHOP ACCOUNT: ' + shopper.name + ' <' + shopper.email + '>';
+        } catch (e) { extra = ' | SHOP LOGIN FAILED: ' + e.message; }
+      }
+      document.getElementById('out').textContent = 'LOGGED IN AS ' + user.name + ' (' + user.role + ') branch=' + ABM.session.branchId() + extra;
+      console.log('AUTOLOGIN ' + document.getElementById('out').textContent);
+    })();
+  </script>
+</body>
+</html>

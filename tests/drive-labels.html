@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: labels</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/barcode.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <iframe id="frame" width="1400" height="1000" style="width:1400px;height:1000px;border:1px solid #ccc"></iframe>
+  <script>
+    // Two halves: the queue/sheet arithmetic through the real component, and a DOM measurement of a
+    // rendered sheet — a label that clips its own product name is a defect you cannot see in code.
+    const L = [];
+    let fails = 0;
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x ? '  [' + x + ']' : '')); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+
+    async function main() {
+      const { db, utils, session, ui } = ABM;
+      db.reset();
+      ui.toast = () => {}; ui.confirm = async () => true;
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+      const BID = session.branchId();
+
+      const html = await (await fetch('../labels.html')).text();
+      const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => /function labelsPage\(/.test(s));
+      ok(!!body, 'loaded labelsPage() from labels.html');
+      (0, eval)(body);
+      const mk = (q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = labelsPage();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+
+      /* ========================= 1. the queue ========================= */
+      const p = mk('');
+      eq(p.items.length, 0, 'T1: starts empty');
+      eq(p.totalLabels, 0, 'T1: no labels');
+      const prod = p.products.find((x) => !x.serialized && x.barcode && x.qty > 3);
+      p.addProduct(prod.id, true);
+      eq(p.items.length, 1, 'T1: a product is queued');
+      eq(p.totalLabels, 1, 'T1: one label by default');
+      p.addProduct(prod.id, true);
+      eq(p.items.length, 1, 'T1: adding it again does not duplicate the line');
+      eq(p.totalLabels, 2, 'T1: it raises the count instead');
+      p.matchStock(p.items[0]);
+      eq(p.items[0].qty, prod.qty, 'T1: one label per unit in stock');
+      p.bump(p.items[0], -1);
+      eq(p.items[0].qty, prod.qty - 1, 'T1: the stepper works');
+      p.items[0].qty = -5; p.normalise(p.items[0]);
+      eq(p.items[0].qty, 0, 'T1: a negative count is clamped to zero');
+      p.items[0].qty = 5000; p.normalise(p.items[0]);
+      eq(p.items[0].qty, 999, 'T1: an absurd count is capped');
+      p.items[0].qty = 3;
+      eq(p.labels.length, 3, 'T1: three stickers are generated');
+      p.remove(0);
+      eq(p.items.length, 0, 'T1: a line can be removed');
+
+      /* ========================= 2. codes ========================= */
+      const q = mk('');
+      const withBarcode = q.products.find((x) => x.barcode);
+      q.addProduct(withBarcode.id, true);
+      eq(q.items[0].codeValue, withBarcode.barcode, 'T2: the product barcode is used by default');
+      eq(q.items[0].symbology, 'EAN-13', 'T2: a 13-digit barcode is EAN-13');
+      q.design.codeSource = 'sku'; q.recode();
+      eq(q.items[0].codeValue, withBarcode.sku, 'T2: switching to SKU re-reads every line');
+      eq(q.items[0].symbology, 'Code 39', 'T2: a SKU is Code 39');
+      q.design.codeSource = 'none'; q.recode();
+      eq(q.labels[0].code, '', 'T2: no barcode means no code on the sticker');
+      q.design.codeSource = 'barcode'; q.recode();
+
+      const serialized = q.products.find((x) => x.serialized && x.qty >= 2);
+      q.addProduct(serialized.id, true);
+      const serLine = q.items.find((i) => String(i.product_id) === String(serialized.id));
+      ok(serLine.units.length >= 2, 'T2: a serialized line knows its units in stock', serLine.units.length + ' units');
+      q.design.codeSource = 'unit'; q.recode();
+      q.matchStock(serLine);
+      const unitLabels = q.labels.filter((l) => l.sku === serialized.sku);
+      ok(unitLabels.length >= 2, 'T2: one sticker per unit');
+      ok(unitLabels[0].code !== unitLabels[1].code, 'T2: each sticker carries its own IMEI / serial', unitLabels[0].code + ' vs ' + unitLabels[1].code);
+      ok(serLine.units.includes(unitLabels[0].code), 'T2: and it is a real registered unit');
+
+      /* ========================= 3. the sheet ========================= */
+      const s = mk('');
+      s.design.size = '50x25';
+      eq(s.cols, 3, 'T3: 50 mm labels fit 3 across an A4');
+      eq(s.perSheet, s.cols * s.rows, 'T3: a sheet is columns × rows');
+      ok(s.perSheet >= 20 && s.perSheet <= 40, 'T3: about 30 to a sheet', String(s.perSheet));
+      s.design.size = '100x50';
+      eq(s.cols, 1, 'T3: 100 mm labels fit 1 across');
+      s.design.size = '38x25';
+      eq(s.cols, 4, 'T3: 38 mm labels fit 4 across');
+      s.design.size = '50x25';
+      const one = s.products.find((x) => !x.serialized);
+      s.addProduct(one.id, true);
+      s.items[0].qty = s.perSheet;
+      eq(s.pages, 1, 'T3: exactly one sheet holds one sheet worth');
+      s.items[0].qty = s.perSheet + 1;
+      eq(s.pages, 2, 'T3: one more spills onto a second sheet');
+      s.items[0].qty = 10; s.design.skip = 25;
+      eq(s.pages, 2, 'T3: skipped stickers count towards the sheet');
+      s.design.skip = 0;
+
+      /* ========================= 4. bulk adds ========================= */
+      const b = mk('');
+      const low = b.products.filter((x) => x.min_stock > 0 && x.qty <= x.min_stock);
+      b.addLowStock();
+      eq(b.items.length, low.length, 'T4: every low-stock product is queued');
+      const cat = db.all('categories').find((c) => b.products.some((x) => String(x.category_id) === String(c.id)));
+      const c2 = mk('?category=' + cat.id);
+      ok(c2.items.length > 0, 'T4: ?category= queues that category (' + c2.items.length + ')');
+      ok(c2.items.every((i) => String(b.products.find((x) => x.id === i.product_id).category_id) === String(cat.id)), 'T4: and nothing else');
+      const purchase = db.all('purchases').find((x) => x.status === 'received' && String(x.branch_id) === String(BID));
+      const c3 = mk('?purchase=' + purchase.id);
+      const pItems = db.where('purchase_items', { purchase_id: purchase.id });
+      ok(c3.items.length > 0, 'T4: ?purchase= queues the delivery (' + c3.items.length + ' lines)');
+      eq(c3.totalLabels, pItems.reduce((a, i) => a + Math.max(1, Number(i.quantity) || 1), 0), 'T4: one label per unit received');
+      const single = mk('?product=' + one.id);
+      eq(single.items.length, 1, 'T4: ?product= queues just that product');
+
+      /* ========================= 5. the rendered sheet ========================= */
+      log('=== measuring a real sheet');
+      await new Promise((resolve) => {
+        const frame = document.getElementById('frame');
+        frame.onload = () => setTimeout(() => {
+          try {
+            const d = frame.contentDocument;
+            const labels = [...d.querySelectorAll('.card .lbl:not(.is-blank)')];
+            ok(labels.length > 0, 'T5: the preview renders stickers (' + labels.length + ')');
+            const first = labels[0];
+            const box = first.getBoundingClientRect();
+            // 50 mm x 25 mm at 96dpi = 189 x 94.5 css px
+            ok(Math.abs(box.width - 50 * 96 / 25.4) < 3, 'T5: a 50 mm label is 50 mm wide', box.width.toFixed(1) + 'px');
+            ok(Math.abs(box.height - 25 * 96 / 25.4) < 3, 'T5: a 25 mm label is 25 mm tall', box.height.toFixed(1) + 'px');
+            const kids = [...first.children].filter((el) => el.offsetParent !== null);
+            ok(kids.length >= 3, 'T5: the sticker shows several lines (' + kids.length + ')');
+            const bottom = Math.max(...kids.map((el) => el.getBoundingClientRect().bottom));
+            const top = Math.min(...kids.map((el) => el.getBoundingClientRect().top));
+            ok(top >= box.top - 0.5, 'T5: nothing is clipped off the top of the sticker', (box.top - top).toFixed(1) + 'px over');
+            ok(bottom <= box.bottom + 0.5, 'T5: nothing is clipped off the bottom', (bottom - box.bottom).toFixed(1) + 'px over');
+            const svg = first.querySelector('svg');
+            ok(!!svg, 'T5: the barcode is drawn');
+            ok(!!svg && svg.querySelectorAll('rect').length > 20, 'T5: as real bars', svg ? String(svg.querySelectorAll('rect').length) : '0');
+            const txt = first.textContent.replace(/\s+/g, ' ').trim();
+            ok(txt.indexOf('Rs.') >= 0, 'T5: the price is on the sticker', txt.slice(0, 60));
+            ok(/[A-Z]{2,}/.test(txt), 'T5: so is the product name / SKU', txt.slice(0, 60));
+          } catch (e) { fails++; L.push('FAIL  T5 threw: ' + e.message); }
+          resolve();
+        }, 1200);
+        frame.src = '../labels.html?category=' + cat.id;
+      });
+    }
+    function log(m) { L.push(m); }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 700);
+  </script>
+</body>
+</html>

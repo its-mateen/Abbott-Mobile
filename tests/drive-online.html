@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE · online storefront services</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/shop.js"></script>
+</head>
+<body data-public>
+<pre id="out"></pre>
+<script>
+(function () {
+  var pass = 0, fail = 0, log = [];
+  function say(m) { log.push(m); console.log('DRIVE ' + m); }
+  function ok(cond, label, extra) {
+    if (cond) { pass++; say('PASS ' + label + (extra ? '  [' + extra + ']' : '')); }
+    else { fail++; say('FAIL ' + label + (extra ? '  [' + extra + ']' : '')); }
+  }
+  function eq(a, b, label) { ok(String(a) === String(b), label, 'got=' + a + ' want=' + b); }
+
+  try {
+    ABM.db.reset();
+    var db = ABM.db, utils = ABM.utils;
+
+    /* ---------------------------------------------------- 0. commerce cfg */
+    var c = SHOP.commerce();
+    say('INFO commerce delivery_fee=' + c.delivery_fee + ' free_above=' + c.free_delivery_above +
+        ' min_order=' + c.min_order + ' fulfil_branch=' + c.fulfil_branch_id + ' prefix=' + c.order_prefix);
+    say('INFO wallet numbers in cms: jazzcash=' + c.jazzcash_number + ' easypaisa=' + c.easypaisa_number);
+
+    /* ------------------------------------------------- 1. delivery fee rule */
+    eq(SHOP.deliveryFee(0), 0, 'deliveryFee(0) = 0');
+    eq(SHOP.deliveryFee(1000), c.delivery_fee, 'deliveryFee(below threshold) = fee');
+    eq(SHOP.deliveryFee(c.free_delivery_above - 1), c.delivery_fee, 'deliveryFee(just below threshold) = fee');
+    eq(SHOP.deliveryFee(c.free_delivery_above), 0, 'deliveryFee(== threshold) = free');
+    eq(SHOP.deliveryFee(c.free_delivery_above + 1), 0, 'deliveryFee(above threshold) = free');
+    eq(SHOP.orderTotal(1000), 1000 + c.delivery_fee, 'orderTotal adds fee');
+
+    /* --------------------------------------------------------- 2. catalog */
+    var prods = SHOP.products();
+    ok(prods.length > 5, 'SHOP.products() returns catalog', 'n=' + prods.length);
+    var serialised = prods.filter(function (p) { return db.isSerialized(p) && SHOP.stockOf(p) > 1; })[0];
+    var plain = prods.filter(function (p) { return !db.isSerialized(p) && db.isStockTracked(p) && SHOP.stockOf(p) >= 3; })[0];
+    ok(!!serialised, 'found a serialized product with stock', serialised && serialised.name + ' qty=' + SHOP.stockOf(serialised));
+    ok(!!plain, 'found a non-serialized product with stock', plain && plain.name + ' qty=' + SHOP.stockOf(plain));
+    eq(SHOP.maxQty(serialised), 1, 'maxQty(serialized) = 1');
+    ok(SHOP.maxQty(plain) > 1, 'maxQty(plain) > 1', 'max=' + SHOP.maxQty(plain));
+
+    /* ------------------------------------------------------------ 3. cart */
+    SHOP.cart.clear();
+    eq(SHOP.cart.count(), 0, 'cart starts empty');
+    SHOP.cart.add(plain.id, 2);
+    SHOP.cart.add(serialised.id, 5);            // must clamp to 1
+    var lines = SHOP.cart.lines();
+    eq(lines.length, 2, 'cart has 2 lines');
+    eq(SHOP.cart.qtyOf(serialised.id), 1, 'serialized line clamped to qty 1');
+    eq(SHOP.cart.qtyOf(plain.id), 2, 'plain line qty 2');
+    var wantSub = utils.round2(plain.retail_price * 2 + serialised.retail_price);
+    eq(SHOP.cart.subtotal(), wantSub, 'cart subtotal matches prices');
+    SHOP.cart.setQty(plain.id, 0);
+    eq(SHOP.cart.lines().length, 1, 'setQty(0) removes the line');
+    SHOP.cart.add(plain.id, 2);
+
+    /* ---------------------------------------- 4. place order (cash on delivery) */
+    var sub = SHOP.cart.subtotal();
+    var fee = SHOP.deliveryFee(sub);
+    var cod = SHOP.placeOrder(
+      { name: 'Drive Tester', phone: '0300-1112223', email: 'drive@example.com',
+        address: 'House 99, Street 1, Model Town', city: 'Lahore', notes: 'call first' },
+      SHOP.cart.get(), 'cod', 'SHOULD-BE-DROPPED');
+    ok(/^WEB-ON-\d{6}$/.test(cod.order_no), 'COD order_no format', cod.order_no);
+    eq(cod.status, 'pending', 'COD status pending');
+    eq(cod.payment_method, 'cod', 'COD payment_method');
+    eq(cod.payment_status, 'unpaid', 'COD payment_status unpaid');
+    eq(cod.payment_reference, '', 'COD reference dropped');
+    eq(cod.items.length, 2, 'COD order has 2 item lines');
+    eq(cod.subtotal, sub, 'COD subtotal');
+    eq(cod.delivery_fee, fee, 'COD delivery fee matches rule');
+    eq(cod.total, utils.round2(sub + fee), 'COD total = subtotal + fee');
+    eq(cod.branch_id, c.fulfil_branch_id, 'COD branch = fulfil branch');
+    eq(cod.source, 'website', 'COD source website');
+    eq((cod.status_log || []).length, 1, 'COD status_log seeded');
+    eq(cod.status_log[0].status, 'pending', 'COD status_log[0] = pending');
+    ok(cod.items.every(function (i) { return i.product_id && i.name && i.quantity > 0 && i.unit_price >= 0 && i.total >= 0; }),
+       'COD item lines carry product_id/name/qty/price/total');
+    ok(utils.round2(cod.items.reduce(function (s, i) { return s + i.total; }, 0)) === cod.subtotal, 'COD subtotal = sum of lines');
+    var auditCod = db.all('audit_logs').filter(function (a) { return a.action === 'order.create' && a.entity_id === cod.id; });
+    eq(auditCod.length, 1, 'COD order writes an audit row');
+
+    /* ------------------------------------- 5. free-delivery threshold on a real order */
+    SHOP.cart.clear();
+    var pricey = prods.filter(function (p) { return SHOP.priceOf(p) >= c.free_delivery_above && SHOP.maxQty(p) > 0; })[0];
+    ok(!!pricey, 'found a product above the free-delivery threshold', pricey && pricey.name);
+    SHOP.cart.add(pricey.id, 1);
+    var freeOrder = SHOP.placeOrder(
+      { name: 'Free Delivery', phone: '0301-2223334', address: 'Flat 3B, Gulberg Heights', city: 'Lahore' },
+      SHOP.cart.get(), 'cod');
+    eq(freeOrder.delivery_fee, 0, 'order above threshold has free delivery');
+    eq(freeOrder.total, freeOrder.subtotal, 'free-delivery total = subtotal');
+
+    /* -------------------------------------------- 6. wallet (JazzCash) order */
+    SHOP.cart.clear();
+    SHOP.cart.add(plain.id, 1);
+    var wallet = SHOP.placeOrder(
+      { name: 'Wallet Tester', phone: '0345-4445556', address: '45-C, DHA Phase 5', city: 'Karachi' },
+      SHOP.cart.get(), 'jazzcash', 'TRX-998877');
+    eq(wallet.payment_method, 'jazzcash', 'wallet payment_method');
+    eq(wallet.payment_status, 'paid', 'wallet order marked paid');
+    eq(wallet.payment_reference, 'TRX-998877', 'wallet reference stored');
+    var walletThrew = false;
+    try { SHOP.placeOrder({ name: 'No Ref', phone: '0345-4445556', address: '45-C, DHA Phase 5', city: 'Karachi' }, [{ product_id: plain.id, qty: 1 }], 'jazzcash', ''); }
+    catch (e) { walletThrew = true; }
+    ok(walletThrew, 'wallet order without a reference is rejected');
+
+    /* ------------------------------------------------- 7. order numbering */
+    ok(cod.order_no !== wallet.order_no && cod.order_no !== freeOrder.order_no, 'order numbers are unique',
+       [cod.order_no, freeOrder.order_no, wallet.order_no].join(','));
+    var seqOk = Number(wallet.order_no.slice(-6)) === Number(cod.order_no.slice(-6)) + 2;
+    ok(seqOk, 'order numbers increment by 1', cod.order_no + ' -> ' + wallet.order_no);
+
+    /* ------------------------------------------------------ 8. validation */
+    function throws(fn, label) { try { fn(); ok(false, label, 'did not throw'); } catch (e) { ok(true, label, e.message); } }
+    throws(function () { SHOP.placeOrder({ name: 'Ab', phone: '03001234567', address: 'A proper address here' }, [{ product_id: plain.id, qty: 1 }], 'cod'); }, 'rejects short name');
+    throws(function () { SHOP.placeOrder({ name: 'Good Name', phone: '123', address: 'A proper address here' }, [{ product_id: plain.id, qty: 1 }], 'cod'); }, 'rejects short phone');
+    throws(function () { SHOP.placeOrder({ name: 'Good Name', phone: '03001234567', address: 'x' }, [{ product_id: plain.id, qty: 1 }], 'cod'); }, 'rejects short address');
+    SHOP.cart.clear();
+    throws(function () { SHOP.placeOrder({ name: 'Good Name', phone: '03001234567', address: 'A proper address here' }, [], 'cod'); }, 'rejects empty cart');
+
+    /* ------------------------------------------------- 9. order tracking */
+    var found = SHOP.findOrder(cod.order_no, '0300-1112223');
+    ok(found && found.id === cod.id, 'findOrder with the right phone returns the order');
+    ok(SHOP.findOrder(cod.order_no.toLowerCase(), '03001112223') !== null, 'findOrder is case/format tolerant');
+    ok(SHOP.findOrder(cod.order_no, '0300-9999999') === null, 'WRONG PHONE does not reveal the order');
+    ok(SHOP.findOrder(cod.order_no, '') === null, 'empty phone does not reveal the order');
+    ok(SHOP.findOrder(cod.order_no, '0300') === null, 'partial phone does not reveal the order');
+    ok(SHOP.findOrder('WEB-ON-999999', '0300-1112223') === null, 'unknown order number returns null');
+    var tu = SHOP.trackUrl(cod);
+    ok(tu.indexOf('no=' + encodeURIComponent(cod.order_no)) > 0 && tu.indexOf('phone=') > 0, 'trackUrl carries no + phone', tu);
+
+    /* -------------------------------------- 10. customer match + min order */
+    var known = db.all('customers').filter(function (x) { return !x.is_walkin && x.phone; })[0];
+    var matched = SHOP.placeOrder(
+      { name: known.name, phone: known.phone, address: 'Shop 8, Main Market', city: 'Lahore' },
+      [{ product_id: plain.id, qty: 1 }], 'cod');
+    eq(matched.customer_id, known.id, 'order links to an existing customer by phone');
+    var cheap = prods.filter(function (p) { return SHOP.priceOf(p) > 0 && SHOP.priceOf(p) < c.min_order && SHOP.maxQty(p) > 0; })[0];
+    if (cheap) {
+      throws(function () { SHOP.placeOrder({ name: 'Too Small', phone: '0300-1112223', address: 'A proper address here' }, [{ product_id: cheap.id, qty: 1 }], 'cod'); }, 'rejects below min_order');
+    } else { say('SKIP no product below min_order to test'); }
+
+    /* ---------------------------------------------- 11. sanitize CMS html */
+    var dirty = '<p onclick="alert(1)">hi</p><script>alert(2)<\/script><img src=x onerror=alert(3)>' +
+                '<a href="javascript:alert(4)">bad</a><iframe src="//evil"></iframe>';
+    var clean = SHOP.sanitize(dirty);
+    ok(clean.indexOf('<script') < 0, 'sanitize strips <script>', clean.slice(0, 120));
+    ok(!/\son\w+\s*=/i.test(clean), 'sanitize strips on* attributes');
+    ok(clean.toLowerCase().indexOf('javascript:') < 0, 'sanitize strips javascript: urls');
+    ok(clean.toLowerCase().indexOf('<iframe') < 0, 'sanitize strips <iframe>');
+
+    /* --------------------------------- 12. repair booking + contact message */
+    var rq = SHOP.bookRepair({ name: 'Repair Guy', phone: '0300-5556667', device_type: 'mobile', brand: 'Apple', model: 'iPhone 13', problem: 'Screen is cracked badly' });
+    eq(rq.status, 'new', 'repair request status new');
+    var msg = SHOP.sendMessage({ name: 'Msg Guy', phone: '0300-5556667', subject: 'Hi', message: 'Hello there' });
+    eq(msg.status, 'new', 'contact message status new');
+
+  } catch (e) {
+    fail++; say('FAIL EXCEPTION ' + (e && e.message) + '\n' + (e && e.stack));
+  }
+
+  say('TOTAL pass=' + pass + ' fail=' + fail);
+  console.log('RESULT: ' + (fail === 0 ? 'PASS' : 'FAIL'));
+  document.getElementById('out').textContent = log.join('\n') + '\nRESULT: ' + (fail === 0 ? 'PASS' : 'FAIL');
+})();
+</script>
+</body>
+</html>

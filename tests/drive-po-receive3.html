@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: PO edited while a delivery is being keyed</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    const L = []; let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async () => true; ui.toast = () => {};
+      ui.warn = (m) => log('   warn: ' + m); ui.error = (m) => log('   error: ' + m); ui.success = () => {};
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        if (!body) throw new Error('no ' + fnName); (0, eval)(body);
+      };
+      const mk = (factory, q) => { history.replaceState(null, '', location.pathname + (q || '')); const o = factory(); o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {}; o.init(); return o; };
+
+      await source('purchase-create.html', 'purchaseCreatePage');
+      await source('purchase-order-create.html', 'purchaseOrderCreatePage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(mgr);
+      const BID = session.branchId();
+      const SUP = db.all('suppliers').find((s) => s.is_active);
+      const PA = db.all('products').find((p) => db.isStockTracked(p) && p.is_active && !db.isSerialized(p));
+
+      /* raise a real order through the real page, and send it */
+      let cre = mk(purchaseOrderCreatePage, '');
+      cre.selectSupplier(SUP);
+      cre.addLine(PA.id); cre.lines[0].qty = 10; cre.recalc();
+      noNav(() => cre.save(true));                       // save + send  -> status 'ordered'
+      const po = db.all('purchase_orders').slice(-1)[0];
+      eq(po.status, 'ordered', 'order sent');
+      const itemIdsBefore = db.where('purchase_order_items', { po_id: po.id }).map((i) => i.id);
+      log('order ' + po.po_no + ' item ids ' + JSON.stringify(itemIdsBefore));
+
+      /* TAB 1: storekeeper opens "Receive stock" against it and starts keying the delivery */
+      const tab1 = mk(purchaseCreatePage, '?po=' + po.id);
+      eq(tab1.lines.length, 1, 'tab 1 pre-filled the outstanding line');
+      log('tab 1 line po_item_id=' + tab1.lines[0].po_item_id + ' qty=' + tab1.lines[0].qty);
+
+      /* a second, unrelated order is raised in between (so this order's line is no longer the newest row) */
+      let other = mk(purchaseOrderCreatePage, '');
+      other.selectSupplier(SUP); other.addLine(PA.id); noNav(() => other.save(false));
+
+      /* TAB 2: the manager edits the still-untouched order (allowed: ordered + nothing received) */
+      const tab2 = mk(purchaseOrderCreatePage, '?id=' + po.id);
+      eq(tab2.blocked, null, 'tab 2 may still edit the order');
+      tab2.form.notes = 'Corrected by the manager';
+      noNav(() => tab2.save(true));
+      const itemIdsAfter = db.where('purchase_order_items', { po_id: po.id }).map((i) => i.id);
+      log('after the edit the item ids are ' + JSON.stringify(itemIdsAfter));
+
+      /* TAB 1 now saves its delivery */
+      const before = stock.qty(BID, PA.id), bal = SUP.balance;
+      tab1.form.pay_amount = 0;
+      noNav(() => tab1.save());
+      const grn = db.all('purchases').slice(-1)[0];
+      const items = db.where('purchase_order_items', { po_id: po.id });
+      const poNow = db.find('purchase_orders', po.id);
+      log('RESULT: purchase ' + grn.purchase_no + ' total ' + grn.total + ' linked to po ' + grn.purchase_order_id);
+      log('        stock moved ' + (stock.qty(BID, PA.id) - before) + ' units, supplier balance +' + utils.round2(db.find('suppliers', SUP.id).balance - bal));
+      log('        order status=' + poNow.status + ' received=' + JSON.stringify(items.map((i) => i.received_quantity)) + ' ordered=' + JSON.stringify(items.map((i) => i.quantity)));
+
+      eq(stock.qty(BID, PA.id), before + 10, 'the 10 units really did arrive in stock');
+      eq(items.reduce((a, i) => a + Number(i.received_quantity), 0), 10, 'the order must record the 10 units it just received');
+
+      const ov = mk(purchaseOrderViewPage, '?id=' + po.id);
+      log('        the order page says: delivered ' + ov.received + '/' + ov.ordered + ', still to come ' + ov.pendingUnits + ' worth ' + ov.pendingValue + ', receipts listed ' + ov.receipts.length);
+      eq(ov.pendingUnits, 0, 'the order page must not still claim the units are outstanding');
+
+      /* and the same order can now be received a second time for the full quantity */
+      const again = mk(purchaseCreatePage, '?po=' + po.id);
+      log('        re-opening "Receive stock" pre-fills ' + (again.lines[0] ? again.lines[0].qty : 0) + ' units again');
+      eq(again.lines.length, 0, 'nothing should be left to receive');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRV3 ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

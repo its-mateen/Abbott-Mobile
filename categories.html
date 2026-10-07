@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Categories &amp; Brands · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="categories" data-title="Categories &amp; Brands" data-perm="categories.view">
+  <main x-data="categoriesPage()" @keydown.escape.window="closeModal()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">Categories &amp; Brands</h2>
+        <p class="page-subtitle"><span x-text="counts.categories"></span> categories · <span x-text="counts.brands"></span> brands · <span x-text="counts.products"></span> products classified</p>
+      </div>
+      <div class="page-actions">
+        <a href="products.html" class="btn btn-secondary"><span x-html="ABM.icon('cube')"></span>Products</a>
+        <button type="button" class="btn btn-primary" x-show="canAdd" @click="openAdd()"><span x-html="ABM.icon('plus')"></span><span x-text="tab === 'categories' ? 'Add Category' : 'Add Brand'"></span></button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="card">
+      <div class="px-4 sm:px-5 pt-2">
+        <div class="tabs">
+          <button type="button" class="tab" :class="tab === 'categories' && 'active'" @click="setTab('categories')">Categories <span class="ml-1 badge badge-slate" x-text="counts.categories"></span></button>
+          <button type="button" class="tab" :class="tab === 'brands' && 'active'" @click="setTab('brands')">Brands <span class="ml-1 badge badge-slate" x-text="counts.brands"></span></button>
+        </div>
+      </div>
+      <div class="card-body !py-3 border-b border-slate-200">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+          <div class="relative sm:col-span-6 lg:col-span-5">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" :placeholder="tab === 'categories' ? 'Search categories…' : 'Search brands…'" x-model.debounce.200ms="q" aria-label="Search">
+          </div>
+          <select class="select sm:col-span-3 lg:col-span-2" x-model="status" aria-label="Status">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <template x-if="tab === 'categories'">
+            <select class="select sm:col-span-3 lg:col-span-2" x-model="type" aria-label="Tracking type">
+              <option value="">All types</option>
+              <option value="imei">IMEI-tracked</option>
+              <option value="standard">Standard</option>
+            </select>
+          </template>
+        </div>
+      </div>
+
+      <!-- Categories table -->
+      <template x-if="tab === 'categories'">
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th class="cursor-pointer select-none" @click="setSort('name')"><span class="inline-flex items-center gap-1">Category <span x-html="sortIcon('name')"></span></span></th>
+            <th class="hidden sm:table-cell">IMEI default</th>
+            <th class="num cursor-pointer select-none" @click="setSort('products')"><span class="inline-flex items-center gap-1">Products <span x-html="sortIcon('products')"></span></span></th>
+            <th class="num hidden md:table-cell">In stock</th>
+            <th class="hidden sm:table-cell">Status</th>
+            <th class="actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="!r.is_active && 'opacity-60'">
+                <td>
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="r.is_imei_tracked ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(r.is_imei_tracked ? 'phone' : 'tag','w-4 h-4')"></span>
+                    <div class="min-w-0">
+                      <div class="font-semibold text-slate-800 truncate" x-text="r.name"></div>
+                      <div class="text-xs text-slate-500 sm:hidden" x-text="(r.is_imei_tracked ? 'IMEI' : 'Standard') + ' · ' + (r.is_active ? 'Active' : 'Inactive')"></div>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden sm:table-cell"><span class="badge" :class="r.is_imei_tracked ? 'badge-navy' : 'badge-slate'" x-text="r.is_imei_tracked ? 'IMEI-tracked' : 'Standard'"></span></td>
+                <td class="num"><a :href="'products.html?category=' + r.id + '&status='" class="font-semibold text-navy-700 hover:underline" x-text="r.products"></a><span class="text-xs text-slate-400" x-show="r.inactiveProducts" x-text="' (' + r.inactiveProducts + ' inactive)'"></span></td>
+                <td class="num hidden md:table-cell text-slate-600" x-text="ABM.utils.num(r.units)"></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.is_active ? 'active' : 'inactive')"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit" x-show="canEdit" @click="openEdit(r)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" :class="r.is_active ? 'text-amber-700' : 'text-emerald-700'" :title="r.is_active ? 'Deactivate' : 'Activate'" x-show="canEdit" @click="toggleActive(r)" x-html="ABM.icon(r.is_active ? 'x-circle' : 'check-circle','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete" x-show="canDelete" @click="remove(r)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="6"><div class="empty"><span x-html="ABM.icon('tag')"></span><div class="empty-title">No categories match</div><div class="text-sm mt-1">Adjust the search or add a new category.</div></div></td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      </template>
+
+      <!-- Brands table -->
+      <template x-if="tab === 'brands'">
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th class="cursor-pointer select-none" @click="setSort('name')"><span class="inline-flex items-center gap-1">Brand <span x-html="sortIcon('name')"></span></span></th>
+            <th class="num cursor-pointer select-none" @click="setSort('products')"><span class="inline-flex items-center gap-1">Products <span x-html="sortIcon('products')"></span></span></th>
+            <th class="num hidden md:table-cell">In stock</th>
+            <th class="hidden md:table-cell">Categories</th>
+            <th class="hidden sm:table-cell">Status</th>
+            <th class="actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="!r.is_active && 'opacity-60'">
+                <td>
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-600 text-xs font-bold" x-text="ABM.utils.initials(r.name)"></span>
+                    <div class="min-w-0">
+                      <div class="font-semibold text-slate-800 truncate" x-text="r.name"></div>
+                      <div class="text-xs text-slate-500 sm:hidden" x-text="r.is_active ? 'Active' : 'Inactive'"></div>
+                    </div>
+                  </div>
+                </td>
+                <td class="num"><a :href="'products.html?brand=' + r.id + '&status='" class="font-semibold text-navy-700 hover:underline" x-text="r.products"></a><span class="text-xs text-slate-400" x-show="r.inactiveProducts" x-text="' (' + r.inactiveProducts + ' inactive)'"></span></td>
+                <td class="num hidden md:table-cell text-slate-600" x-text="ABM.utils.num(r.units)"></td>
+                <td class="hidden md:table-cell"><div class="flex flex-wrap gap-1"><template x-for="c in r.categoryNames" :key="c"><span class="badge badge-slate" x-text="c"></span></template><span x-show="!r.categoryNames.length" class="text-slate-400">—</span></div></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.is_active ? 'active' : 'inactive')"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit" x-show="canEdit" @click="openEdit(r)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" :class="r.is_active ? 'text-amber-700' : 'text-emerald-700'" :title="r.is_active ? 'Deactivate' : 'Activate'" x-show="canEdit" @click="toggleActive(r)" x-html="ABM.icon(r.is_active ? 'x-circle' : 'check-circle','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete" x-show="canDelete" @click="remove(r)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="6"><div class="empty"><span x-html="ABM.icon('store')"></span><div class="empty-title">No brands match</div><div class="text-sm mt-1">Adjust the search or add a new brand.</div></div></td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      </template>
+
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button></template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <p class="mt-3 text-xs text-slate-500 flex items-start gap-1.5"><span class="flex-none mt-0.5" x-html="ABM.icon('info','w-3.5 h-3.5')"></span><span>A category's <b>IMEI default</b> pre-selects IMEI tracking when a new product is created in it. Categories and brands that are referenced by products cannot be deleted — deactivate them to hide them from new products.</span></p>
+
+    <!-- Add / Edit modal -->
+    <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="closeModal()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="catModalTitle">
+        <form @submit.prevent="save()" novalidate>
+          <div class="modal-header">
+            <div class="modal-title" id="catModalTitle" x-text="(modal.mode === 'add' ? 'Add ' : 'Edit ') + (modal.kind === 'categories' ? 'category' : 'brand')"></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeModal()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div>
+              <label class="label" for="cf-name">Name <span class="req">*</span></label>
+              <input id="cf-name" type="text" class="input" x-ref="firstField" x-model="modal.form.name" :class="modal.errors.name && 'is-invalid'" :placeholder="modal.kind === 'categories' ? 'e.g. Smartphones' : 'e.g. Samsung'" maxlength="80">
+              <p class="field-error" x-show="modal.errors.name" x-text="modal.errors.name"></p>
+            </div>
+            <template x-if="modal.kind === 'categories'">
+              <div class="flex items-start gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <button type="button" class="switch mt-0.5" :class="modal.form.is_imei_tracked && 'on'" role="switch" :aria-checked="modal.form.is_imei_tracked ? 'true' : 'false'" @click="modal.form.is_imei_tracked = modal.form.is_imei_tracked ? 0 : 1"></button>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold text-slate-800">IMEI-tracked by default</div>
+                  <div class="text-xs text-slate-500">New products in this category will have IMEI tracking switched on (phones, tablets, watches). Existing products are not changed.</div>
+                </div>
+              </div>
+            </template>
+            <div class="flex items-start gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+              <button type="button" class="switch mt-0.5" :class="modal.form.is_active && 'on'" role="switch" :aria-checked="modal.form.is_active ? 'true' : 'false'" @click="modal.form.is_active = modal.form.is_active ? 0 : 1"></button>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold text-slate-800">Active</div>
+                <div class="text-xs text-slate-500">Inactive entries are hidden when creating new products but stay on existing ones.</div>
+              </div>
+            </div>
+            <template x-if="modal.mode === 'edit' && modal.products > 0">
+              <p class="text-xs text-slate-500 flex items-center gap-1.5"><span x-html="ABM.icon('cube','w-3.5 h-3.5')"></span>Used by <b x-text="modal.products"></b> product<span x-text="modal.products === 1 ? '' : 's'"></span>.</p>
+            </template>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="modal.busy"><span x-html="ABM.icon('check')"></span><span x-text="modal.mode === 'add' ? 'Add' : 'Save changes'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function categoriesPage() {
+      const { db, utils, ui } = ABM;
+      const PER_PAGE = 15;
+      return {
+        canAdd: ABM.session.can('categories.add'),
+        canEdit: ABM.session.can('categories.edit'),
+        canDelete: ABM.session.can('categories.delete'),
+        tab: ['categories', 'brands'].includes(utils.qs('tab')) ? utils.qs('tab') : 'categories',
+        q: '', status: '', type: '',
+        sort: { key: 'name', dir: 'asc' },
+        page: 1,
+        cats: [], brands: [],
+        counts: { categories: 0, brands: 0, products: 0 },
+        modal: { open: false, mode: 'add', kind: 'categories', id: null, busy: false, products: 0, form: { name: '', is_imei_tracked: 0, is_active: 1 }, errors: {} },
+
+        init() {
+          this.refresh();
+          ['q', 'status', 'type', 'tab'].forEach((k) => this.$watch(k, () => { this.page = 1; }));
+        },
+        setTab(t) { this.tab = t; this.sort = { key: 'name', dir: 'asc' }; try { history.replaceState(null, '', '?tab=' + t); } catch (e) { /* ignore */ } },
+        refresh() {
+          const products = db.all('products');
+          const stock = db.all('branch_stock');
+          const unitsFor = (pred) => products.filter(pred).reduce((a, p) => a + stock.filter((s) => s.product_id === p.id).reduce((x, s) => x + s.quantity, 0), 0);
+          this.cats = db.all('categories').map((c) => {
+            const mine = products.filter((p) => p.category_id === c.id);
+            return { ...c, products: mine.length, inactiveProducts: mine.filter((p) => !p.is_active).length, units: unitsFor((p) => p.category_id === c.id) };
+          });
+          this.brands = db.all('brands').map((b) => {
+            const mine = products.filter((p) => p.brand_id === b.id);
+            const catIds = [...new Set(mine.map((p) => p.category_id))];
+            return { ...b, products: mine.length, inactiveProducts: mine.filter((p) => !p.is_active).length, units: unitsFor((p) => p.brand_id === b.id), categoryNames: catIds.map((id) => db.categoryName(id)).sort() };
+          });
+          this.counts = { categories: this.cats.length, brands: this.brands.length, products: products.length };
+        },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const src = this.tab === 'categories' ? this.cats : this.brands;
+          const list = src.filter((r) => {
+            if (this.status === 'active' && !r.is_active) return false;
+            if (this.status === 'inactive' && r.is_active) return false;
+            if (this.tab === 'categories' && this.type === 'imei' && !r.is_imei_tracked) return false;
+            if (this.tab === 'categories' && this.type === 'standard' && r.is_imei_tracked) return false;
+            if (q && !String(r.name).toLowerCase().includes(q)) return false;
+            return true;
+          });
+          const { key, dir } = this.sort;
+          return utils.sortBy(list, (r) => (key === 'name' ? r.name.toLowerCase() : Number(r[key]) || 0), dir);
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: 'asc' }; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+
+        /* ----------------------------------------------------------- modal */
+        coll() { return this.modal.kind === 'categories' ? 'categories' : 'brands'; },
+        label(kind) { return kind === 'categories' ? 'Category' : 'Brand'; },
+        openAdd() {
+          if (!this.canAdd) { ui.error('Your role is not allowed to add categories or brands.'); return; }
+          this.modal = { open: true, mode: 'add', kind: this.tab, id: null, busy: false, products: 0, form: { name: '', is_imei_tracked: 0, is_active: 1 }, errors: {} };
+          this.$nextTick(() => this.$refs.firstField && this.$refs.firstField.focus());
+        },
+        openEdit(r) {
+          if (!this.canEdit) { ui.error('Your role is not allowed to edit categories or brands.'); return; }
+          this.modal = { open: true, mode: 'edit', kind: this.tab, id: r.id, busy: false, products: r.products, form: { name: r.name, is_imei_tracked: r.is_imei_tracked ? 1 : 0, is_active: r.is_active ? 1 : 0 }, errors: {} };
+          this.$nextTick(() => { if (this.$refs.firstField) { this.$refs.firstField.focus(); this.$refs.firstField.select(); } });
+        },
+        closeModal() { if (this.modal.open) this.modal.open = false; },
+        nameExists(name) { const s = String(name || '').trim().toLowerCase(); return db.all(this.coll()).some((r) => String(r.name).trim().toLowerCase() === s && String(r.id) !== String(this.modal.id)); },
+        validate() {
+          const e = {}; const name = String(this.modal.form.name || '').trim();
+          if (!name) e.name = 'Name is required.';
+          else if (name.length < 2) e.name = 'Name must be at least 2 characters.';
+          else if (this.nameExists(name)) e.name = `A ${this.label(this.modal.kind).toLowerCase()} with this name already exists.`;
+          this.modal.errors = e; return !Object.keys(e).length;
+        },
+        save() {
+          if (!this.validate()) return;
+          this.modal.busy = true;
+          try {
+            const kind = this.modal.kind, coll = this.coll(), f = this.modal.form;
+            const data = kind === 'categories' ? { name: f.name.trim(), is_imei_tracked: f.is_imei_tracked ? 1 : 0, is_active: f.is_active ? 1 : 0 } : { name: f.name.trim(), is_active: f.is_active ? 1 : 0 };
+            const entity = kind === 'categories' ? 'category' : 'brand';
+            if (this.modal.mode === 'add') {
+              const rec = db.insert(coll, data);
+              db.audit(entity + '.create', entity, rec.id, `${this.label(kind)} "${rec.name}" created`);
+              ui.success(`${this.label(kind)} added.`);
+            } else {
+              db.update(coll, this.modal.id, data);
+              db.audit(entity + '.update', entity, this.modal.id, `${this.label(kind)} "${data.name}" updated`);
+              ui.success(`${this.label(kind)} updated.`);
+            }
+            this.modal.open = false;
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not save.'); } finally { this.modal.busy = false; }
+        },
+
+        /* --------------------------------------------------------- actions */
+        async toggleActive(r) {
+          if (!this.canEdit) { ui.error('Your role is not allowed to edit categories or brands.'); return; }
+          const kind = this.tab, coll = kind === 'categories' ? 'categories' : 'brands', entity = kind === 'categories' ? 'category' : 'brand';
+          const activate = !r.is_active;
+          if (!activate) {
+            const ok = await ui.confirm({ title: `Deactivate ${entity}?`, message: `"${r.name}" will no longer be offered when creating products. ${r.products ? r.products + ' existing product' + (r.products > 1 ? 's keep' : ' keeps') + ' this ' + entity + '.' : ''}`, confirmText: 'Deactivate', danger: true });
+            if (!ok) return;
+          }
+          db.update(coll, r.id, { is_active: activate ? 1 : 0 });
+          db.audit(entity + (activate ? '.activate' : '.deactivate'), entity, r.id, `${this.label(kind)} "${r.name}" ${activate ? 'activated' : 'deactivated'}`);
+          ui.success(`${this.label(kind)} ${activate ? 'activated' : 'deactivated'}.`);
+          this.refresh();
+        },
+        async remove(r) {
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete categories or brands.'); return; }
+          const kind = this.tab, coll = kind === 'categories' ? 'categories' : 'brands', entity = kind === 'categories' ? 'category' : 'brand';
+          if (r.products > 0) {
+            const ok = await ui.confirm({ title: `Cannot delete this ${entity}`, message: `"${r.name}" is used by ${r.products} product${r.products > 1 ? 's' : ''}. Reassign those products first, or deactivate the ${entity} to hide it from new products.`, confirmText: r.is_active ? 'Deactivate instead' : 'OK', cancelText: 'Close', danger: r.is_active });
+            if (ok && r.is_active) { db.update(coll, r.id, { is_active: 0 }); db.audit(entity + '.deactivate', entity, r.id, `${this.label(kind)} "${r.name}" deactivated (delete blocked)`); ui.success(`${this.label(kind)} deactivated.`); this.refresh(); }
+            return;
+          }
+          const ok = await ui.confirm({ title: `Delete ${entity}?`, message: `"${r.name}" will be permanently removed.`, confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          db.remove(coll, r.id);
+          db.audit(entity + '.delete', entity, r.id, `${this.label(kind)} "${r.name}" deleted`);
+          ui.success(`${this.label(kind)} deleted.`);
+          this.refresh();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Day-End Closing · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .z-line { display: flex; align-items: center; gap: .75rem; width: 100%; padding: .75rem 1.25rem; text-align: left; background: transparent; border: 0; cursor: pointer; }
+    .z-line:hover { background: rgb(var(--navy-500) / .05); }
+    .z-detail { background: rgb(var(--slate-50) / .7); border-top: 1px solid rgb(var(--slate-200) / .7); }
+    .z-detail li { display: flex; align-items: center; gap: .75rem; padding: .5rem 1.25rem .5rem 3.75rem; font-size: .8125rem; border-bottom: 1px solid rgb(var(--slate-200) / .5); }
+    .z-detail li:last-child { border-bottom: 0; }
+    .denom-row { display: grid; grid-template-columns: 5.5rem 1fr 7rem; align-items: center; gap: .5rem; }
+    @media print {
+      .z-detail { display: block !important; }
+      .z-line { padding: .35rem 0; }
+      .z-detail li { padding-left: 1.5rem; }
+      .print-area .card { border: 1px solid #cbd5e1 !important; break-inside: avoid; margin-bottom: .75rem; }
+      .print-area .grid { display: block !important; }
+      .print-area .lg\:col-span-2 { width: auto !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="day-end" data-title="Day-End Closing" data-perm="closing.view">
+  <main x-data="dayEndPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Day-End Closing</h2>
+        <p class="page-subtitle">Z-report for <b x-text="branch.name"></b> · <span x-text="ABM.utils.date(date, 'long')"></span> <span x-show="isToday" class="badge badge-navy ml-1">Today</span></p>
+      </div>
+      <div class="page-actions items-center">
+        <div class="inline-flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-icon" @click="shiftDate(-1)" title="Previous day" aria-label="Previous day"><span x-html="ABM.icon('chevron-left')"></span></button>
+          <input type="date" class="input input-sm !w-auto" :value="date" :max="today" @change="setDate($event.target.value)" aria-label="Closing date">
+          <button type="button" class="btn btn-secondary btn-icon" @click="shiftDate(1)" :disabled="date >= today" title="Next day" aria-label="Next day"><span x-html="ABM.icon('chevron-right')"></span></button>
+        </div>
+        <a :href="'closings.html?range=this_month' + (isSuperAdmin ? '&branch=' + branchId : '')" class="btn btn-secondary"><span x-html="ABM.icon('clipboard')"></span>History</a>
+        <button type="button" class="btn btn-primary" @click="print()"><span x-html="ABM.icon('printer')"></span>Print Z-Report</button>
+      </div>
+    </div>
+
+    <!-- Alerts -->
+    <div class="space-y-3 mb-4 no-print">
+      <div class="alert alert-warning" x-show="unclosed.length" x-cloak>
+        <span x-html="ABM.icon('warning')"></span>
+        <div class="min-w-0">
+          <b><span x-text="unclosed.length"></span> previous day<span x-text="unclosed.length === 1 ? '' : 's'"></span> with activity <span x-text="unclosed.length === 1 ? 'has' : 'have'"></span> not been closed</b> for <span x-text="branch.name"></span>:
+          <span class="inline-flex flex-wrap gap-1.5 mt-1">
+            <template x-for="u in unclosed.slice(0, 6)" :key="u">
+              <a :href="dayLink(u)" class="badge badge-amber hover:underline" x-text="ABM.utils.date(u, 'short')"></a>
+            </template>
+            <span class="badge badge-slate" x-show="unclosed.length > 6" x-text="'+' + (unclosed.length - 6) + ' more'"></span>
+          </span>
+          <div class="text-xs mt-1 opacity-80">The opening balance carries over from the last <i>closed</i> day, so close earlier days first to keep the float accurate.</div>
+        </div>
+      </div>
+      <div class="alert alert-success" x-show="readOnly" x-cloak>
+        <span x-html="ABM.icon('lock')"></span>
+        <div class="min-w-0"><b>This day is closed.</b> Closed by <span x-text="ABM.db.userName(closing && closing.closed_by)"></span> on <span x-text="closing ? ABM.utils.datetime(closing.closed_at) : ''"></span> — the report below is read-only.
+          <template x-if="isSuperAdmin"><span> Need to correct it? <button type="button" class="font-semibold underline" @click="reopen()">Reopen this day</button>.</span></template>
+        </div>
+      </div>
+      <div class="alert alert-info" x-show="closing && closing.status === 'open'" x-cloak>
+        <span x-html="ABM.icon('info')"></span>
+        <div class="min-w-0"><b>This day was reopened</b><span x-show="closing && closing.reopened_by"> by <span x-text="ABM.db.userName(closing && closing.reopened_by)"></span> on <span x-text="closing ? ABM.utils.datetime(closing.reopened_at) : ''"></span></span>. Re-count the drawer and close it again.</div>
+      </div>
+      <div class="alert alert-danger" x-show="readOnly && drift" x-cloak>
+        <span x-html="ABM.icon('warning')"></span>
+        <div class="min-w-0"><b>Live figures differ from the closed report.</b> Expected cash from current data is <span x-text="$money(live.expected)"></span> versus <span x-text="closing ? $money(closing.expected_cash) : ''"></span> recorded at closing (difference <span x-text="$money(drift)"></span>). Entries were probably added or edited after the day was closed<template x-if="isSuperAdmin"><span> — reopen the day to re-close it with the current figures</span></template>.</div>
+      </div>
+      <div class="alert alert-info" x-show="!readOnly && !canClose" x-cloak>
+        <span x-html="ABM.icon('info')"></span>
+        <div>You can review this Z-report, but closing the day requires the <span class="mono">closing.manage</span> permission.</div>
+      </div>
+    </div>
+
+    <div class="print-area">
+      <!-- Print-only header -->
+      <div class="hidden print:block mb-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <div class="text-xl font-extrabold" x-text="ABM.db.setting('company_name') || 'Abbott Mobile'"></div>
+            <div class="text-sm" x-text="branch.name + (branch.address ? ' · ' + branch.address : '') + (branch.phone ? ' · ' + branch.phone : '')"></div>
+          </div>
+          <div class="text-right">
+            <div class="text-lg font-bold">Z-REPORT</div>
+            <div class="text-sm" x-text="ABM.utils.date(date, 'long')"></div>
+            <div class="text-xs" x-text="readOnly ? ('Closed by ' + ABM.db.userName(closing && closing.closed_by) + ' · ' + (closing ? ABM.utils.datetime(closing.closed_at) : '')) : 'PROVISIONAL — day not closed yet'"></div>
+            <div class="text-xs" x-text="'Printed by ' + user.name + ' · ' + ABM.utils.datetime(new Date())"></div>
+          </div>
+        </div>
+        <div class="border-b border-slate-300 mt-3"></div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- LEFT: cash drawer + collections + summary -->
+        <div class="lg:col-span-2 space-y-4 min-w-0">
+          <!-- Cash drawer reconciliation -->
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Cash drawer</div><div class="card-subtitle" x-text="readOnly ? 'Figures recorded at closing · click a line to see the entries' : 'Computed live from today\'s entries · click a line to see the entries'"></div></div>
+              <span x-html="readOnly ? $badge('closed') : $badge('open', 'Not closed')"></span>
+            </div>
+            <div class="divide-y divide-slate-100">
+              <!-- Opening balance -->
+              <div class="z-line cursor-default hover:!bg-transparent">
+                <span class="chip chip-slate !w-9 !h-9" x-html="ABM.icon('wallet','w-4 h-4')"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-semibold text-slate-800">Opening balance</div>
+                  <div class="text-xs text-slate-500" x-text="fig.openingSource"></div>
+                </div>
+                <template x-if="!readOnly && live.openingEditable">
+                  <div class="w-32 sm:w-40 flex-none no-print"><input type="number" min="0" step="0.01" class="input input-sm input-money" x-model.number="form.opening" @input="recompute()" aria-label="Opening balance"></div>
+                </template>
+                <div class="num font-bold text-slate-900 tabular whitespace-nowrap" :class="(!readOnly && live.openingEditable) ? 'hidden print:block' : ''" x-text="$money(fig.opening)"></div>
+              </div>
+              <!-- Cash lines -->
+              <template x-for="l in lines" :key="l.key">
+                <div>
+                  <button type="button" class="z-line" @click="toggle(l.key)" :aria-expanded="expanded[l.key] ? 'true' : 'false'">
+                    <span class="chip !w-9 !h-9" :class="l.sign > 0 ? 'chip-money' : 'chip-danger'" x-html="ABM.icon(l.icon,'w-4 h-4')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-semibold text-slate-800 flex items-center gap-2 flex-wrap"><span x-text="l.label"></span><span class="badge badge-slate" x-text="l.count + ' entr' + (l.count === 1 ? 'y' : 'ies')"></span></div>
+                      <div class="text-xs text-slate-500" x-text="l.hint"></div>
+                      <div class="text-xs text-rose-600 font-medium" x-show="readOnly && Math.abs(l.live - l.amount) >= 0.01" x-text="'Live data now shows ' + ABM.utils.money(l.live)"></div>
+                    </div>
+                    <div class="text-right flex-none">
+                      <div class="font-bold tabular whitespace-nowrap" :class="l.sign > 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="(l.sign > 0 ? '+ ' : '− ') + ABM.utils.money(l.amount)"></div>
+                    </div>
+                    <span class="text-slate-400 no-print" x-html="ABM.icon(expanded[l.key] ? 'chevron-up' : 'chevron-down','w-4 h-4')"></span>
+                  </button>
+                  <!-- no x-collapse: the Alpine Collapse plugin is not loaded (the guide allows only the Alpine core CDN),
+                       and the directive logged a warning for every line on every page load -->
+                  <div class="z-detail" x-show="expanded[l.key]" x-cloak>
+                    <ul>
+                      <template x-for="it in l.items" :key="it.id">
+                        <li>
+                          <div class="min-w-0 flex-1">
+                            <a :href="it.href" class="font-semibold text-navy-700 hover:underline mono" x-text="it.label"></a>
+                            <span class="text-slate-500 ml-2" x-text="it.sub"></span>
+                          </div>
+                          <span class="text-xs text-slate-400 hidden sm:inline whitespace-nowrap" x-text="it.time"></span>
+                          <span class="font-semibold tabular whitespace-nowrap" x-text="$money(it.amount)"></span>
+                        </li>
+                      </template>
+                      <template x-if="!l.items.length"><li class="text-slate-400 italic">No entries on this day.</li></template>
+                      <li class="!pl-14 no-print" x-show="l.items.length"><a :href="l.href" class="text-xs font-semibold text-navy-700 hover:underline">Open in <span x-text="l.hrefLabel"></span> →</a></li>
+                    </ul>
+                  </div>
+                </div>
+              </template>
+              <!-- Expected -->
+              <div class="z-line cursor-default hover:!bg-transparent bg-slate-50">
+                <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('calculator','w-4 h-4')"></span>
+                <div class="min-w-0 flex-1"><div class="text-sm font-bold text-slate-900 uppercase tracking-wide">Expected cash in drawer</div><div class="text-xs text-slate-500">Opening + cash in − cash out</div></div>
+                <div class="text-lg font-extrabold text-slate-900 tabular whitespace-nowrap" x-text="$money(fig.expected)"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Non-cash collections -->
+            <div class="card min-w-0">
+              <div class="card-header"><div><div class="card-title">Non-cash collections</div><div class="card-subtitle">Sales, ledger receipts & repair payments</div></div></div>
+              <ul class="divide-y divide-slate-100">
+                <template x-for="m in nonCash" :key="m.method">
+                  <li class="flex items-center gap-3 px-5 py-2.5">
+                    <span x-html="$badge(m.method)"></span>
+                    <span class="flex-1 text-xs text-slate-400" x-text="m.count + ' entr' + (m.count === 1 ? 'y' : 'ies')"></span>
+                    <span class="font-semibold tabular" x-text="$money(m.amount)"></span>
+                  </li>
+                </template>
+                <li class="flex items-center gap-3 px-5 py-2.5 bg-slate-50 font-bold text-slate-900">
+                  <span class="flex-1">Total non-cash</span>
+                  <span class="tabular" x-text="$money(nonCashTotal)"></span>
+                </li>
+                <li class="flex items-center gap-3 px-5 py-2.5 text-xs text-slate-500" x-show="storeCreditUsed > 0"><span class="flex-1">Store credit redeemed at POS (not a collection)</span><span class="tabular" x-text="$money(storeCreditUsed)"></span></li>
+              </ul>
+            </div>
+            <!-- Sales & repairs summary -->
+            <div class="card min-w-0">
+              <div class="card-header"><div><div class="card-title">Sales & repairs</div><div class="card-subtitle" x-text="ABM.utils.date(date)"></div></div><a :href="'sales.html?' + dayQuery" class="text-xs font-semibold text-navy-700 hover:underline no-print">Sales</a></div>
+              <dl class="divide-y divide-slate-100 text-sm">
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Invoices</dt><dd class="font-semibold tabular" x-text="summary.invoices"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Gross sales</dt><dd class="font-semibold tabular" x-text="$money(summary.gross)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Discounts</dt><dd class="font-semibold tabular text-rose-600" x-text="'− ' + ABM.utils.money(summary.discounts)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600" x-text="(ABM.db.setting('tax_label') || 'Tax')"></dt><dd class="font-semibold tabular" x-text="$money(summary.tax)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2 bg-slate-50"><dt class="font-bold text-slate-900">Net sales</dt><dd class="font-bold tabular text-slate-900" x-text="$money(summary.net)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Credit (khata) sales <span class="text-slate-400" x-text="'· ' + summary.creditCount"></span></dt><dd class="font-semibold tabular text-amber-700" x-text="$money(summary.credit)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Returns <span class="text-slate-400" x-text="'· ' + summary.returns"></span></dt><dd class="font-semibold tabular text-rose-600" x-text="$money(summary.returnsAmount)"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Repair jobs received / delivered</dt><dd class="font-semibold tabular" x-text="summary.jobsReceived + ' / ' + summary.jobsDelivered"></dd></div>
+                <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Repair revenue (delivered)</dt><dd class="font-semibold tabular" x-text="$money(summary.repairRevenue)"></dd></div>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: count & close / closed summary -->
+        <div class="space-y-4 min-w-0">
+          <!-- Closed summary -->
+          <template x-if="readOnly">
+            <div class="card border-emerald-200">
+              <div class="card-header">
+                <div><div class="card-title">Closing summary</div><div class="card-subtitle">Recorded at closing</div></div>
+                <span x-html="$badge('closed')"></span>
+              </div>
+              <div class="card-body space-y-3">
+                <div class="grid grid-cols-2 gap-3">
+                  <div class="rounded-xl bg-slate-50 p-3 min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Expected</div><div class="text-lg font-bold text-slate-900 tabular truncate" x-text="$money(closing.expected_cash)"></div></div>
+                  <div class="rounded-xl bg-slate-50 p-3 min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Counted</div><div class="text-lg font-bold text-slate-900 tabular truncate" x-text="$money(closing.actual_cash)"></div></div>
+                </div>
+                <div class="rounded-xl p-3 flex items-center justify-between gap-3" :class="discClass(closing.discrepancy, 'box')">
+                  <div><div class="text-[11px] font-bold uppercase tracking-wider">Discrepancy</div><div class="text-xs opacity-80" x-text="discLabel(closing.discrepancy)"></div></div>
+                  <div class="text-xl font-extrabold tabular" x-text="ABM.utils.money(closing.discrepancy)"></div>
+                </div>
+                <dl class="text-sm divide-y divide-slate-100">
+                  <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Bank deposit</dt><dd class="font-semibold tabular" x-text="$money(closing.bank_deposit)"></dd></div>
+                  <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Retained float (next opening)</dt><dd class="font-semibold tabular" x-text="$money(closing.retained_float)"></dd></div>
+                  <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Closed by</dt><dd class="font-semibold text-right" x-text="ABM.db.userName(closing.closed_by)"></dd></div>
+                  <div class="flex justify-between gap-3 py-2"><dt class="text-slate-600">Closed at</dt><dd class="font-semibold text-right" x-text="ABM.utils.datetime(closing.closed_at)"></dd></div>
+                </dl>
+                <div x-show="closing.notes"><div class="section-title">Notes</div><p class="text-sm text-slate-700 whitespace-pre-line" x-text="closing.notes"></p></div>
+                <div x-show="closingDenoms.length">
+                  <div class="section-title">Denominations counted</div>
+                  <ul class="text-sm divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    <template x-for="d in closingDenoms" :key="d.label">
+                      <li class="flex items-center gap-3 px-3 py-1.5"><span class="w-24 text-slate-600" x-text="d.label"></span><span class="flex-1 text-xs text-slate-400" x-text="d.count !== null ? '× ' + d.count : ''"></span><span class="font-semibold tabular" x-text="$money(d.amount)"></span></li>
+                    </template>
+                  </ul>
+                </div>
+              </div>
+              <div class="card-footer flex flex-wrap gap-2 no-print">
+                <button type="button" class="btn btn-primary" @click="print()"><span x-html="ABM.icon('printer')"></span>Print Z-Report</button>
+                <template x-if="isSuperAdmin"><button type="button" class="btn btn-danger-soft" @click="reopen()"><span x-html="ABM.icon('refresh')"></span>Reopen</button></template>
+              </div>
+            </div>
+          </template>
+
+          <!-- Count & close form -->
+          <template x-if="!readOnly">
+            <div class="card no-print" :class="canClose ? 'border-navy-200' : ''">
+              <div class="card-header">
+                <div><div class="card-title">Count the drawer</div><div class="card-subtitle">Actual cash on hand at close</div></div>
+                <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+                  <button type="button" class="px-2.5 py-1 rounded-md" :class="form.mode === 'count' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.mode = 'count'">Count notes</button>
+                  <button type="button" class="px-2.5 py-1 rounded-md" :class="form.mode === 'direct' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.mode = 'direct'">Enter total</button>
+                </div>
+              </div>
+              <div class="card-body space-y-4">
+                <div x-show="form.mode === 'count'" class="space-y-1.5">
+                  <template x-for="d in denoms" :key="d">
+                    <div class="denom-row">
+                      <span class="text-sm font-semibold text-slate-700 tabular" x-text="'Rs. ' + ABM.utils.num(d)"></span>
+                      <div class="input-group"><span class="addon addon-left">×</span><input type="number" min="0" step="1" inputmode="numeric" class="input input-sm !text-right" :aria-label="'Number of Rs. ' + d + ' notes'" x-model.number="form.counts[d]" placeholder="0" :disabled="!canClose"></div>
+                      <span class="text-sm text-right tabular text-slate-600" x-text="ABM.utils.money((Number(form.counts[d]) || 0) * d, {decimals:0})"></span>
+                    </div>
+                  </template>
+                  <div class="denom-row">
+                    <span class="text-sm font-semibold text-slate-700">Coins</span>
+                    <div class="input-group"><span class="addon addon-left">Rs.</span><input type="number" min="0" step="1" inputmode="decimal" class="input input-sm !text-right" aria-label="Coins amount" x-model.number="form.coins" placeholder="0" :disabled="!canClose"></div>
+                    <span class="text-sm text-right tabular text-slate-600" x-text="ABM.utils.money(Number(form.coins) || 0, {decimals:0})"></span>
+                  </div>
+                </div>
+                <div x-show="form.mode === 'direct'">
+                  <label class="label" for="ce-actual">Actual cash counted <span class="req">*</span></label>
+                  <div class="input-group"><input id="ce-actual" type="number" min="0" step="0.01" inputmode="decimal" class="input input-lg input-money" x-model.number="form.actualDirect" placeholder="0.00" :disabled="!canClose" :class="errors.actual && 'is-invalid'"><span class="addon">Rs.</span></div>
+                </div>
+                <p class="field-error" x-show="errors.actual" x-text="errors.actual"></p>
+
+                <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 text-sm">
+                  <div class="flex justify-between gap-3 px-3 py-2"><span class="text-slate-600">Expected</span><span class="font-semibold tabular" x-text="$money(fig.expected)"></span></div>
+                  <div class="flex justify-between gap-3 px-3 py-2"><span class="text-slate-600">Counted</span><span class="font-semibold tabular" x-text="actualEntered ? $money(actual) : '—'"></span></div>
+                  <div class="flex justify-between items-center gap-3 px-3 py-2" :class="discClass(discrepancy, 'row')">
+                    <span class="font-bold">Discrepancy</span>
+                    <span class="text-right"><span class="font-extrabold tabular text-base" x-text="actualEntered ? ABM.utils.money(discrepancy) : '—'"></span><span class="block text-[11px] opacity-80" x-text="actualEntered ? discLabel(discrepancy) : 'Count the drawer to compare'"></span></span>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="label" for="ce-notes">Notes <span class="req" x-show="actualEntered && discrepancy !== 0">*</span> <span class="text-slate-400 font-normal" x-show="!(actualEntered && discrepancy !== 0)">(optional)</span></label>
+                  <textarea id="ce-notes" class="textarea" rows="2" x-model="form.notes" :class="errors.notes && 'is-invalid'" :placeholder="actualEntered && discrepancy !== 0 ? 'Explain the variance (required when the drawer does not balance)' : 'Anything notable about today'" :disabled="!canClose" maxlength="500"></textarea>
+                  <p class="field-error" x-show="errors.notes" x-text="errors.notes"></p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label class="label" for="ce-deposit">Bank deposit</label>
+                    <div class="input-group"><input id="ce-deposit" type="number" min="0" step="0.01" inputmode="decimal" class="input input-money" x-model.number="form.bank_deposit" @input="onDepositInput()" placeholder="0.00" :disabled="!canClose" :class="errors.bank_deposit && 'is-invalid'"><span class="addon">Rs.</span></div>
+                    <p class="field-error" x-show="errors.bank_deposit" x-text="errors.bank_deposit"></p>
+                    <p class="help" x-show="!errors.bank_deposit"><button type="button" class="font-semibold text-navy-700 hover:underline" @click="suggestDeposit()" :disabled="!actualEntered">Suggest</button> — everything above the float</p>
+                    <div class="mt-2" x-show="Number(form.bank_deposit) > 0">
+                      <label class="label !text-[11px]" for="ce-bank">Into which account</label>
+                      <select id="ce-bank" class="select input-sm" x-model="bankAccountId" :disabled="!canClose || !bankAccounts.length">
+                        <option value="">Do not record it in the bank</option>
+                        <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="a.name"></option></template>
+                      </select>
+                      <p class="help !mt-1" x-show="!bankAccounts.length">No bank account yet — <a href="banking.html?new=1" class="font-semibold text-navy-700 hover:underline">add one</a> so banked cash is tracked.</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label class="label" for="ce-float">Retained float</label>
+                    <div class="input-group"><input id="ce-float" type="number" min="0" step="0.01" inputmode="decimal" class="input input-money" x-model.number="form.retained_float" placeholder="0.00" :disabled="!canClose" :class="errors.retained_float && 'is-invalid'"><span class="addon">Rs.</span></div>
+                    <p class="field-error" x-show="errors.retained_float" x-text="errors.retained_float"></p>
+                    <p class="help" x-show="!errors.retained_float">Becomes tomorrow's opening balance</p>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs text-slate-500" x-text="canClose ? 'Closing locks this day for editing.' : 'Read-only for your role.'"></span>
+                <button type="button" class="btn btn-money" @click="closeDay()" :disabled="!canClose || busy" x-show="canClose"><span x-html="ABM.icon('lock')"></span>Close Day</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Cashier shifts that touched this day -->
+          <div class="card no-print" x-show="shifts.length">
+            <div class="card-header">
+              <div><div class="card-title">Cashier drawers</div><div class="card-subtitle">Shifts that ran on this day</div></div>
+              <a :href="'shifts.html?range=custom&from=' + date + '&to=' + date + (isSuperAdmin ? '&branch=' + branchId : '')" class="text-xs font-semibold text-navy-700 hover:underline">All shifts</a>
+            </div>
+            <div class="divide-y divide-slate-100">
+              <template x-for="s in shifts" :key="s.id">
+                <a :href="'shift-view.html?id=' + s.id" class="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 min-w-0">
+                  <span class="chip flex-none" :class="s.status === 'open' ? 'chip-warning' : 'chip-money'" x-html="ABM.icon('wallet','w-4 h-4')"></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-semibold text-slate-800 truncate" x-text="ABM.db.userName(s.user_id)"></span>
+                    <span class="block text-[11px] text-slate-500 truncate"><span class="mono" x-text="s.shift_no"></span> · <span x-text="ABM.utils.time(s.opened_at) + ' → ' + (s.closed_at ? ABM.utils.time(s.closed_at) : 'open')"></span></span>
+                  </span>
+                  <span class="flex-none text-right">
+                    <span class="block text-sm font-bold tabular text-slate-800" x-text="$money(s.status === 'open' ? ABM.shift.tally(s).expected : s.counted_cash, {decimals:0})"></span>
+                    <span class="block text-[11px]" :class="s.status === 'open' ? 'text-amber-700' : s.variance === 0 ? 'text-emerald-700' : s.variance < 0 ? 'text-rose-600' : 'text-amber-700'"
+                          x-text="s.status === 'open' ? 'still open' : (s.variance === 0 ? 'balanced' : (s.variance < 0 ? 'short ' : 'over ') + ABM.utils.money(Math.abs(s.variance), {decimals:0}))"></span>
+                  </span>
+                </a>
+              </template>
+            </div>
+            <div class="card-footer text-xs text-slate-500">Drawer variances are the cashiers' own counts — the Z-report above still reconciles the whole branch.</div>
+          </div>
+
+          <!-- Previous closing card -->
+          <div class="card no-print" x-show="prevClosing">
+            <div class="card-header"><div class="card-title">Previous closing</div><a :href="prevClosing ? dayLink(prevClosing.closing_date) : '#'" class="text-xs font-semibold text-navy-700 hover:underline">Open</a></div>
+            <dl class="text-sm divide-y divide-slate-100" x-show="prevClosing">
+              <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Date</dt><dd class="font-semibold" x-text="prevClosing ? ABM.utils.date(prevClosing.closing_date) : ''"></dd></div>
+              <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Counted</dt><dd class="font-semibold tabular" x-text="prevClosing ? $money(prevClosing.actual_cash) : ''"></dd></div>
+              <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Discrepancy</dt><dd><span x-html="prevClosing ? discBadge(prevClosing.discrepancy) : ''"></span></dd></div>
+              <div class="flex justify-between gap-3 px-5 py-2"><dt class="text-slate-600">Retained float</dt><dd class="font-semibold tabular" x-text="prevClosing ? $money(prevClosing.retained_float) : ''"></dd></div>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile sticky action bar -->
+    <div class="h-20 lg:hidden no-print" x-show="!readOnly && canClose"></div>
+    <div class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-3 flex items-center gap-3 no-print" x-show="!readOnly && canClose" x-cloak>
+      <div class="min-w-0 flex-1">
+        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Expected · Counted</div>
+        <div class="text-sm font-bold text-slate-900 tabular truncate"><span x-text="ABM.utils.money(fig.expected, {decimals:0})"></span> · <span x-text="actualEntered ? ABM.utils.money(actual, {decimals:0}) : '—'"></span></div>
+        <div class="text-xs font-semibold truncate" :class="discClass(discrepancy, 'text')" x-text="actualEntered ? ('Diff ' + ABM.utils.money(discrepancy, {decimals:0})) : 'Not counted yet'"></div>
+      </div>
+      <button type="button" class="btn btn-money flex-none" @click="closeDay()" :disabled="busy"><span x-html="ABM.icon('lock')"></span>Close Day</button>
+    </div>
+  </main>
+
+  <script>
+    function dayEndPage() {
+      const { db, utils, ui, session } = ABM;
+      const DENOMS = [5000, 1000, 500, 100, 50, 20, 10];
+      const NONCASH = ['card', 'jazzcash', 'easypaisa', 'bank_transfer'];
+      const dayOf = (v) => String(v || '').slice(0, 10);
+      const user = session.user() || { name: '' };
+      const isSuperAdmin = session.isSuperAdmin();
+      const qBranch = utils.qs('branch');
+      const branchId = isSuperAdmin && qBranch && db.find('branches', qBranch) ? Number(qBranch) : session.branchId();
+      return {
+        user, isSuperAdmin, branchId,
+        branch: db.find('branches', branchId) || { name: '', code: '', address: '', phone: '' },
+        canClose: session.can('closing.edit'),
+        today: utils.today(),
+        date: utils.today(),
+        denoms: DENOMS,
+        closing: null, prevClosing: null, shifts: [],
+        // where the day's banked cash goes (see ABM.bank)
+        bankAccounts: [], bankAccountId: '',
+        live: { opening: 0, openingSource: '', openingEditable: false, expected: 0 },
+        lines: [], nonCash: [], nonCashTotal: 0, storeCreditUsed: 0,
+        summary: { invoices: 0, gross: 0, discounts: 0, tax: 0, net: 0, creditCount: 0, credit: 0, returns: 0, returnsAmount: 0, jobsReceived: 0, jobsDelivered: 0, repairRevenue: 0 },
+        unclosed: [],
+        expanded: {},
+        form: { mode: 'count', counts: {}, coins: '', actualDirect: '', opening: '', notes: '', bank_deposit: '', retained_float: '' },
+        errors: {},
+        busy: false,
+
+        init() {
+          const qd = utils.qs('date');
+          if (qd && utils.parseDate(qd)) {
+            if (qd > this.today) { ui.warn('You cannot close a future day — showing today instead.'); this.date = this.today; }
+            else this.date = qd;
+          }
+          this.resetForm();
+          this.compute();
+          if (utils.qs('print') === '1' && !/__layout|__click/.test(location.search)) setTimeout(() => window.print(), 900);
+        },
+
+        /* ----------------------------------------------------------- helpers */
+        get isToday() { return this.date === this.today; },
+        get readOnly() { return !!(this.closing && this.closing.status === 'closed'); },
+        get dayQuery() { return 'range=custom&from=' + this.date + '&to=' + this.date; },
+        dayLink(d) { return 'day-end.html?date=' + d + (isSuperAdmin ? '&branch=' + this.branchId : ''); },
+        toggle(key) { this.expanded[key] = !this.expanded[key]; },
+        /** Figures shown in the report: the stored closing when the day is closed, otherwise live data. */
+        get fig() {
+          const c = this.closing;
+          if (this.readOnly && c) return { opening: Number(c.opening_balance) || 0, openingSource: 'As recorded at closing', expected: Number(c.expected_cash) || 0 };
+          return { opening: this.live.opening, openingSource: this.live.openingSource, expected: this.live.expected };
+        },
+        get drift() { return this.readOnly && this.closing ? utils.round2(this.live.expected - (Number(this.closing.expected_cash) || 0)) : 0; },
+        get closingDenoms() {
+          const c = this.closing; if (!c || !c.denominations) return [];
+          let d = c.denominations; if (typeof d === 'string') { try { d = JSON.parse(d); } catch (e) { return []; } }
+          const out = DENOMS.filter((n) => Number(d[n]) > 0).map((n) => ({ label: 'Rs. ' + utils.num(n), count: Number(d[n]), amount: Number(d[n]) * n }));
+          if (Number(d.coins) > 0) out.push({ label: 'Coins', count: null, amount: Number(d.coins) });
+          return out;
+        },
+        discClass(v, kind) {
+          const n = Number(v) || 0;
+          if (kind === 'box') return n === 0 ? 'bg-emerald-100 text-emerald-700' : n < 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700';
+          if (kind === 'row') return n === 0 || v === null ? 'text-emerald-700' : n < 0 ? 'text-rose-600' : 'text-amber-700';
+          return n === 0 || v === null ? 'text-emerald-700' : n < 0 ? 'text-rose-600' : 'text-amber-700';
+        },
+        discLabel(v) { const n = Number(v) || 0; return n === 0 ? 'Drawer balances' : n < 0 ? 'Short — less cash than expected' : 'Over — more cash than expected'; },
+        discBadge(v) { const n = utils.round2(v); return ui.badge(n === 0 ? 'ok' : n < 0 ? 'due' : 'partial', n === 0 ? 'Balanced' : (n < 0 ? 'Short ' : 'Over ') + utils.money(Math.abs(n), { decimals: 0 })); },
+
+        /* -------------------------------------------------------------- date */
+        setDate(v) {
+          if (!v || !utils.parseDate(v)) return;
+          if (v > this.today) { ui.warn('You cannot open a future day.'); v = this.today; }
+          this.date = v;
+          const q = new URLSearchParams(location.search); q.set('date', v); if (isSuperAdmin) q.set('branch', String(this.branchId));
+          try { history.replaceState(null, '', location.pathname + '?' + q.toString()); } catch (e) { /* ignore */ }
+          this.expanded = {}; this.errors = {};
+          this.resetForm();
+          this.compute();
+        },
+        shiftDate(n) { this.setDate(utils.isoDate(utils.addDays(utils.parseDate(this.date), n))); },
+
+        /* ----------------------------------------------------------- compute */
+        resetForm() {
+          const counts = {}; DENOMS.forEach((d) => { counts[d] = ''; });
+          this.form = { mode: 'count', counts, coins: '', actualDirect: '', opening: '', notes: '', bank_deposit: '', retained_float: Number(db.setting('cash_float')) || 0 };
+        },
+        compute() {
+          const b = this.branchId, d = this.date;
+          const money = (n) => utils.money(n);
+          // closing rows
+          this.bankAccounts = ABM.bank.accounts(b).filter((a) => a.is_active);
+          if (!this.bankAccounts.some((a) => String(a.id) === String(this.bankAccountId))) {
+            this.bankAccountId = this.bankAccounts.length ? String(this.bankAccounts[0].id) : '';
+          }
+          // cashier drawers that ran on this day (opened, closed or still open on it)
+          this.shifts = utils.sortBy(db.all('cashier_shifts').filter((s) => Number(s.branch_id) === Number(b)
+            && (dayOf(s.opened_at) === d || (s.closed_at && dayOf(s.closed_at) === d) || (s.status === 'open' && dayOf(s.opened_at) <= d))), 'opened_at');
+          const closings = db.all('daily_closings').filter((c) => Number(c.branch_id) === Number(b));
+          this.closing = closings.find((c) => c.closing_date === d) || null;
+          this.prevClosing = utils.sortBy(closings.filter((c) => c.closing_date < d && c.status === 'closed'), 'closing_date', 'desc')[0] || null;
+          // sales & payments
+          const sales = db.all('sales').filter((s) => Number(s.branch_id) === Number(b) && s.status !== 'void');
+          const saleById = new Map(sales.map((s) => [String(s.id), s]));
+          const salesToday = sales.filter((s) => dayOf(s.sale_date) === d);
+          const payments = db.all('sale_payments').map((p) => ({ p, s: saleById.get(String(p.sale_id)) })).filter((x) => x.s && dayOf(x.p.created_at || x.s.sale_date) === d);
+          const cashSales = payments.filter((x) => x.p.method === 'cash').map((x) => ({ id: 'p' + x.p.id, label: x.s.invoice_no, sub: db.customerName(x.s.customer_id), time: utils.time(x.p.created_at || x.s.sale_date), amount: Number(x.p.amount) || 0, href: 'sale-view.html?id=' + x.s.id }));
+          // customer ledger
+          const ctx = db.all('customer_transactions').filter((t) => Number(t.branch_id) === Number(b) && dayOf(t.created_at) === d);
+          const cashReceived = ctx.filter((t) => t.type === 'payment' && t.payment_method === 'cash' && Number(t.credit) > 0).map((t) => ({ id: 'c' + t.id, label: db.customerName(t.customer_id), sub: t.notes || t.payment_reference || 'Ledger payment', time: utils.time(t.created_at), amount: Number(t.credit) || 0, href: 'customer-view.html?id=' + t.customer_id }));
+          // repairs
+          const jobs = db.all('repair_jobs').filter((j) => Number(j.branch_id) === Number(b));
+          const jobById = new Map(jobs.map((j) => [String(j.id), j]));
+          const rpay = db.all('repair_payments').map((p) => ({ p, j: jobById.get(String(p.job_id)) })).filter((x) => x.j && dayOf(x.p.created_at) === d);
+          const cashRepairs = rpay.filter((x) => x.p.method === 'cash').map((x) => ({ id: 'r' + x.p.id, label: x.j.job_no, sub: db.customerName(x.j.customer_id) + ' · ' + utils.titleCase(x.p.kind || 'payment'), time: utils.time(x.p.created_at), amount: Number(x.p.amount) || 0, href: 'repair-view.html?id=' + x.j.id }));
+          // refunds
+          const returnsToday = db.all('sale_returns').filter((r) => Number(r.branch_id) === Number(b) && dayOf(r.return_date) === d);
+          const cashRefunds = returnsToday.filter((r) => r.refund_method === 'cash').map((r) => ({ id: 'ret' + r.id, label: r.return_no, sub: db.customerName(r.customer_id) + (r.reason ? ' · ' + r.reason : ''), time: utils.time(r.return_date), amount: Number(r.refund_amount) || 0, href: 'sale-view.html?id=' + r.sale_id }))
+            .concat(ctx.filter((t) => t.type === 'refund' && t.payment_method === 'cash' && t.reference_type !== 'sale_return' && (Number(t.debit) > 0 || Number(t.credit) > 0)).map((t) => ({ id: 'cr' + t.id, label: db.customerName(t.customer_id), sub: t.notes || 'Cash refund from ledger', time: utils.time(t.created_at), amount: Number(t.debit) || Number(t.credit) || 0, href: 'customer-view.html?id=' + t.customer_id })));
+          // expenses
+          const cashExpenses = db.all('expenses').filter((e) => Number(e.branch_id) === Number(b) && e.expense_date === d && e.payment_method === 'cash').map((e) => { const c = db.find('expense_categories', e.category_id); return { id: 'e' + e.id, label: c ? c.name : 'Expense', sub: e.description + (e.reference ? ' · ' + e.reference : ''), time: db.userName(e.created_by), amount: Number(e.amount) || 0, href: 'expenses.html?' + this.dayQuery + '&method=cash' }; });
+          // supplier payments
+          const supplierCash = db.all('supplier_transactions').filter((t) => Number(t.branch_id) === Number(b) && dayOf(t.created_at) === d && t.type === 'payment' && t.payment_method === 'cash' && Number(t.debit) > 0).map((t) => ({ id: 's' + t.id, label: db.supplierName(t.supplier_id), sub: t.notes || t.payment_reference || 'Supplier payment', time: utils.time(t.created_at), amount: Number(t.debit) || 0, href: 'supplier-view.html?id=' + t.supplier_id }));
+          // opening balance
+          const prev = this.prevClosing;
+          const settingFloat = Number(db.setting('cash_float')) || 0;
+          const openingEditable = !prev;
+          let opening = prev ? (Number(prev.retained_float) || 0) : settingFloat;
+          if (openingEditable) { if (this.form.opening === '' || this.form.opening === null) this.form.opening = opening; opening = Number(this.form.opening) || 0; }
+          const openingSource = prev ? 'Retained float from ' + utils.date(prev.closing_date) + (prev.closing_date !== utils.isoDate(utils.addDays(utils.parseDate(d), -1)) ? ' (last closed day)' : '') : 'No earlier closing — default cash float from settings' + (openingEditable && this.canClose ? ', editable' : '');
+          const c = this.closing;
+          const stored = (k, liveAmt) => (this.readOnly && c ? (Number(c[k]) || 0) : liveAmt);
+          const mk = (key, label, icon, sign, items, hint, href, hrefLabel, storedKey) => { const liveAmt = utils.sum(items, 'amount'); return { key, label, icon, sign, items, count: items.length, live: liveAmt, amount: stored(storedKey, liveAmt), hint, href, hrefLabel }; };
+          this.lines = [
+            mk('sales', 'Cash sales', 'receipt', 1, cashSales, 'Cash payments taken at POS', 'sales.html?' + this.dayQuery, 'Sales History', 'cash_sales'),
+            mk('received', 'Cash received (khata)', 'users', 1, cashReceived, 'Customer ledger payments in cash', 'customers.html', 'Customers', 'cash_received'),
+            mk('repairs', 'Cash from repairs', 'wrench', 1, cashRepairs, 'Advances and repair bills paid in cash', 'repairs.html?' + this.dayQuery, 'Repair Jobs', 'cash_repairs'),
+            mk('refunds', 'Cash refunds', 'return', -1, cashRefunds, 'Returns refunded from the drawer', 'returns.html?' + this.dayQuery, 'Returns', 'cash_refunds'),
+            mk('expenses', 'Cash expenses', 'banknotes', -1, cashExpenses, 'Expenses paid from the drawer', 'expenses.html?' + this.dayQuery + '&method=cash', 'Expenses', 'cash_expenses'),
+            mk('supplier', 'Supplier cash payments', 'truck', -1, supplierCash, 'Payables settled in cash', 'suppliers.html', 'Suppliers', 'supplier_cash_payments'),
+          ];
+          const liveExpected = utils.round2(opening + this.lines.reduce((a, l) => a + l.sign * l.live, 0));
+          this.live = { opening, openingSource, openingEditable, expected: liveExpected, sales: cashSales, received: cashReceived, repairs: cashRepairs, refunds: cashRefunds, expenses: cashExpenses, supplier: supplierCash };
+          // non-cash collections
+          const nc = {}; NONCASH.forEach((m) => { nc[m] = { method: m, amount: 0, count: 0 }; });
+          const addNc = (m, amt) => { if (nc[m]) { nc[m].amount = utils.round2(nc[m].amount + (Number(amt) || 0)); nc[m].count += 1; } };
+          payments.forEach((x) => addNc(x.p.method, x.p.amount));
+          ctx.filter((t) => t.type === 'payment' && Number(t.credit) > 0).forEach((t) => addNc(t.payment_method, t.credit));
+          rpay.forEach((x) => addNc(x.p.method, x.p.amount));
+          this.nonCash = NONCASH.map((m) => nc[m]);
+          this.nonCashTotal = utils.sum(this.nonCash, 'amount');
+          this.storeCreditUsed = utils.sum(payments.filter((x) => x.p.method === 'store_credit'), (x) => Number(x.p.amount) || 0);
+          // sales & repairs summary
+          const delivered = jobs.filter((j) => j.status === 'delivered' && dayOf(j.delivered_at) === d);
+          this.summary = {
+            invoices: salesToday.length, gross: utils.sum(salesToday, 'subtotal'), discounts: utils.sum(salesToday, 'discount_amount'), tax: utils.sum(salesToday, 'tax_amount'), net: utils.sum(salesToday, 'total'),
+            creditCount: salesToday.filter((s) => Number(s.due_amount) > 0).length, credit: utils.sum(salesToday, 'due_amount'),
+            returns: returnsToday.length, returnsAmount: utils.sum(returnsToday, 'refund_amount'),
+            jobsReceived: jobs.filter((j) => dayOf(j.received_at || j.created_at) === d).length, jobsDelivered: delivered.length, repairRevenue: utils.sum(delivered, 'total'),
+          };
+          // unclosed previous days (with activity, last 31 days before this date)
+          const activity = new Set();
+          const floor = utils.isoDate(utils.addDays(utils.parseDate(d), -31));
+          const note = (v) => { const x = dayOf(v); if (x && x < d && x >= floor) activity.add(x); };
+          sales.forEach((s) => note(s.sale_date));
+          db.all('expenses').forEach((e) => { if (Number(e.branch_id) === Number(b)) note(e.expense_date); });
+          db.all('customer_transactions').forEach((t) => { if (Number(t.branch_id) === Number(b) && t.type === 'payment') note(t.created_at); });
+          db.all('repair_payments').forEach((p) => { if (jobById.has(String(p.job_id))) note(p.created_at); });
+          const closedSet = new Set(closings.filter((x) => x.status === 'closed').map((x) => x.closing_date));
+          this.unclosed = [...activity].filter((x) => !closedSet.has(x)).sort();
+          // prefill the form from a reopened (status open) closing
+          if (c && c.status === 'open' && !this.form._prefilled) {
+            let den = c.denominations; if (typeof den === 'string') { try { den = JSON.parse(den); } catch (e) { den = null; } }
+            if (den) { this.form.mode = 'count'; DENOMS.forEach((n) => { this.form.counts[n] = Number(den[n]) || ''; }); this.form.coins = Number(den.coins) || ''; }
+            else { this.form.mode = 'direct'; this.form.actualDirect = Number(c.actual_cash) || 0; }
+            this.form.notes = c.notes || ''; this.form.bank_deposit = Number(c.bank_deposit) || ''; this.form.retained_float = Number(c.retained_float) || 0;
+            if (openingEditable) this.form.opening = Number(c.opening_balance) || 0;
+            this.form._prefilled = true;
+            this.compute();
+          }
+        },
+        recompute() { this.compute(); },
+
+        /* ------------------------------------------------------------- count */
+        get countedTotal() { return utils.round2(DENOMS.reduce((a, d) => a + (Number(this.form.counts[d]) || 0) * d, 0) + (Number(this.form.coins) || 0)); },
+        get actualEntered() {
+          if (this.form.mode === 'direct') return this.form.actualDirect !== '' && this.form.actualDirect !== null && !isNaN(Number(this.form.actualDirect));
+          return DENOMS.some((d) => this.form.counts[d] !== '' && this.form.counts[d] !== null) || (this.form.coins !== '' && this.form.coins !== null);
+        },
+        get actual() { return this.form.mode === 'direct' ? utils.round2(this.form.actualDirect) : this.countedTotal; },
+        get discrepancy() { return this.actualEntered ? utils.round2(this.actual - this.fig.expected) : null; },
+        onDepositInput() { if (this.actualEntered) this.form.retained_float = utils.round2(Math.max(0, this.actual - (Number(this.form.bank_deposit) || 0))); },
+        suggestDeposit() { if (!this.actualEntered) return; const fl = Number(this.form.retained_float) || 0; this.form.bank_deposit = utils.round2(Math.max(0, this.actual - fl)); this.form.retained_float = utils.round2(Math.min(fl, this.actual)); },
+        validate() {
+          const e = {};
+          if (!this.actualEntered) e.actual = this.form.mode === 'direct' ? 'Enter the cash counted in the drawer.' : 'Count the notes and coins in the drawer first.';
+          else if (this.actual < 0) e.actual = 'Counted cash cannot be negative.';
+          if (this.actualEntered && this.discrepancy !== 0 && !String(this.form.notes || '').trim()) e.notes = 'Explain the discrepancy before closing.';
+          const dep = Number(this.form.bank_deposit) || 0, fl = Number(this.form.retained_float) || 0;
+          if (dep < 0) e.bank_deposit = 'Deposit cannot be negative.';
+          if (fl < 0) e.retained_float = 'Float cannot be negative.';
+          if (this.actualEntered && dep + fl > this.actual + 0.005) e.bank_deposit = 'Deposit + retained float cannot exceed the counted cash (' + utils.money(this.actual) + ').';
+          if (this.live.openingEditable && (Number(this.form.opening) < 0 || isNaN(Number(this.form.opening)))) e.opening = 'Opening balance must be 0 or more.';
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        async closeDay() {
+          if (!this.canClose) return;
+          if (this.date > this.today) { ui.error('You cannot close a future day.'); return; }
+          if (!this.validate()) { ui.error(Object.values(this.errors)[0]); return; }
+          const disc = this.discrepancy;
+          const ok = await ui.confirm({
+            title: 'Close ' + utils.date(this.date) + ' for ' + this.branch.name + '?',
+            message: 'Expected ' + utils.money(this.fig.expected) + ' · Counted ' + utils.money(this.actual) + ' · ' + (disc === 0 ? 'Drawer balances.' : (disc < 0 ? 'Short by ' : 'Over by ') + utils.money(Math.abs(disc)) + '.') + ' Once closed, the day becomes read-only.',
+            confirmText: 'Close Day', danger: disc !== 0,
+          });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const L = {}; this.lines.forEach((l) => { L[l.key] = l.live; });
+            const den = this.form.mode === 'count' ? Object.assign({}, ...DENOMS.map((d) => ({ [d]: Number(this.form.counts[d]) || 0 })), { coins: Number(this.form.coins) || 0 }) : null;
+            const row = {
+              branch_id: Number(this.branchId), closing_date: this.date, opening_balance: utils.round2(this.live.opening),
+              cash_sales: L.sales, cash_received: L.received, cash_repairs: L.repairs, cash_refunds: L.refunds, cash_expenses: L.expenses, supplier_cash_payments: L.supplier,
+              expected_cash: this.live.expected, actual_cash: this.actual, discrepancy: disc,
+              bank_deposit: utils.round2(this.form.bank_deposit), retained_float: utils.round2(this.form.retained_float), denominations: den,
+              notes: String(this.form.notes || '').trim(), status: 'closed', closed_by: user.id || null, closed_at: utils.now(),
+            };
+            let rec;
+            if (this.closing) { rec = db.update('daily_closings', this.closing.id, row); }
+            else { rec = db.insert('daily_closings', row); }
+            // the cash that leaves for the bank has to land in an account, not disappear
+            let banked = '';
+            if (row.bank_deposit > 0 && this.bankAccountId) {
+              try {
+                ABM.bank.deposit(this.bankAccountId, row.bank_deposit, {
+                  date: this.date, reference: 'Day-end ' + this.date, notes: 'Cash banked at day-end',
+                  ref: { type: 'daily_closing', id: rec.id }, branchId: this.branchId,
+                });
+                banked = ' ' + utils.money(row.bank_deposit) + ' deposited into ' + db.find('bank_accounts', this.bankAccountId).name + '.';
+              } catch (bankErr) {
+                ui.warn('The day is closed, but the deposit could not be booked to the bank: ' + bankErr.message);
+              }
+            }
+            db.audit('closing.close', 'daily_closing', rec.id, `Day ${this.date} closed for ${this.branch.code}: expected ${utils.money(row.expected_cash)}, counted ${utils.money(row.actual_cash)}, discrepancy ${utils.money(row.discrepancy)}${banked ? '; banked ' + utils.money(row.bank_deposit) : ''}`);
+            ui.success('Day closed. ' + (disc === 0 ? 'The drawer balanced.' : 'Discrepancy of ' + utils.money(disc) + ' recorded.') + banked);
+            this.expanded = {}; this.errors = {};
+            this.resetForm();
+            this.compute();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          } catch (err) {
+            ui.error(err.message || 'Could not close the day.');
+          } finally { this.busy = false; }
+        },
+        async reopen() {
+          if (!isSuperAdmin || !this.closing) return;
+          const later = db.all('daily_closings').filter((c) => Number(c.branch_id) === Number(this.branchId) && c.closing_date > this.date && c.status === 'closed').length;
+          const ok = await ui.confirm({ title: 'Reopen ' + utils.date(this.date) + '?', message: 'The recorded figures stay on file until the day is closed again. ' + (later ? later + ' later day' + (later === 1 ? '' : 's') + ' will keep their opening balance. ' : '') + 'This action is logged.', confirmText: 'Reopen day', danger: true });
+          if (!ok) return;
+          db.update('daily_closings', this.closing.id, { status: 'open', reopened_by: user.id || null, reopened_at: utils.now() });
+          db.audit('closing.reopen', 'daily_closing', this.closing.id, `Day ${this.date} reopened for ${this.branch.code} (was closed by ${db.userName(this.closing.closed_by)})`);
+          ui.warn('Day reopened — re-count and close it again.');
+          this.resetForm();
+          this.compute();
+        },
+        print() { window.print(); },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Create an account · Abbott Mobiles</title>
+  <meta name="description" content="Create an Abbott Mobile account to track orders, download invoices and follow your repairs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-register">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopRegister()">
+    <div class="shop-container">
+      <div class="shop-auth">
+
+        <div class="shop-auth-form">
+          <nav class="shop-crumbs mb-6" aria-label="Breadcrumb">
+            <a href="index.html">Home</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <span class="font-semibold text-slate-700">Create account</span>
+          </nav>
+
+          <h1 class="shop-h2">Create your account</h1>
+          <p class="shop-muted mt-1">One account for your orders, invoices and repairs.</p>
+
+          <div class="shop-error mt-5" x-show="error" x-cloak>
+            <span x-html="SHOP.icon('x-circle','')"></span><span x-text="error"></span>
+          </div>
+
+          <form class="mt-6 space-y-4" @submit.prevent="submit()" novalidate>
+            <div>
+              <label class="shop-label" for="name">Full name <span class="text-rose-500">*</span></label>
+              <input id="name" type="text" class="shop-input" :class="fieldErr.name && '!border-rose-500'"
+                     x-model.trim="form.name" autocomplete="name" placeholder="e.g. Muhammad Ali" required>
+              <p class="text-xs text-rose-600 mt-1" x-show="fieldErr.name" x-cloak x-text="fieldErr.name"></p>
+            </div>
+            <div>
+              <label class="shop-label" for="email">Email address <span class="text-rose-500">*</span></label>
+              <input id="email" type="email" class="shop-input" :class="fieldErr.email && '!border-rose-500'"
+                     x-model.trim="form.email" autocomplete="email" placeholder="you@example.com" required>
+              <p class="text-xs text-slate-500 mt-1" x-show="!fieldErr.email">Your invoices are emailed here.</p>
+              <p class="text-xs text-rose-600 mt-1" x-show="fieldErr.email" x-cloak x-text="fieldErr.email"></p>
+            </div>
+            <div>
+              <label class="shop-label" for="phone">Mobile number <span class="text-rose-500">*</span></label>
+              <input id="phone" type="tel" class="shop-input" :class="fieldErr.phone && '!border-rose-500'"
+                     x-model.trim="form.phone" autocomplete="tel" placeholder="0300-1234567" required>
+              <p class="text-xs text-rose-600 mt-1" x-show="fieldErr.phone" x-cloak x-text="fieldErr.phone"></p>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="shop-label" for="pw">Password <span class="text-rose-500">*</span></label>
+                <input id="pw" :type="showPw ? 'text' : 'password'" class="shop-input" :class="fieldErr.password && '!border-rose-500'"
+                       x-model="form.password" autocomplete="new-password" placeholder="At least 6 characters" required>
+                <p class="text-xs text-rose-600 mt-1" x-show="fieldErr.password" x-cloak x-text="fieldErr.password"></p>
+              </div>
+              <div>
+                <label class="shop-label" for="pw2">Confirm password <span class="text-rose-500">*</span></label>
+                <input id="pw2" :type="showPw ? 'text' : 'password'" class="shop-input" :class="fieldErr.confirm && '!border-rose-500'"
+                       x-model="form.confirm" autocomplete="new-password" placeholder="Repeat it" required>
+                <p class="text-xs text-rose-600 mt-1" x-show="fieldErr.confirm" x-cloak x-text="fieldErr.confirm"></p>
+              </div>
+            </div>
+            <label class="shop-check">
+              <input type="checkbox" x-model="showPw"> <span>Show passwords</span>
+            </label>
+
+            <div class="shop-divider"></div>
+            <p class="shop-label !mb-2">Delivery address <span class="font-normal text-slate-400">(optional — speeds up checkout)</span></p>
+            <div>
+              <input type="text" class="shop-input" x-model.trim="form.address" autocomplete="street-address" placeholder="House / street / area">
+            </div>
+            <div>
+              <input type="text" class="shop-input" x-model.trim="form.city" autocomplete="address-level2" placeholder="City">
+            </div>
+
+            <button type="submit" class="shop-btn shop-btn-lg shop-btn-block" :disabled="busy">
+              <span x-show="!busy"><span x-html="SHOP.icon('user','')"></span>Create account</span>
+              <span x-show="busy" x-cloak>Creating…</span>
+            </button>
+            <p class="text-xs text-slate-500">
+              By creating an account you agree to our
+              <a href="page.html?slug=return-policy" class="shop-link">return policy</a> and
+              <a href="page.html?slug=warranty-policy" class="shop-link">warranty terms</a>.
+            </p>
+          </form>
+
+          <p class="text-sm text-slate-600 mt-6">
+            Already have an account?
+            <a :href="'login.html' + (next ? '?next=' + encodeURIComponent(next) : '')" class="shop-link">Sign in</a>
+          </p>
+        </div>
+
+        <aside class="shop-auth-side">
+          <div class="shop-eyebrow shop-on-dark">Why register</div>
+          <h2 class="shop-h2 shop-on-dark mt-1">Keep every purchase and repair together.</h2>
+          <div class="mt-6 space-y-1">
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('receipt','')"></span></span>
+              <span><b class="block">Invoice by email</b><span class="text-white/70 text-sm">Sent the moment you order, downloadable any time.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('truck','')"></span></span>
+              <span><b class="block">Track every delivery</b><span class="text-white/70 text-sm">Confirmed, packed, on the way, delivered.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('shield-check','')"></span></span>
+              <span><b class="block">Warranty on record</b><span class="text-white/70 text-sm">Your IMEI and serial numbers stay on file.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('wrench','')"></span></span>
+              <span><b class="block">Repair history</b><span class="text-white/70 text-sm">Every job card your device has been through.</span></span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopRegister() {
+      const { utils } = ABM;
+      return {
+        form: { name: '', email: '', phone: '', password: '', confirm: '', address: '', city: '' },
+        fieldErr: {}, showPw: false, busy: false, error: '', next: '',
+        init() {
+          this.next = utils.qs('next') || '';
+          if (SHOP.auth.isLoggedIn()) { location.replace(this.next || 'account.html'); return; }
+          ['name', 'email', 'phone'].forEach((k) => { if (utils.qs(k)) this.form[k] = utils.qs(k); });
+        },
+        validate() {
+          const e = {};
+          if (String(this.form.name).trim().length < 3) e.name = 'Please enter your full name.';
+          if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(this.form.email)) e.email = 'Please enter a valid email address.';
+          if (SHOP.digits(this.form.phone).length < 10) e.phone = 'Please enter a valid mobile number.';
+          if (String(this.form.password).length < 6) e.password = 'At least 6 characters.';
+          if (this.form.confirm !== this.form.password) e.confirm = 'The passwords do not match.';
+          this.fieldErr = e;
+          return !Object.keys(e).length;
+        },
+        submit() {
+          this.error = '';
+          if (!this.validate()) { this.error = 'Please fix the highlighted fields.'; return; }
+          this.busy = true;
+          try {
+            const c = SHOP.auth.register(this.form);
+            SHOP.toast('Account created. Welcome, ' + String(c.name).split(' ')[0] + '!');
+            const target = this.next && /^[a-z0-9._-]+\.html(\?.*)?$/i.test(this.next) ? this.next : 'account.html';
+            setTimeout(() => location.replace(target), 300);
+          } catch (e) {
+            this.error = e.message;
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

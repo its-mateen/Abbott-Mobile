@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Import Products · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="products-import" data-title="Import Products" data-perm="products.add">
+  <main x-data="productImportPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="products.html" class="hover:text-navy-700">Products</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>Import</span></div>
+        <h2 class="page-title" x-text="mode === 'imeis' ? 'Import IMEIs / serial numbers' : 'Import products'">Import products</h2>
+        <p class="page-subtitle" x-text="mode === 'imeis' ? 'Load serialized opening stock unit by unit — every line is checked before a single unit is registered.' : 'Bring a price list or an old system’s export into the catalog — nothing is written until you have seen every row.'"></p>
+      </div>
+      <div class="page-actions">
+        <button type="button" class="btn btn-secondary" @click="downloadTemplate()"><span x-html="ABM.icon('download')"></span>Template CSV</button>
+        <a href="products.html" class="btn btn-secondary">Cancel</a>
+      </div>
+    </div>
+
+    <!-- Steps -->
+    <div class="card mb-4">
+      <div class="card-body !py-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <template x-for="s in steps" :key="s.n">
+            <div class="flex items-center gap-3 rounded-xl border p-3 min-w-0" :class="step === s.n ? 'border-navy-200 bg-navy-50' : step > s.n ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'">
+              <span class="w-9 h-9 rounded-full flex-none flex items-center justify-center font-bold text-sm" :class="step === s.n ? 'bg-navy-700 text-white' : step > s.n ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'" x-html="step > s.n ? ABM.icon('check','w-4 h-4') : s.n"></span>
+              <div class="min-w-0">
+                <div class="text-sm font-semibold truncate" :class="step < s.n ? 'text-slate-500' : 'text-slate-900'" x-text="s.label"></div>
+                <div class="text-[11px] truncate" :class="step < s.n ? 'text-slate-400' : 'text-slate-600'" x-text="s.hint"></div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 1 — the file -->
+    <div class="card" x-show="step === 1">
+      <div class="card-header"><div><div class="card-title">1 · The data</div><div class="card-subtitle">Pick what you are importing, then choose a .csv file or paste the rows straight in</div></div></div>
+      <div class="card-body space-y-4">
+        <div>
+          <div class="label">What are you importing?</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <button type="button" class="rounded-xl border p-3 text-left" :class="mode === 'products' ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white hover:border-slate-400'" @click="setMode('products')" :aria-pressed="mode === 'products' ? 'true' : 'false'">
+              <span class="flex items-center gap-2 min-w-0"><span class="chip chip-navy !w-8 !h-8 flex-none" x-html="ABM.icon('cube','w-4 h-4')"></span><span class="text-sm font-semibold text-slate-800">Products</span></span>
+              <span class="block text-[11px] text-slate-500 mt-1.5 leading-snug">Catalogue rows: prices, category, device and serial type, condition, PTA status, specs, stock levels — plus the opening quantity of non-serialized items.</span>
+            </button>
+            <button type="button" class="rounded-xl border p-3 text-left disabled:opacity-50 disabled:cursor-not-allowed" :class="mode === 'imeis' ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white hover:border-slate-400'" :disabled="!canImeis" @click="setMode('imeis')" :aria-pressed="mode === 'imeis' ? 'true' : 'false'">
+              <span class="flex items-center gap-2 min-w-0"><span class="chip chip-info !w-8 !h-8 flex-none" x-html="ABM.icon('qr','w-4 h-4')"></span><span class="text-sm font-semibold text-slate-800">IMEIs / serial numbers</span></span>
+              <span class="block text-[11px] text-slate-500 mt-1.5 leading-snug">One line per unit — SKU or barcode, IMEI, optional IMEI 2, cost, branch, grade, PTA — registered as serialized opening stock.</span>
+            </button>
+          </div>
+          <p class="help" x-show="!canImeis">Registering units needs the IMEI Registry “Add” permission.</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <label class="label" for="im-file">CSV file</label>
+            <input id="im-file" type="file" accept=".csv,text/csv,text/plain" class="input !py-2" @change="onFile($event)">
+            <p class="help">Exported from Excel, Google Sheets or your old software. The first row must be the column names.</p>
+          </div>
+          <div>
+            <label class="label" for="im-sep">Separator</label>
+            <select id="im-sep" class="select" x-model="sep" @change="parse()">
+              <option value="auto">Detect automatically</option>
+              <option value=",">Comma ,</option>
+              <option value=";">Semicolon ;</option>
+              <option value="\t">Tab</option>
+            </select>
+            <p class="help" x-show="detected" x-text="'Detected: ' + detected"></p>
+          </div>
+        </div>
+        <div>
+          <label class="label" for="im-text">…or paste the rows</label>
+          <textarea id="im-text" class="textarea mono text-xs !min-h-[10rem]" rows="8" x-model="raw" @input="parse()" :placeholder="placeholder"></textarea>
+        </div>
+        <div class="alert" :class="parseError ? 'alert-danger' : rows.length ? 'alert-success' : 'alert-info'">
+          <span x-html="ABM.icon(parseError ? 'x-circle' : rows.length ? 'check-circle' : 'info')"></span>
+          <span x-show="parseError" x-text="parseError"></span>
+          <span x-show="!parseError && rows.length"><b x-text="rows.length"></b> row(s) and <b x-text="headers.length"></b> column(s) read.</span>
+          <span x-show="!parseError && !rows.length">Nothing loaded yet. The template CSV shows every column the importer understands.</span>
+        </div>
+      </div>
+      <div class="card-footer flex justify-end gap-2">
+        <button type="button" class="btn btn-primary" :disabled="!rows.length" @click="goMap()">Next: match the columns<span x-html="ABM.icon('arrow-right')"></span></button>
+      </div>
+    </div>
+
+    <!-- STEP 2 — mapping -->
+    <div class="card" x-show="step === 2" x-cloak>
+      <div class="card-header">
+        <div><div class="card-title">2 · Match the columns</div><div class="card-subtitle">We guessed from the headings — change anything that is wrong</div></div>
+        <span class="text-xs text-slate-500" x-text="rows.length + ' row(s)'"></span>
+      </div>
+      <div class="card-body space-y-4">
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Your column</th><th class="hidden sm:table-cell">First value</th><th>Import as</th></tr></thead>
+            <tbody>
+              <template x-for="(h, i) in headers" :key="i">
+                <tr>
+                  <td class="font-semibold text-slate-800 break-words max-w-[9rem] sm:max-w-none" x-text="h || '(no heading)'"></td>
+                  <td class="hidden sm:table-cell text-slate-500 truncate max-w-[14rem]" x-text="(rows[0] || [])[i] || '—'"></td>
+                  <td>
+                    <select class="select" x-model="map[i]" x-effect="syncSelect($el, map[i])" :aria-label="'Import ' + (h || 'column ' + (i + 1)) + ' as'">
+                      <option value="">— ignore —</option>
+                      <template x-for="f in fields" :key="f.key"><option :value="f.key" x-text="f.label + (f.required ? ' *' : '')"></option></template>
+                    </select>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <template x-if="mode === 'products'">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="flex items-start gap-2 cursor-pointer select-none text-sm">
+              <input type="checkbox" class="checkbox mt-0.5" x-model="opts.createMissing">
+              <span><span class="font-medium text-slate-800">Create missing categories and brands</span><span class="block text-xs text-slate-500">Otherwise a row naming an unknown category is an error. A new category takes the product type, device type and serial type of its first row.</span></span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer select-none text-sm">
+              <input type="checkbox" class="checkbox mt-0.5" x-model="opts.updateExisting">
+              <span><span class="font-medium text-slate-800">Update products that already exist</span><span class="block text-xs text-slate-500">Matched on SKU, then barcode. Unticked, they are skipped.</span></span>
+            </label>
+            <label class="flex items-start gap-2 cursor-pointer select-none text-sm">
+              <input type="checkbox" class="checkbox mt-0.5" x-model="opts.openingStock">
+              <span><span class="font-medium text-slate-800">Book the stock column as opening stock</span><span class="block text-xs text-slate-500">Adds it at <b x-text="branchName"></b> as an opening movement. Serialized products are never stocked this way — load their units with “IMEIs / serial numbers”.</span></span>
+            </label>
+            <div>
+              <label class="label" for="im-branch">Stock goes to</label>
+              <template x-if="isSuperAdmin">
+                <select id="im-branch" class="select" x-model="opts.branch_id" x-effect="syncSelect($el, opts.branch_id)">
+                  <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                </select>
+              </template>
+              <template x-if="!isSuperAdmin">
+                <div class="input bg-slate-50 truncate" x-text="branchName"></div>
+              </template>
+            </div>
+          </div>
+        </template>
+        <template x-if="mode === 'imeis'">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label class="label" for="im-branch-u">Branch for lines with no branch</label>
+              <template x-if="isSuperAdmin">
+                <select id="im-branch-u" class="select" x-model="opts.branch_id" x-effect="syncSelect($el, opts.branch_id)">
+                  <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                </select>
+              </template>
+              <template x-if="!isSuperAdmin">
+                <div class="input bg-slate-50 truncate" x-text="branchName"></div>
+              </template>
+              <p class="help" x-text="isSuperAdmin ? 'A Branch column (code or name) overrides this line by line.' : 'Units can only be registered at your own branch.'"></p>
+            </div>
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 leading-relaxed">
+              Each unit is registered as opening stock (source “import”) at its own cost, so its profit is exact when it sells. A line whose IMEI is already registered, repeats another line or names an unknown or non-serialized product is left out.
+            </div>
+          </div>
+        </template>
+        <div class="alert" :class="missingRequired.length ? 'alert-danger' : 'alert-info'">
+          <span x-html="ABM.icon(missingRequired.length ? 'x-circle' : 'info')"></span>
+          <span x-show="missingRequired.length">Still needed: <b x-text="missingRequired.join(', ')"></b>.</span>
+          <span x-show="!missingRequired.length">Everything required is matched. Next you will see exactly what each row would do.</span>
+        </div>
+      </div>
+      <div class="card-footer flex flex-wrap justify-between gap-2">
+        <button type="button" class="btn btn-secondary" @click="step = 1"><span x-html="ABM.icon('arrow-left')"></span>Back</button>
+        <button type="button" class="btn btn-primary" :disabled="missingRequired.length" @click="goPreview()">Next: check the rows<span x-html="ABM.icon('arrow-right')"></span></button>
+      </div>
+    </div>
+
+    <!-- STEP 3 — preview & import -->
+    <div class="card" x-show="step === 3" x-cloak>
+      <div class="card-header">
+        <div><div class="card-title">3 · What will happen</div><div class="card-subtitle">Nothing has been written yet</div></div>
+        <div class="flex items-center gap-1 flex-wrap">
+          <button type="button" class="btn btn-ghost btn-sm" :class="filter === 'all' && 'btn-secondary'" @click="filter = 'all'">All <span x-text="preview.length"></span></button>
+          <button type="button" class="btn btn-ghost btn-sm" :class="filter === 'create' && 'btn-secondary'" @click="filter = 'create'"><span x-text="mode === 'imeis' ? 'To register' : 'New'"></span> <span x-text="counts.create"></span></button>
+          <button type="button" class="btn btn-ghost btn-sm" :class="filter === 'update' && 'btn-secondary'" @click="filter = 'update'" x-show="mode === 'products'">Updates <span x-text="counts.update"></span></button>
+          <button type="button" class="btn btn-ghost btn-sm text-rose-600" :class="filter === 'error' && 'btn-secondary'" @click="filter = 'error'">Problems <span x-text="counts.error"></span></button>
+        </div>
+      </div>
+      <template x-if="mode === 'products'">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 pt-4">
+          <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">New products</div><div class="text-xl font-extrabold text-emerald-700 tabular" x-text="counts.create"></div></div>
+          <div class="rounded-xl bg-navy-50 border border-navy-200 p-3"><div class="text-[11px] font-bold uppercase tracking-wider text-navy-700">Updates</div><div class="text-xl font-extrabold text-navy-800 tabular" x-text="counts.update"></div></div>
+          <div class="rounded-xl bg-slate-50 border border-slate-200 p-3"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Skipped</div><div class="text-xl font-extrabold text-slate-700 tabular" x-text="counts.skip"></div></div>
+          <div class="rounded-xl p-3 border" :class="counts.error ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'"><div class="text-[11px] font-bold uppercase tracking-wider" :class="counts.error ? 'text-rose-700' : 'text-slate-500'">Problems</div><div class="text-xl font-extrabold tabular" :class="counts.error ? 'text-rose-600' : 'text-slate-700'" x-text="counts.error"></div></div>
+        </div>
+      </template>
+      <template x-if="mode === 'imeis'">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 px-5 pt-4">
+          <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Units to register</div><div class="text-xl font-extrabold text-emerald-700 tabular" x-text="counts.create"></div></div>
+          <div class="rounded-xl bg-navy-50 border border-navy-200 p-3"><div class="text-[11px] font-bold uppercase tracking-wider text-navy-700">Products</div><div class="text-xl font-extrabold text-navy-800 tabular" x-text="unitTotals.products"></div></div>
+          <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Stock value</div><div class="text-xl font-extrabold text-slate-700 tabular truncate" x-text="$money(unitTotals.cost, {decimals:0})"></div></div>
+          <div class="rounded-xl p-3 border" :class="counts.error ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'"><div class="text-[11px] font-bold uppercase tracking-wider" :class="counts.error ? 'text-rose-700' : 'text-slate-500'">Problems</div><div class="text-xl font-extrabold tabular" :class="counts.error ? 'text-rose-600' : 'text-slate-700'" x-text="counts.error"></div></div>
+        </div>
+      </template>
+
+      <!-- products preview -->
+      <template x-if="mode === 'products'">
+        <div class="table-wrap mt-4">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="w-12">Row</th>
+                <th>Product</th>
+                <th class="hidden md:table-cell">Category / brand</th>
+                <th class="num hidden lg:table-cell">Cost</th>
+                <th class="num hidden lg:table-cell">Retail</th>
+                <th class="num hidden xl:table-cell">Stock</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in visible" :key="r.line">
+                <tr :class="r.action === 'error' && '!bg-rose-50'">
+                  <td class="text-slate-400 tabular" x-text="r.line"></td>
+                  <td>
+                    <div class="font-semibold text-slate-800 truncate max-w-[12rem] sm:max-w-[18rem]" x-text="r.data.name || '(no name)'"></div>
+                    <div class="text-xs text-slate-500 truncate max-w-[12rem] sm:max-w-[18rem]"><span class="mono" x-text="r.data.sku || '—'"></span><span x-show="r.data.barcode"> · <span class="mono" x-text="r.data.barcode"></span></span></div>
+                    <div class="text-xs text-slate-500 truncate max-w-[12rem] sm:max-w-[18rem]" x-show="r.summary" x-text="r.summary"></div>
+                    <div class="text-xs text-rose-600" x-show="r.error" x-text="r.error"></div>
+                    <div class="text-xs text-amber-700" x-show="!r.error && r.warning" x-text="r.warning"></div>
+                  </td>
+                  <td class="hidden md:table-cell text-slate-600 truncate max-w-[12rem]"><span x-text="r.categoryName || '—'"></span><span class="text-slate-400"> · </span><span x-text="r.brandName || '—'"></span></td>
+                  <td class="num hidden lg:table-cell tabular" x-text="r.data.cost_price === undefined ? '—' : $money(r.data.cost_price, {decimals:0})"></td>
+                  <td class="num hidden lg:table-cell tabular" x-text="r.data.retail_price === undefined ? '—' : $money(r.data.retail_price, {decimals:0})"></td>
+                  <td class="num hidden xl:table-cell tabular" x-text="r.data.stock === undefined ? '—' : r.data.stock"></td>
+                  <td><span x-html="$badge(r.action === 'create' ? 'active' : r.action === 'update' ? 'partial' : r.action === 'error' ? 'due' : 'inactive', r.actionLabel)"></span></td>
+                </tr>
+              </template>
+              <template x-if="!visible.length">
+                <tr><td colspan="7" class="empty py-8 text-sm">Nothing in this view.</td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- IMEI preview -->
+      <template x-if="mode === 'imeis'">
+        <div class="table-wrap mt-4">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="w-12">Row</th>
+                <th>Unit</th>
+                <th class="hidden md:table-cell">Product</th>
+                <th class="hidden sm:table-cell">Branch</th>
+                <th class="num hidden lg:table-cell">Cost</th>
+                <th class="hidden lg:table-cell">Grade / PTA</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in visible" :key="r.line">
+                <tr :class="r.action === 'error' && '!bg-rose-50'">
+                  <td class="text-slate-400 tabular" x-text="r.line"></td>
+                  <td>
+                    <div class="mono font-semibold text-slate-800 truncate max-w-[12rem] sm:max-w-[16rem]" x-text="r.imei || r.data.imei || '(no IMEI)'"></div>
+                    <div class="mono text-xs text-slate-500 truncate" x-show="r.imei2" x-text="'IMEI 2 ' + r.imei2"></div>
+                    <div class="text-xs text-slate-500 truncate max-w-[12rem] md:hidden" x-text="r.productLabel || r.data.sku || r.data.barcode || ''"></div>
+                    <div class="text-xs text-rose-600" x-show="r.error" x-text="r.error"></div>
+                    <div class="text-xs text-amber-700" x-show="!r.error && r.warning" x-text="r.warning"></div>
+                  </td>
+                  <td class="hidden md:table-cell min-w-0">
+                    <div class="text-slate-700 truncate max-w-[14rem]" x-text="r.productLabel || '—'"></div>
+                    <div class="mono text-xs text-slate-500 truncate" x-text="r.productSku || r.data.sku || r.data.barcode || ''"></div>
+                  </td>
+                  <td class="hidden sm:table-cell text-slate-600" x-text="r.branchCode || r.data.branch || '—'"></td>
+                  <td class="num hidden lg:table-cell tabular" x-text="r.action === 'error' && r.cost == null ? '—' : $money(r.cost, {decimals:0})"></td>
+                  <td class="hidden lg:table-cell">
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge badge-slate" x-show="r.grade" x-text="'Grade ' + r.grade"></span>
+                      <span x-show="r.pta" x-html="ptaBadge(r.pta)"></span>
+                      <span class="badge badge-slate" x-show="r.battery != null" x-text="'Battery ' + r.battery + '%'"></span>
+                      <span class="text-slate-400" x-show="!r.grade && !r.pta && r.battery == null">—</span>
+                    </div>
+                  </td>
+                  <td><span x-html="$badge(r.action === 'create' ? 'active' : r.action === 'error' ? 'due' : 'inactive', r.actionLabel)"></span></td>
+                </tr>
+              </template>
+              <template x-if="!visible.length">
+                <tr><td colspan="7" class="empty py-8 text-sm">Nothing in this view.</td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+      <div class="card-footer flex flex-wrap justify-between gap-2">
+        <button type="button" class="btn btn-secondary" @click="step = 2"><span x-html="ABM.icon('arrow-left')"></span>Back to matching</button>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs text-slate-500" x-show="counts.error">Rows with problems are left out.</span>
+          <button type="button" class="btn btn-money" :disabled="busy || !importable" @click="runImport()"><span x-html="ABM.icon('check')"></span><span x-text="mode === 'imeis' ? 'Register ' + importable + ' unit(s)' : 'Import ' + importable + ' product(s)'"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 4 — done -->
+    <div class="card" x-show="step === 4" x-cloak>
+      <div class="card-body text-center py-10">
+        <div class="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4" x-html="ABM.icon('check-circle','w-7 h-7')"></div>
+        <h2 class="text-xl font-bold text-slate-900">Import finished</h2>
+        <template x-if="result.mode !== 'imeis'">
+          <p class="text-sm text-slate-600 mt-2">
+            <b x-text="result.created"></b> product(s) created, <b x-text="result.updated"></b> updated<span x-show="result.stocked">, <b x-text="result.stocked"></b> stocked at <b x-text="branchName"></b></span><span x-show="result.categories || result.brands">, <b x-text="result.categories"></b> categor(y/ies) and <b x-text="result.brands"></b> brand(s) created</span>.
+          </p>
+        </template>
+        <template x-if="result.mode === 'imeis'">
+          <p class="text-sm text-slate-600 mt-2">
+            <b x-text="result.units"></b> unit(s) registered for <b x-text="result.products"></b> product(s)<span x-show="result.failed">, <b class="text-rose-600" x-text="result.failed"></b> refused</span>.
+          </p>
+        </template>
+        <ul class="mt-3 text-xs text-rose-600 space-y-0.5 max-w-xl mx-auto text-left" x-show="result.failures.length">
+          <template x-for="(f, i) in result.failures.slice(0, 20)" :key="i"><li x-text="f"></li></template>
+        </ul>
+        <div class="mt-6 flex justify-center gap-2 flex-wrap">
+          <a :href="result.mode === 'imeis' ? 'imeis.html' : 'products.html'" class="btn btn-primary" x-text="result.mode === 'imeis' ? 'Open the IMEI registry' : 'Open the catalog'"></a>
+          <a :href="'labels.html?ids=' + result.ids.slice(0, 200).join(',')" class="btn btn-secondary" x-show="result.ids.length">Print labels for them</a>
+          <button type="button" class="btn btn-ghost" @click="reset()">Import another file</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function productImportPage() {
+      const { db, utils, ui, session } = ABM;
+      /* ------------------------------------------------------------------ columns */
+      const FIELDS = [
+        { key: 'sku', label: 'SKU', required: true, aliases: ['sku', 'code', 'item code', 'product code', 'article'] },
+        { key: 'name', label: 'Name', required: true, aliases: ['name', 'product', 'title', 'description', 'item'] },
+        { key: 'barcode', label: 'Barcode', aliases: ['barcode', 'ean', 'upc', 'gtin'] },
+        { key: 'model', label: 'Model', aliases: ['model'] },
+        { key: 'variant', label: 'Variant', aliases: ['variant', 'spec', 'storage'] },
+        { key: 'color', label: 'Colour', aliases: ['color', 'colour'] },
+        { key: 'variant_group', label: 'Variant group', aliases: ['variant group', 'model group', 'family', 'parent'] },
+        { key: 'category', label: 'Category', aliases: ['category', 'cat', 'group'] },
+        { key: 'brand', label: 'Brand', aliases: ['brand', 'make', 'manufacturer'] },
+        { key: 'product_type', label: 'Product type', aliases: ['product type', 'type', 'kind'] },
+        { key: 'device_type', label: 'Device type', aliases: ['device type', 'device'] },
+        { key: 'serial_type', label: 'Serial type', aliases: ['serial type', 'tracking', 'serial tracking', 'serialized'] },
+        { key: 'condition', label: 'Condition', aliases: ['condition'] },
+        { key: 'pta_status', label: 'PTA status', aliases: ['pta', 'pta status', 'pta approved'] },
+        { key: 'cost_price', label: 'Cost price', aliases: ['cost', 'cost price', 'purchase price', 'buy'] },
+        { key: 'retail_price', label: 'Retail price', aliases: ['retail', 'price', 'sale price', 'mrp', 'selling price'] },
+        { key: 'wholesale_price', label: 'Wholesale price', aliases: ['wholesale', 'dealer', 'trade'] },
+        { key: 'min_sale_price', label: 'Minimum sale price', aliases: ['min sale', 'min price', 'floor'] },
+        { key: 'tax_rate', label: 'Tax %', aliases: ['tax', 'tax rate', 'gst', 'vat'] },
+        { key: 'min_stock', label: 'Minimum stock', aliases: ['min stock', 'reorder level', 'minimum'] },
+        { key: 'max_stock', label: 'Maximum stock', aliases: ['max stock', 'maximum stock', 'maximum', 'max'] },
+        { key: 'reorder_qty', label: 'Reorder quantity', aliases: ['reorder qty', 'reorder quantity', 'reorder'] },
+        { key: 'warranty_months', label: 'Warranty (months)', aliases: ['warranty', 'warranty months'] },
+        { key: 'stock', label: 'Opening stock', aliases: ['stock', 'qty', 'quantity', 'opening stock', 'on hand'] },
+      ];
+      const NUMERIC = ['cost_price', 'retail_price', 'wholesale_price', 'min_sale_price', 'tax_rate', 'min_stock', 'max_stock', 'reorder_qty', 'warranty_months', 'stock'];
+      const IMEI_FIELDS = [
+        { key: 'sku', label: 'SKU', aliases: ['sku', 'code', 'item code', 'product code'] },
+        { key: 'barcode', label: 'Barcode', aliases: ['barcode', 'ean', 'upc', 'gtin'] },
+        { key: 'imei', label: 'IMEI / serial', required: true, aliases: ['imei', 'imei 1', 'imei1', 'serial', 'serial no', 'serial number', 'sn', 'imei serial'] },
+        { key: 'imei2', label: 'IMEI 2', aliases: ['imei 2', 'imei2', 'second imei'] },
+        { key: 'cost', label: 'Unit cost', aliases: ['cost', 'cost price', 'unit cost', 'purchase price'] },
+        { key: 'branch', label: 'Branch', aliases: ['branch', 'branch code', 'store', 'location'] },
+        { key: 'grade', label: 'Grade', aliases: ['grade', 'condition grade'] },
+        { key: 'pta_status', label: 'PTA status', aliases: ['pta', 'pta status'] },
+        { key: 'battery_health', label: 'Battery health %', aliases: ['battery', 'battery health', 'battery %'] },
+        { key: 'notes', label: 'Notes', aliases: ['notes', 'note', 'remarks'] },
+      ];
+      const STD_SPECS = [...new Set(Object.values(db.SPEC_KEYS).reduce((a, k) => a.concat(k), []))];
+      const PTA_DEVICE_TYPES = ['mobile', 'tablet', 'smartwatch'];
+      const TYPE_PLURAL = { device: 'devices', accessory: 'accessories', part: 'spare parts', service: 'services' };
+
+      /* ------------------------------------------------------------ normalising */
+      const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[_\-]+/g, ' ').replace(/[()%*#:.]/g, ' ').replace(/\s+/g, ' ').trim();
+      const pick = (table) => (v) => table[norm(v)] || null;
+      const normProductType = pick({ device: 'device', devices: 'device', accessory: 'accessory', accessories: 'accessory', part: 'part', parts: 'part', 'spare part': 'part', 'spare parts': 'part', service: 'service', services: 'service', labor: 'service', labour: 'service', 'service / labor': 'service' });
+      const normDeviceType = pick({ mobile: 'mobile', 'mobile phone': 'mobile', phone: 'mobile', smartphone: 'mobile', tablet: 'tablet', tab: 'tablet', smartwatch: 'smartwatch', 'smart watch': 'smartwatch', watch: 'smartwatch', laptop: 'laptop', notebook: 'laptop', desktop: 'desktop', 'desktop / aio': 'desktop', aio: 'desktop', 'all in one': 'desktop', pc: 'desktop' });
+      const normSerialType = pick({ imei: 'imei', serial: 'serial', 'serial no': 'serial', 'serial number': 'serial', none: 'none', no: 'none', '0': 'none', 'not serialized': 'none', quantity: 'none', yes: 'auto', '1': 'auto', serialized: 'auto' });
+      const normCondition = pick({ new: 'new', used: 'used', refurbished: 'refurbished', refurb: 'refurbished' });
+      const normPta = pick({ approved: 'approved', 'pta approved': 'approved', pta: 'approved', yes: 'approved', y: 'approved', 'non pta': 'non_pta', nonpta: 'non_pta', no: 'non_pta', n: 'non_pta', 'not approved': 'non_pta', unknown: 'unknown', 'not checked': 'unknown', 'pta unknown': 'unknown', 'not applicable': 'not_applicable', 'n/a': 'not_applicable', na: 'not_applicable' });
+      const catType = (c) => c.product_type || ((c.is_serialized !== undefined ? c.is_serialized : c.is_imei_tracked) ? 'device' : 'accessory');
+      const ptaApplies = (p) => !!p && db.productType(p) === 'device' && PTA_DEVICE_TYPES.includes(p.device_type);
+      const PTA_LABEL = { approved: 'PTA approved', non_pta: 'Non-PTA', unknown: 'PTA unknown' };
+      /** A Luhn-valid 15-digit IMEI for the template that is not registered yet. */
+      const sampleImei = (seed) => {
+        for (let n = seed; n < seed + 500; n++) {
+          const body = '35693803' + String(n).padStart(6, '0');
+          let sum = 0;
+          for (let i = 0; i < 14; i++) { let d = Number(body[13 - i]); if (i % 2 === 0) { d *= 2; if (d > 9) d -= 9; } sum += d; }
+          const imei = body + ((10 - (sum % 10)) % 10);
+          if (!ABM.stock.findUnit(imei)) return imei;
+        }
+        return '';
+      };
+
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canImeis: session.can('imei.add'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        mode: 'products',
+        steps: [
+          { n: 1, label: 'The data', hint: 'file or paste' },
+          { n: 2, label: 'Match the columns', hint: 'what each column is' },
+          { n: 3, label: 'Check & import', hint: 'row by row' },
+        ],
+        step: 1, raw: '', sep: 'auto', detected: '', parseError: '',
+        headers: [], rows: [], map: {}, filter: 'all', busy: false,
+        opts: { createMissing: true, updateExisting: true, openingStock: false, branch_id: String(session.branchId() || '') },
+        preview: [], result: { mode: 'products', created: 0, updated: 0, stocked: 0, categories: 0, brands: 0, ids: [], units: 0, products: 0, failed: 0, failures: [] },
+
+        get branchName() { return db.branchName(this.opts.branch_id); },
+        /** Spec columns: every standard spec key, plus any spec_<key> column the file brings. */
+        get specFields() {
+          const keys = new Set(STD_SPECS);
+          this.headers.forEach((h) => { const m = norm(h).match(/^spec (.+)$/); if (m) keys.add(m[1].replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')); });
+          return [...keys].filter(Boolean).map((k) => ({ key: 'spec_' + k, label: 'Spec: ' + db.specLabel(k), aliases: ['spec ' + k.replace(/_/g, ' ')] }));
+        },
+        get fields() { return this.mode === 'imeis' ? IMEI_FIELDS : FIELDS.concat(this.specFields); },
+        fieldLabel(key) { const f = this.fields.find((x) => x.key === key); return f ? f.label : key; },
+        get placeholder() {
+          return this.mode === 'imeis'
+            ? 'SKU,IMEI,IMEI 2,Cost,Branch,Grade,PTA\nAPP-IPHONE15-001,356938035643809,,215000,MB,A,approved'
+            : 'sku,name,category,brand,cost,retail,stock\nACC-CABLE-01,Type-C Cable 1m,Cables & Chargers,Generic,250,600,40';
+        },
+        get missingRequired() {
+          const used = Object.values(this.map);
+          const out = this.fields.filter((f) => f.required && !used.includes(f.key)).map((f) => f.label);
+          if (this.mode === 'imeis' && !used.includes('sku') && !used.includes('barcode')) out.unshift('SKU or barcode');
+          return out;
+        },
+        get counts() {
+          const c = { create: 0, update: 0, error: 0, skip: 0 };
+          this.preview.forEach((r) => { c[r.action] = (c[r.action] || 0) + 1; });
+          return c;
+        },
+        get importable() { return this.counts.create + (this.mode === 'imeis' ? 0 : this.counts.update); },
+        get unitTotals() {
+          const ok = this.preview.filter((r) => r.action === 'create');
+          return { products: new Set(ok.map((r) => r.productId)).size, cost: utils.sum(ok, 'cost') };
+        },
+        get visible() { return this.filter === 'all' ? this.preview : this.preview.filter((r) => r.action === this.filter); },
+
+        init() {
+          if (!this.isSuperAdmin) this.opts.branch_id = String(session.branchId());
+          if (utils.qs('mode') === 'imeis' && this.canImeis) this.mode = 'imeis';
+        },
+        /** Re-apply a select's model value after its x-for options have rendered. */
+        syncSelect(el, value) { this.$nextTick(() => { const v = value == null ? '' : String(value); if (el && el.value !== v) el.value = v; }); },
+        ptaBadge(k) { return k ? ui.badge(k, PTA_LABEL[k] || ui.statusLabel(k)) : ''; },
+        setMode(m) {
+          if (m === this.mode) return;
+          if (m === 'imeis' && !this.canImeis) { ui.error('Your role is not allowed to register units.'); return; }
+          this.mode = m; this.preview = []; this.filter = 'all';
+          if (String(this.raw || '').trim()) this.parse(); else { this.headers = []; this.rows = []; this.map = {}; }
+        },
+
+        /* ------------------------------------------------------- reading */
+        onFile(e) {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (file.size > 2 * 1024 * 1024) { ui.error('That file is over 2 MB — split it into smaller batches.'); return; }
+          const reader = new FileReader();
+          reader.onload = () => { this.raw = String(reader.result || ''); this.parse(); };
+          reader.onerror = () => ui.error('Could not read that file.');
+          reader.readAsText(file);
+        },
+        /** A CSV reader that survives quoted fields, embedded commas and CRLF. */
+        parseCsv(text, sep) {
+          const rows = [];
+          let row = [], field = '', quoted = false;
+          for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            if (quoted) {
+              if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else quoted = false; }
+              else field += c;
+            } else if (c === '"') quoted = true;
+            else if (c === sep) { row.push(field); field = ''; }
+            else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+            else if (c === '\r') { /* ignore */ }
+            else field += c;
+          }
+          if (field.length || row.length) { row.push(field); rows.push(row); }
+          return rows.filter((r) => r.some((v) => String(v).trim() !== ''));
+        },
+        parse() {
+          this.parseError = ''; this.headers = []; this.rows = []; this.detected = '';
+          const text = String(this.raw || '').replace(/^﻿/, '').trim();
+          if (!text) return;
+          let sep = this.sep === 'auto' ? null : (this.sep === '\\t' ? '\t' : this.sep);
+          if (!sep) {
+            const first = text.split(/\r?\n/)[0] || '';
+            const counts = { ',': (first.match(/,/g) || []).length, ';': (first.match(/;/g) || []).length, '\t': (first.match(/\t/g) || []).length };
+            sep = Object.keys(counts).reduce((a, b) => (counts[b] > counts[a] ? b : a), ',');
+            this.detected = sep === '\t' ? 'Tab' : sep === ';' ? 'Semicolon' : 'Comma';
+          }
+          const all = this.parseCsv(text, sep);
+          if (all.length < 2) { this.parseError = 'Needs a heading row and at least one row of data.'; return; }
+          this.headers = all[0].map((h) => String(h).trim());
+          this.rows = all.slice(1);
+          if (this.rows.length > 2000) { this.parseError = 'That is ' + this.rows.length + ' rows — import up to 2000 at a time.'; this.rows = []; return; }
+          this.autoMap();
+        },
+        /** Match each heading to a field by its key, its label (so the template round-trips) or a known alias. */
+        autoMap() {
+          const map = {};
+          const taken = new Set();
+          const fields = this.fields;
+          this.headers.forEach((h, i) => {
+            const key = norm(h);
+            const hit = fields.find((f) => !taken.has(f.key) && (norm(f.key) === key || norm(f.label) === key || (f.aliases || []).some((a) => norm(a) === key)));
+            if (hit) { map[i] = hit.key; taken.add(hit.key); }
+            else map[i] = '';
+          });
+          this.map = map;
+        },
+        goMap() { if (!this.rows.length) { ui.warn('Load some rows first.'); return; } this.step = 2; },
+
+        /* ------------------------------------------------------ previewing */
+        /** A number from a cell: "Rs. 1,200", "1 200" and "12%" all read; anything else is null. */
+        num(v) {
+          const s = String(v == null ? '' : v).trim().replace(/^(rs\.?|pkr)\s*/i, '').replace(/[\s,]/g, '').replace(/%$/, '');
+          return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : null;
+        },
+        goPreview() {
+          if (this.missingRequired.length) { ui.error('Match ' + this.missingRequired.join(' and ') + ' first.'); return; }
+          this.preview = this.mode === 'imeis' ? this.previewImeis() : this.previewProducts();
+          this.filter = 'all';
+          this.step = 3;
+        },
+        /** One CSV row as {field: value}; spec_<key> columns gather into data.specs, numbers that do not read become NaN. */
+        readRow(cells) {
+          const data = {};
+          Object.keys(this.map).forEach((i) => {
+            const key = this.map[i];
+            if (!key) return;
+            const raw = String(cells[i] == null ? '' : cells[i]).trim();
+            if (raw === '') return;
+            if (key.indexOf('spec_') === 0) { (data.specs = data.specs || {})[key.slice(5)] = raw; return; }
+            if (NUMERIC.includes(key)) { const n = this.num(raw); data[key] = n === null ? NaN : n; }
+            else data[key] = raw;
+          });
+          return data;
+        },
+        previewProducts() {
+          const cats = db.all('categories'); const brands = db.all('brands'); const products = db.all('products');
+          const bySku = new Map(products.map((p) => [String(p.sku || '').toUpperCase(), p]));
+          const unitCounts = {}; db.all('product_imeis').forEach((u) => { unitCounts[u.product_id] = (unitCounts[u.product_id] || 0) + 1; });
+          const seenSku = new Set(); const seenBarcode = new Map();
+          const newCats = new Map();                         // lower-case name -> the plan of the first row that creates it
+          return this.rows.map((cells, idx) => {
+            const data = this.readRow(cells);
+            const row = { line: idx + 2, data, error: '', warning: '', action: 'create', actionLabel: 'New', categoryName: data.category || '', brandName: data.brand || '', existing: null, plan: null, summary: '' };
+            const fail = (m) => { if (!row.error) row.error = m; };
+            const warn = (m) => { row.warning = row.warning ? row.warning + ' ' + m : m; };
+
+            const sku = String(data.sku || '').trim();
+            if (!sku) fail('No SKU.');
+            else if (seenSku.has(sku.toUpperCase())) fail('The same SKU appears twice in this file.');
+            if (!row.error && !String(data.name || '').trim()) fail('No product name.');
+            if (!row.error) { const bad = NUMERIC.find((k) => Number.isNaN(data[k])); if (bad) fail(`${this.fieldLabel(bad)} is not a number.`); }
+            if (!row.error) {
+              seenSku.add(sku.toUpperCase());
+              const existing = bySku.get(sku.toUpperCase()) || (data.barcode ? products.find((p) => utils.sameBarcode(p.barcode, data.barcode)) : null);
+              if (existing) {
+                row.existing = existing;
+                if (!this.opts.updateExisting) { row.action = 'skip'; row.actionLabel = 'Exists — skipped'; }
+                else { row.action = 'update'; row.actionLabel = 'Update ' + existing.sku; }
+              }
+            }
+            // a barcode belongs to one product only
+            if (!row.error && data.barcode) {
+              const code = String(data.barcode).trim();
+              const owner = products.find((p) => utils.sameBarcode(p.barcode, code) && (!row.existing || p.id !== row.existing.id));
+              const again = [...seenBarcode.keys()].find((k) => utils.sameBarcode(k, code));
+              if (owner) fail(`Barcode ${code} already belongs to ${owner.sku}.`);
+              else if (again) fail(`Barcode ${code} is also on row ${seenBarcode.get(again)}.`);
+              else seenBarcode.set(code, row.line);
+              if (!row.error && /^\d{13}$/.test(code) && utils.eanCheck(code.slice(0, 12)) !== code[12]) warn(`Barcode ${code} has a wrong EAN-13 check digit (should end in ${utils.eanCheck(code.slice(0, 12))}) — it will not print as EAN-13.`);
+            }
+            // category / brand resolution
+            let catRec = null, catPlan = null;
+            if (!row.error) {
+              const catName = String(data.category || '').trim();
+              if (catName) {
+                const found = cats.find((c) => c.name.toLowerCase() === catName.toLowerCase());
+                if (found) { row.category_id = found.id; catRec = found; }
+                else if (this.opts.createMissing) { row.newCategory = catName; catPlan = newCats.get(catName.toLowerCase()) || null; }
+                else fail(`Unknown category "${catName}".`);
+              } else if (!row.existing) fail('No category — a new product needs one.');
+              else { catRec = cats.find((c) => String(c.id) === String(row.existing.category_id)) || null; row.categoryName = catRec ? catRec.name : ''; }
+              const brandName = String(data.brand || '').trim();
+              if (brandName) {
+                const found = brands.find((b) => b.name.toLowerCase() === brandName.toLowerCase());
+                if (found) row.brand_id = found.id;
+                else if (this.opts.createMissing) row.newBrand = brandName;
+                else fail(`Unknown brand "${brandName}".`);
+              }
+            }
+            // what kind of product the row describes: type, device, serial tracking, condition, PTA
+            const base = row.existing;
+            const plan = {};
+            if (!row.error) {
+              if (data.product_type !== undefined) { plan.product_type = normProductType(data.product_type); if (!plan.product_type) fail(`Product type "${data.product_type}" — use device, accessory, part or service.`); }
+              else if (base) plan.product_type = db.productType(base);
+              else if (catRec) plan.product_type = catType(catRec);
+              else plan.product_type = catPlan ? catPlan.product_type : (data.device_type !== undefined ? 'device' : 'accessory');
+            }
+            if (!row.error) {
+              if (data.device_type !== undefined) { plan.device_type = normDeviceType(data.device_type); if (!plan.device_type) fail(`Device type "${data.device_type}" — use mobile, tablet, smartwatch, laptop or desktop.`); }
+              else if (base && db.productType(base) === plan.product_type) plan.device_type = base.device_type || null;
+              else if (catRec) plan.device_type = catRec.device_type || null;
+              else plan.device_type = catPlan ? catPlan.device_type : null;
+              if (!row.error && plan.product_type === 'accessory') { if (data.device_type !== undefined) warn('Accessories have no device type — ignored.'); plan.device_type = null; }
+              if (!row.error && plan.product_type === 'device' && !plan.device_type) fail('A device needs a device type (mobile, tablet, smartwatch, laptop or desktop).');
+            }
+            if (!row.error) {
+              const kind = catRec ? catType(catRec) : row.newCategory ? (catPlan ? catPlan.product_type : plan.product_type) : null;
+              if (kind && kind !== plan.product_type) fail(`Category "${catRec ? catRec.name : row.newCategory}" holds ${TYPE_PLURAL[kind]}, not ${TYPE_PLURAL[plan.product_type]}${data.category ? '' : ' — give a matching category'}.`);
+            }
+            if (!row.error) {
+              const big = ['laptop', 'desktop'].includes(plan.device_type);
+              if (plan.product_type === 'service') {
+                plan.is_serialized = 0; plan.serial_type = null;
+                if (data.serial_type !== undefined && normSerialType(data.serial_type) !== 'none') warn('Services are never serialized — serial type ignored.');
+              } else if (data.serial_type !== undefined) {
+                const s = normSerialType(data.serial_type);
+                if (!s) fail(`Serial type "${data.serial_type}" — use IMEI, serial or none.`);
+                else if (s === 'none') { plan.is_serialized = 0; plan.serial_type = null; }
+                else { plan.is_serialized = 1; plan.serial_type = s === 'auto' ? (big ? 'serial' : 'imei') : s; }
+              } else if (base && db.productType(base) === plan.product_type) { plan.is_serialized = db.isSerialized(base) ? 1 : 0; plan.serial_type = plan.is_serialized ? db.serialType(base) : null; }
+              else if (catRec || catPlan) {
+                const c = catRec || catPlan;
+                const ser = c.is_serialized !== undefined ? c.is_serialized : c.is_imei_tracked;
+                plan.is_serialized = ser ? 1 : 0; plan.serial_type = ser ? (c.serial_type || (big ? 'serial' : 'imei')) : null;
+              } else if (plan.product_type === 'device') { plan.is_serialized = 1; plan.serial_type = big ? 'serial' : 'imei'; }
+              else { plan.is_serialized = 0; plan.serial_type = null; }
+            }
+            if (!row.error && base) {
+              const units = unitCounts[base.id] || 0;
+              const changed = plan.product_type !== db.productType(base) || plan.is_serialized !== (db.isSerialized(base) ? 1 : 0) || (plan.is_serialized && plan.serial_type !== db.serialType(base));
+              if (units && changed) fail(`${units} unit${units === 1 ? ' is' : 's are'} registered for ${base.sku} — its type and serial tracking cannot change.`);
+              else if (plan.product_type === 'service' && db.productType(base) !== 'service' && db.all('branch_stock').some((s) => s.product_id === base.id && s.quantity > 0)) fail(`${base.sku} has stock on hand, so it cannot become a service.`);
+            }
+            if (!row.error) {
+              if (data.condition !== undefined) { plan.condition = normCondition(data.condition); if (!plan.condition) fail(`Condition "${data.condition}" — use new, used or refurbished.`); }
+              else plan.condition = base ? (base.condition || 'new') : 'new';
+              if (plan.product_type === 'service') plan.condition = 'new';
+            }
+            if (!row.error) {
+              const applies = plan.product_type === 'device' && PTA_DEVICE_TYPES.includes(plan.device_type);
+              const baseStatus = base && ['approved', 'non_pta', 'unknown'].includes(base.pta_status) ? base.pta_status : 'unknown';
+              if (data.pta_status !== undefined) {
+                const n = normPta(data.pta_status);
+                if (!n) fail(`PTA status "${data.pta_status}" — use approved, non-PTA or unknown.`);
+                else if (!applies) { plan.pta_status = 'not_applicable'; if (n !== 'not_applicable') warn('PTA status applies to phones, tablets and smartwatches only — ignored.'); }
+                else plan.pta_status = n === 'not_applicable' ? 'unknown' : n;
+              } else plan.pta_status = applies ? baseStatus : 'not_applicable';
+            }
+            // whole numbers and the stock ladder
+            if (!row.error) {
+              const whole = (k, max) => { const v = data[k]; if (v === undefined) return; if (!Number.isInteger(v) || v < 0 || (max != null && v > max)) fail(`${this.fieldLabel(k)} must be a whole number ${max != null ? 'from 0 to ' + max : 'of 0 or more'}.`); };
+              whole('warranty_months', 120); whole('min_stock'); whole('max_stock'); whole('reorder_qty');
+              if (!row.error) {
+                const mn = data.min_stock !== undefined ? data.min_stock : (base ? Number(base.min_stock) || 0 : 0);
+                const mx = data.max_stock !== undefined ? data.max_stock : (base ? Number(base.max_stock) || 0 : 0);
+                if (mx > 0 && mx < mn) fail('Maximum stock is below the minimum stock.');
+              }
+              if (!row.error && data.stock !== undefined && (!Number.isInteger(data.stock) || data.stock < 0)) fail('Opening stock must be a whole number of 0 or more.');
+            }
+            // prices
+            if (!row.error) {
+              const cost = plan.product_type === 'service' ? 0 : (data.cost_price !== undefined ? data.cost_price : Number((base || {}).cost_price) || 0);
+              const retail = data.retail_price !== undefined ? data.retail_price : Number((base || {}).retail_price) || 0;
+              const floor = data.min_sale_price !== undefined ? data.min_sale_price : (!base || base.min_sale_price === undefined ? null : Number(base.min_sale_price));
+              if (!base && !(retail > 0)) fail('A new product needs a retail price above zero.');
+              else if (cost < 0 || retail < 0) fail('Prices cannot be negative.');
+              else if (retail > 0 && cost > retail) warn('Cost is above retail — check the columns.');
+              else if (floor !== null && floor > 0 && floor < cost) warn('Minimum sale price is below cost; it will be raised to cost.');
+              if (data.tax_rate !== undefined && (data.tax_rate < 0 || data.tax_rate > 100)) fail('Tax must be between 0 and 100.');
+            }
+            if (!row.error && this.opts.openingStock && data.stock > 0) {
+              if (plan.is_serialized) warn('Serialized — the stock column is not booked; register its units with “IMEIs / serial numbers”.');
+              else if (plan.product_type === 'service') warn('Services carry no stock — the stock column is ignored.');
+            }
+            if (!row.error) {
+              row.plan = plan;
+              if (row.newCategory && !newCats.has(row.newCategory.toLowerCase())) newCats.set(row.newCategory.toLowerCase(), { product_type: plan.product_type, device_type: plan.product_type === 'accessory' ? null : plan.device_type, is_serialized: plan.is_serialized, serial_type: plan.serial_type });
+              row.summary = [db.productTypeLabel(plan.product_type), plan.device_type ? db.deviceTypeLabel(plan.device_type) : '', plan.is_serialized ? (plan.serial_type === 'serial' ? 'Serial No.' : 'IMEI') : '',
+                plan.condition !== 'new' ? utils.titleCase(plan.condition) : '', PTA_LABEL[plan.pta_status] || '', data.variant_group ? 'group ' + data.variant_group : ''].filter(Boolean).join(' · ');
+            }
+            if (row.error) { row.action = 'error'; row.actionLabel = 'Problem'; }
+            return row;
+          });
+        },
+        /** IMEI / serial lines: every line is checked the way the registry checks a scan, before anything is written. */
+        previewImeis() {
+          const products = db.all('products');
+          const bySku = new Map(products.map((p) => [String(p.sku || '').toUpperCase(), p]));
+          const branches = this.branches;
+          const luhn = !!db.setting('imei_luhn_check');
+          const myBranch = String(session.branchId());
+          const seen = new Map();
+          return this.rows.map((cells, idx) => {
+            const data = {};
+            Object.keys(this.map).forEach((i) => { const key = this.map[i]; if (!key) return; const raw = String(cells[i] == null ? '' : cells[i]).trim(); if (raw !== '') data[key] = raw; });
+            const row = { line: idx + 2, data, error: '', warning: '', action: 'create', actionLabel: 'Register', productId: null, productLabel: '', productSku: '', imei: '', imei2: '', branch_id: null, branchCode: '', cost: null, grade: '', pta: '', battery: null, notes: '' };
+            const fail = (m) => { if (!row.error) row.error = m; };
+            const warn = (m) => { row.warning = row.warning ? row.warning + ' ' + m : m; };
+            // 1 the product
+            const bySkuHit = data.sku ? bySku.get(data.sku.toUpperCase()) || null : null;
+            const byCodeHit = data.barcode ? products.find((x) => utils.sameBarcode(x.barcode, data.barcode)) || null : null;
+            const p = bySkuHit || byCodeHit;
+            if (!data.sku && !data.barcode) fail('No SKU or barcode.');
+            else if (!p) fail(`No product with ${data.sku ? 'SKU ' + data.sku : 'barcode ' + data.barcode}.`);
+            else if (bySkuHit && byCodeHit && bySkuHit.id !== byCodeHit.id) fail(`SKU ${data.sku} and barcode ${data.barcode} are two different products.`);
+            else if (!db.isSerialized(p)) fail(`${p.sku} is not serialized — import its quantity as opening stock with the Products import.`);
+            if (p) { row.productId = p.id; row.productLabel = db.productLabel(p.id); row.productSku = p.sku; }
+            if (!row.error && !p.is_active) warn(`${p.sku} is inactive.`);
+            // 2 IMEI / serial number
+            if (!row.error) {
+              const type = db.serialType(p);
+              const label = type === 'serial' ? 'Serial number' : 'IMEI';
+              const v = ABM.stock.normalizeSerial(data.imei || '', type);
+              row.imei = v;
+              if (!v) fail(`No ${label}.`);
+              else {
+                try { ABM.stock.validateSerial(v, p); } catch (err) { fail(err.message); }
+                if (!row.error && ABM.stock.findUnit(v)) fail(`${label} ${v} is already registered as another unit's second IMEI.`);
+                if (!row.error && seen.has(v.toUpperCase())) fail(`${label} ${v} is also on row ${seen.get(v.toUpperCase())}.`);
+              }
+            }
+            // 3 IMEI 2 (dual SIM)
+            if (!row.error && data.imei2) {
+              const v2 = ABM.stock.normalizeSerial(data.imei2, 'imei');
+              row.imei2 = v2;
+              if (db.serialType(p) !== 'imei') fail('A second IMEI only applies to IMEI-tracked products.');
+              else if (!utils.isValidImei(v2)) fail(`IMEI 2 "${v2}" must be exactly 15 digits.`);
+              else if (luhn && !utils.luhnValid(v2)) fail(`IMEI 2 ${v2} failed the Luhn check digit.`);
+              else if (v2 === row.imei) fail('IMEI 2 repeats IMEI 1.');
+              else if (ABM.stock.findUnit(v2)) fail(`IMEI 2 ${v2} is already registered.`);
+              else if (seen.has(v2)) fail(`IMEI 2 ${v2} is also on row ${seen.get(v2)}.`);
+            }
+            if (!row.error) { seen.set(row.imei.toUpperCase(), row.line); if (row.imei2) seen.set(row.imei2, row.line); }
+            // 4 branch
+            if (!row.error) {
+              let b = null;
+              if (data.branch) { const q = data.branch.toLowerCase(); b = branches.find((x) => [x.code, x.name, String(x.id)].some((v) => String(v || '').toLowerCase() === q)) || null; if (!b) fail(`Unknown branch "${data.branch}".`); }
+              else { b = branches.find((x) => String(x.id) === String(this.opts.branch_id)) || null; if (!b) fail('Choose the branch the units go to.'); }
+              if (!row.error && !this.isSuperAdmin && String(b.id) !== myBranch) fail(`You can only register stock at ${db.branchCode(myBranch)}.`);
+              if (b) { row.branch_id = b.id; row.branchCode = b.code; }
+            }
+            // 5 cost
+            if (!row.error) {
+              if (data.cost !== undefined) { const n = this.num(data.cost); if (n === null || n < 0) fail('Unit cost must be a number of 0 or more.'); else row.cost = utils.round2(n); }
+              else { row.cost = utils.round2(Number(p.cost_price) || 0); warn(`No cost given — the catalogue cost ${utils.money(row.cost, { decimals: 0 })} is used.`); }
+            }
+            // 6 grade, battery, PTA, notes
+            if (!row.error && data.grade) { const g = data.grade.toUpperCase().replace(/^GRADE\s*/, '').trim(); if (!['A', 'B', 'C', 'D'].includes(g)) fail('Grade must be A, B, C or D.'); else row.grade = g; }
+            if (!row.error && data.battery_health) { const n = this.num(data.battery_health); if (n === null || !Number.isInteger(n) || n < 0 || n > 100) fail('Battery health is a whole number from 0 to 100.'); else row.battery = n; }
+            if (!row.error && data.pta_status) {
+              const n = normPta(data.pta_status);
+              if (!n) fail(`PTA status "${data.pta_status}" — use approved, non-PTA or unknown.`);
+              else if (!ptaApplies(p)) { if (n !== 'not_applicable') warn(`${p.sku} is not a phone, tablet or watch — PTA status ignored.`); }
+              else if (n === 'not_applicable') fail('A phone, tablet or watch is PTA approved, non-PTA or unknown.');
+              else row.pta = n;
+            }
+            row.notes = String(data.notes || '').slice(0, 200);
+            if (row.error) { row.action = 'error'; row.actionLabel = 'Problem'; }
+            return row;
+          });
+        },
+
+        /* -------------------------------------------------------- importing */
+        runImport() { if (this.mode === 'imeis') this.runImeis(); else this.runProducts(); },
+        runProducts() {
+          const rows = this.preview.filter((r) => r.action === 'create' || r.action === 'update');
+          if (!rows.length) { ui.warn('Nothing to import.'); return; }
+          this.busy = true;
+          const res = { mode: 'products', created: 0, updated: 0, stocked: 0, categories: 0, brands: 0, ids: [], units: 0, products: 0, failed: 0, failures: [] };
+          try {
+            const branchId = Number(this.opts.branch_id);
+            const catByName = (name) => db.all('categories').find((c) => c.name.toLowerCase() === String(name).toLowerCase());
+            const brandByName = (name) => db.all('brands').find((b) => b.name.toLowerCase() === String(name).toLowerCase());
+            const catPlans = new Map();
+            rows.forEach((r) => { if (r.newCategory && !catPlans.has(r.newCategory.toLowerCase())) catPlans.set(r.newCategory.toLowerCase(), r.plan); });
+            rows.forEach((row) => {
+              const d = row.data, plan = row.plan;
+              const isService = plan.product_type === 'service';
+              // categories and brands first, so the product can point at them
+              let categoryId = row.category_id;
+              if (!categoryId && row.newCategory) {
+                const found = catByName(row.newCategory);
+                if (found) categoryId = found.id;
+                else {
+                  const cp = catPlans.get(row.newCategory.toLowerCase()) || plan;
+                  const made = db.insert('categories', { name: row.newCategory, product_type: cp.product_type, device_type: cp.product_type === 'accessory' ? null : (cp.device_type || null), is_serialized: cp.is_serialized ? 1 : 0, is_imei_tracked: cp.is_serialized ? 1 : 0, serial_type: cp.is_serialized ? cp.serial_type : null, is_active: 1 });
+                  db.audit('category.create', 'category', made.id, `Category "${made.name}" created by the product import`);
+                  categoryId = made.id; res.categories++;
+                }
+              }
+              let brandId = row.brand_id;
+              if (!brandId && row.newBrand) {
+                const found = brandByName(row.newBrand);
+                if (found) brandId = found.id;
+                else { const made = db.insert('brands', { name: row.newBrand, is_active: 1 }); db.audit('brand.create', 'brand', made.id, `Brand "${made.name}" created by the product import`); brandId = made.id; res.brands++; }
+              }
+              const patch = {};
+              ['name', 'model', 'variant', 'color', 'barcode', 'variant_group'].forEach((k) => { if (d[k] !== undefined) patch[k] = d[k]; });
+              ['cost_price', 'retail_price', 'wholesale_price', 'tax_rate', 'min_stock', 'max_stock', 'reorder_qty', 'warranty_months'].forEach((k) => { if (d[k] !== undefined) patch[k] = d[k]; });
+              if (d.min_sale_price !== undefined) patch.min_sale_price = d.min_sale_price;
+              if (categoryId) patch.category_id = categoryId;
+              if (brandId) patch.brand_id = brandId;
+              if (isService) patch.cost_price = 0;
+              // how the product is classified and tracked, as the preview worked it out
+              const kind = {
+                product_type: plan.product_type, device_type: plan.device_type || null,
+                is_serialized: plan.is_serialized ? 1 : 0, is_imei_tracked: plan.is_serialized ? 1 : 0, serial_type: plan.is_serialized ? plan.serial_type : null,
+                is_stock_tracked: isService ? 0 : 1, condition: plan.condition, pta_status: plan.pta_status,
+              };
+
+              if (row.existing) {
+                const cur = db.find('products', row.existing.id);
+                if (!cur) { res.failed++; res.failures.push('Row ' + row.line + ': ' + row.existing.sku + ' no longer exists.'); return; }
+                Object.keys(kind).forEach((k) => { if (String(cur[k] == null ? '' : cur[k]) !== String(kind[k] == null ? '' : kind[k])) patch[k] = kind[k]; });
+                if (isService && cur.unit !== 'job') patch.unit = 'job';
+                if (!isService && cur.unit === 'job') patch.unit = 'pcs';
+                if (d.specs) patch.specs = Object.assign({}, cur.specs || {}, d.specs);
+                // keep the catalogue rule intact even when the file only moves one price
+                const after = Object.assign({}, cur, patch);
+                if (after.min_sale_price !== null && after.min_sale_price !== undefined && Number(after.min_sale_price) < Number(after.cost_price || 0)) {
+                  patch.min_sale_price = utils.round2(Math.min(Number(after.cost_price) || 0, Number(after.retail_price) || Number(after.cost_price) || 0));
+                }
+                const before = { ...cur };
+                db.update('products', cur.id, patch);
+                db.recordPrices(before, patch, 'import', { type: 'import' });   // price_history for every price the file moved
+                res.updated++; res.ids.push(cur.id);
+                row.productId = cur.id;
+              } else {
+                const cost = isService ? 0 : Number(patch.cost_price) || 0;
+                const retail = Number(patch.retail_price) || 0;
+                const floor = patch.min_sale_price !== undefined ? Number(patch.min_sale_price) : (isService ? retail : utils.round2(Math.max(cost, Math.min(retail, cost * 1.03))));
+                const made = db.insert('products', Object.assign({
+                  sku: d.sku, barcode: d.barcode || null, name: d.name, model: d.model || '', variant: d.variant || '', color: d.color || '', variant_group: d.variant_group || null,
+                  category_id: categoryId, brand_id: brandId || null,
+                  unit: isService ? 'job' : 'pcs', specs: d.specs || {}, warranty_months: 0, cost_price: 0, retail_price: 0,
+                  // no wholesale column: sell wholesale at retail, as the product form does
+                  wholesale_price: retail, min_sale_price: floor,
+                  tax_rate: Number(db.setting('default_tax_rate')) || 0, min_stock: 0, max_stock: 0, reorder_qty: 0,
+                  supplier_id: null, tags: [], description: '', image: null, is_active: 1, serial_prefix: null,
+                }, kind, patch));
+                res.created++; res.ids.push(made.id);
+                row.productId = made.id;
+              }
+
+              // opening stock — never for serialized products, whose units have to be registered one by one
+              if (this.opts.openingStock && d.stock !== undefined && d.stock > 0 && row.productId) {
+                const p = db.find('products', row.productId);
+                if (p && db.isStockTracked(p) && !db.isSerialized(p)) {
+                  const have = ABM.stock.qty(branchId, p.id);
+                  const diff = utils.round2(d.stock - have);
+                  if (diff > 0) {
+                    ABM.stock.add(branchId, p.id, diff, Number(p.cost_price) || 0, 'opening', { type: 'import', id: null }, null, 'Imported opening stock');
+                    db.audit('stock.opening', 'product', p.id, `Opening stock +${diff} ${p.sku} at ${db.branchCode(branchId)} (CSV import, now ${ABM.stock.qty(branchId, p.id)})`, branchId);
+                    res.stocked++;
+                  }
+                }
+              }
+            });
+            db.audit('product.import', 'product', null, `Imported ${res.created} new and ${res.updated} updated product(s)${res.stocked ? `, opening stock for ${res.stocked}` : ''}${res.categories || res.brands ? `; created ${res.categories} categor(y/ies) and ${res.brands} brand(s)` : ''}`);
+            this.result = res;
+            this.step = 4;
+            ui.success(res.created + ' created, ' + res.updated + ' updated.');
+          } catch (err) {
+            ui.error(err.message || 'The import failed — nothing further was written.');
+          } finally { this.busy = false; }
+        },
+        /** Register every good line with ABM.stock.addImeis (movement 'opening', unit source 'import'). */
+        runImeis() {
+          if (!this.canImeis) { ui.error('Your role is not allowed to register units.'); return; }
+          const rows = this.preview.filter((r) => r.action === 'create');
+          if (!rows.length) { ui.warn('Nothing to register.'); return; }
+          this.busy = true;
+          const res = { mode: 'imeis', created: 0, updated: 0, stocked: 0, categories: 0, brands: 0, ids: [], units: 0, products: 0, failed: 0, failures: [] };
+          const groups = new Map();
+          try {
+            rows.forEach((row) => {
+              const p = db.find('products', row.productId);
+              try {
+                if (!p) throw new Error('The product no longer exists.');
+                const extra = { source: 'import' };
+                if (row.imei2) extra.imei2 = row.imei2;
+                if (row.grade) extra.grade = row.grade;
+                if (row.battery != null) extra.battery_health = row.battery;
+                if (row.pta) extra.pta_status = row.pta;
+                if (row.notes) extra.notes = row.notes;
+                const unit = ABM.stock.addImeis(row.branch_id, p.id, [row.imei], row.cost, 'opening', { type: 'import', id: null }, extra)[0];
+                res.units++;
+                row.action = 'done'; row.actionLabel = 'Registered';
+                const k = p.id + '|' + row.branch_id;
+                if (!groups.has(k)) groups.set(k, { p, branchId: row.branch_id, units: [] });
+                groups.get(k).units.push(unit.imei + (unit.imei2 ? ' / ' + unit.imei2 : '') + ' @ ' + utils.round2(row.cost));
+              } catch (err) {
+                res.failed++; res.failures.push('Row ' + row.line + ': ' + err.message);
+                row.action = 'error'; row.actionLabel = 'Problem'; row.error = err.message;
+              }
+            });
+            // one audit row per product and branch, naming every unit it received
+            groups.forEach((g) => db.audit('imei.register', 'product', g.p.id, `${g.units.length} ${db.serialLabel(g.p)}${g.units.length > 1 ? 's' : ''} registered for ${g.p.sku} at ${db.branchCode(g.branchId)} by CSV import (opening stock): ${g.units.join(', ')}`, g.branchId));
+            res.ids = [...new Set([...groups.values()].map((g) => g.p.id))];
+            res.products = res.ids.length;
+            db.audit('imei.import', 'product_imei', null, `CSV import: ${res.units} unit(s) registered for ${res.products} product(s)${res.failed ? `, ${res.failed} refused` : ''}`);
+            this.result = res;
+            this.step = 4;
+            if (res.failed) ui.warn(res.units + ' registered, ' + res.failed + ' refused.');
+            else ui.success(res.units + ' unit' + (res.units === 1 ? '' : 's') + ' registered.');
+          } catch (err) {
+            ui.error(err.message || 'The import failed — nothing further was written.');
+          } finally { this.busy = false; }
+        },
+        reset() {
+          this.step = 1; this.raw = ''; this.headers = []; this.rows = []; this.map = {}; this.preview = [];
+          this.result = { mode: this.mode, created: 0, updated: 0, stocked: 0, categories: 0, brands: 0, ids: [], units: 0, products: 0, failed: 0, failures: [] };
+        },
+        /** The template for the current mode, built from the same column list the importer reads (so it always maps back). */
+        templateCsv() {
+          const esc = (v) => { const s = String(v == null ? '' : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+          if (this.mode === 'imeis') {
+            const cols = IMEI_FIELDS.map((f) => f.label);
+            const phone = db.all('products').find((p) => p.is_active && db.isSerialized(p) && db.serialType(p) === 'imei');
+            const laptop = db.all('products').find((p) => p.is_active && db.isSerialized(p) && db.serialType(p) === 'serial');
+            const code = db.branchCode(this.opts.branch_id) || '';
+            const lines = [];
+            if (phone) lines.push([phone.sku, '', sampleImei(100), sampleImei(200), Number(phone.cost_price) || 0, code, 'A', 'approved', '', 'Opening stock']);
+            if (phone) lines.push(['', phone.barcode || '', sampleImei(300), '', Number(phone.cost_price) || 0, code, 'B', 'non-PTA', 91, 'Open box']);
+            if (laptop) lines.push([laptop.sku, '', (laptop.serial_prefix || 'SN') + 'TPL0001', '', Number(laptop.cost_price) || 0, code, '', '', 88, '']);
+            return [cols.join(','), ...lines.map((l) => l.map(esc).join(','))].join('\n') + '\n';
+          }
+          const specCols = ['ram', 'storage'];
+          const cols = FIELDS.map((f) => f.key).concat(specCols.map((k) => 'spec_' + k));
+          const header = FIELDS.map((f) => f.label).concat(specCols.map((k) => 'spec_' + k));
+          const samples = [
+            { sku: 'ACC-CABLE-100', name: 'Type-C Cable 1m', barcode: '8801234567893', model: 'C-100', variant: '1m', color: 'White', category: 'Cables & Chargers', brand: 'Generic', product_type: 'accessory', serial_type: 'none', condition: 'new', cost_price: 250, retail_price: 600, wholesale_price: 450, min_sale_price: 300, tax_rate: 0, min_stock: 10, max_stock: 40, reorder_qty: 20, warranty_months: 0, stock: 40 },
+            { sku: 'ACC-CASE-200', name: 'Silicone Case', model: 'S-200', variant: 'Soft', color: 'Black', category: 'Screen Protectors & Cases', brand: 'Generic', product_type: 'accessory', serial_type: 'none', condition: 'new', cost_price: 180, retail_price: 450, wholesale_price: 350, min_sale_price: 200, tax_rate: 0, min_stock: 8, max_stock: 30, reorder_qty: 15, warranty_months: 0, stock: 25 },
+            { sku: 'SAM-A16-128-BLK', name: 'Galaxy A16', model: 'SM-A165F', variant: '4GB/128GB', color: 'Black', variant_group: 'Galaxy A16 128GB', category: 'Smartphones', brand: 'Samsung', product_type: 'device', device_type: 'mobile', serial_type: 'imei', condition: 'new', pta_status: 'approved', cost_price: 41000, retail_price: 46999, wholesale_price: 45500, min_sale_price: 42500, tax_rate: 0, min_stock: 2, max_stock: 8, reorder_qty: 4, warranty_months: 12, spec_ram: '4GB', spec_storage: '128GB' },
+            { sku: 'SAM-A16-128-BLU', name: 'Galaxy A16', model: 'SM-A165F', variant: '4GB/128GB', color: 'Light Blue', variant_group: 'Galaxy A16 128GB', category: 'Smartphones', brand: 'Samsung', product_type: 'device', device_type: 'mobile', serial_type: 'imei', condition: 'used', pta_status: 'non_pta', cost_price: 30000, retail_price: 35999, wholesale_price: 34500, min_sale_price: 31000, tax_rate: 0, min_stock: 0, max_stock: 4, reorder_qty: 0, warranty_months: 1, spec_ram: '4GB', spec_storage: '128GB' },
+          ];
+          return [header.map(esc).join(','), ...samples.map((s) => cols.map((k) => esc(s[k])).join(','))].join('\n') + '\n';
+        },
+        downloadTemplate() {
+          const name = this.mode === 'imeis' ? 'imei-import-template.csv' : 'product-import-template.csv';
+          utils.download(name, this.templateCsv(), 'text/csv', { allow: true }); // a blank template is not an export
+          ui.success('Template downloaded — keep the heading row.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

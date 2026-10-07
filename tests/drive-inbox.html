@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: admin inbox</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+  <script defer src="../assets/js/shop.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // End-to-end check of the Inbox data flow: the website writes, the admin reads and acts.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || e.message.indexOf(match) >= 0, e.message); } }
+      try {
+        ABM.db.reset();
+
+        /* ---------- seed is present and shaped right ---------- */
+        var msgs = ABM.db.all('contact_messages');
+        ok('seed ships website messages', msgs.length >= 5, msgs.length + ' messages');
+        ok('messages carry a reference number', msgs.every(function (m) { return !!m.message_no; }));
+        ok('unread messages exist for the badge', msgs.filter(function (m) { return m.status === 'new'; }).length > 0);
+        ok('subscribers seeded', ABM.db.all('newsletter_subscribers').length >= 5);
+        ok('email outbox seeded', ABM.db.all('email_outbox').length > 0);
+
+        /* ---------- the badge counter the sidebar uses ---------- */
+        var unread = ABM.shell.unreadMessages();
+        ok('shell.unreadMessages matches the data', unread === msgs.filter(function (m) { return m.status === 'new'; }).length, 'unread=' + unread);
+
+        /* ---------- a visitor sends a message from the website ---------- */
+        var before = ABM.db.all('contact_messages').length;
+        var row = SHOP.sendMessage({ name: 'Walk In Tester', phone: '0300-1239876', email: 'tester@example.com', subject: 'Price check', message: 'Do you have the Galaxy A55 in blue?' });
+        ok('website message lands in the admin collection', ABM.db.all('contact_messages').length === before + 1);
+        ok('new message starts unread', row.status === 'new', row.status);
+        ok('new message gets its own reference', /^MSG-/.test(row.message_no), row.message_no);
+        ok('badge count went up', ABM.shell.unreadMessages() === unread + 1);
+        ok('message is audited', ABM.db.all('audit_logs').some(function (a) { return a.action === 'message.create'; }));
+        throws('empty message refused', function () { SHOP.sendMessage({ name: 'X', message: '' }); }, 'name');
+        throws('no contact details refused', function () { SHOP.sendMessage({ name: 'No Contact', message: 'Hello there' }); }, 'email address or a phone');
+
+        /* ---------- admin actions: read, note, replied, archive, delete ---------- */
+        ABM.db.update('contact_messages', row.id, { status: 'read' });
+        ok('opening marks it read', ABM.db.find('contact_messages', row.id).status === 'read');
+        ok('badge drops when read', ABM.shell.unreadMessages() === unread);
+
+        ABM.db.update('contact_messages', row.id, { notes: 'Told him we have 3 in stock.' });
+        ok('internal note saves', ABM.db.find('contact_messages', row.id).notes.indexOf('3 in stock') >= 0);
+
+        ABM.db.update('contact_messages', row.id, { status: 'replied', replied_at: ABM.utils.now() });
+        var replied = ABM.db.find('contact_messages', row.id);
+        ok('marking replied stores a timestamp', replied.status === 'replied' && !!replied.replied_at);
+
+        ABM.db.update('contact_messages', row.id, { status: 'archived' });
+        ok('archiving works', ABM.db.find('contact_messages', row.id).status === 'archived');
+
+        ABM.db.remove('contact_messages', row.id);
+        ok('deleting removes it', !ABM.db.find('contact_messages', row.id));
+
+        /* ---------- newsletter ---------- */
+        var subsBefore = ABM.db.all('newsletter_subscribers').length;
+        var sub = SHOP.subscribe('brand.new@example.com');
+        ok('website signup is stored', ABM.db.all('newsletter_subscribers').length === subsBefore + 1);
+        var again = SHOP.subscribe('brand.new@example.com');
+        ok('duplicate signup does not create a second row', ABM.db.all('newsletter_subscribers').length === subsBefore + 1 && again.id === sub.id);
+        throws('invalid email refused', function () { SHOP.subscribe('not-an-email'); }, 'valid email');
+        ABM.db.update('newsletter_subscribers', sub.id, { is_active: 0 });
+        ok('unsubscribe flips the flag', ABM.db.find('newsletter_subscribers', sub.id).is_active === 0);
+
+        /* ---------- email log is fed by real orders ---------- */
+        var outBefore = ABM.db.all('email_outbox').length;
+        var prod = SHOP.products().filter(function (p) { return ABM.db.productType(p) === 'accessory' && SHOP.inStock(p); })[0];
+        SHOP.cart.clear(); SHOP.cart.add(prod.id, 1);
+        var order = SHOP.placeOrder({ name: 'Inbox Tester', phone: '0322-7778889', email: 'inbox.tester@example.com', address: '5 Test Road', city: 'Lahore' }, SHOP.cart.get(), 'cod', '');
+        SHOP.cart.clear();
+        ok('placing an order logs the invoice email', ABM.db.all('email_outbox').length === outBefore + 1);
+        var mail = ABM.db.all('email_outbox').slice(-1)[0];
+        ok('email log row points back at the order', mail.reference_type === 'online_order' && String(mail.reference_id) === String(order.id));
+        ok('email body can be previewed', mail.body_html.indexOf('INVOICE') >= 0);
+
+        /* ---------- permissions ---------- */
+        ok('cashier can read the inbox', ABM.roles.has('cashier', 'messages.view'));
+        ok('branch manager can manage the inbox', ABM.roles.has('branch_manager', 'messages.manage'));
+        ok('technician cannot see the inbox', !ABM.roles.has('technician', 'messages.view'));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: stock area (purchases, transfers, serials, valuation)</title>
+<script src="../assets/js/data.js"></script><script src="../assets/js/app.js"></script></head>
+<body data-public><pre id="out" style="font:12px/1.5 monospace;white-space:pre-wrap">running…</pre>
+<script>
+/*
+  Headless driver for the STOCK area. It loads the real page components out of the
+  .html files (the same inline `function xxxPage()` Alpine uses), mounts them with
+  stub Alpine magics and drives them through real flows against ABM services.
+  Run:  powershell -File tests\render.ps1 -Page tests/drive-stock.html -NoLogin
+  Read: tests\out\tests_drive_stock_html__admin.console.log   (lines tagged DRIVE)
+*/
+(async function () {
+  const { db, utils, stock, ledger, session, ui } = ABM;
+  const L = [];
+  let pass = 0, fail = 0;
+  const log = (m) => { L.push(m); console.log('DRIVE ' + m); };
+  const ok = (name, cond, extra) => {
+    if (cond) { pass++; log('PASS  ' + name + (extra ? '  [' + extra + ']' : '')); }
+    else { fail++; log('FAIL  ' + name + (extra ? '  [' + extra + ']' : '')); }
+    return !!cond;
+  };
+  const eq = (name, got, want, tol) => ok(name, tol ? Math.abs(Number(got) - Number(want)) <= tol : String(got) === String(want), 'got=' + JSON.stringify(got) + ' want=' + JSON.stringify(want));
+  const r2 = (n) => Math.round(Number(n) * 100) / 100;
+
+  /* ------------------------------------------------------------ harness */
+  const srcCache = {};
+  async function loadPage(file) {
+    if (srcCache[file]) return;
+    const html = await fetch('../' + file, { cache: 'no-store' }).then((r) => r.text());
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    let src = [...doc.querySelectorAll('body script:not([src])')].map((s) => s.textContent).join('\n');
+    // the only transform: keep the driver page from navigating away on save()
+    src = src.replace(/location\.href\s*=/g, 'window.__nav =').replace(/location\.replace\(/g, 'window.__navReplace = (');
+    (0, eval)(src);
+    srcCache[file] = true;
+  }
+  const realQs = utils.qs;
+  function mount(factoryName, params) {
+    utils.qs = (n, d = null) => (params && params[n] !== undefined ? params[n] : d);
+    const c = window[factoryName]();
+    utils.qs = realQs;
+    c.$nextTick = (fn) => { if (typeof fn === 'function') fn(); return Promise.resolve(); };
+    c.$watch = () => {};
+    c.$refs = {};
+    c.$root = document.body;
+    c.$el = document.body;
+    if (typeof c.init === 'function') c.init();
+    return c;
+  }
+  // save() often defers navigation through setTimeout — swallow timers while a save runs
+  function noNav(fn) {
+    const real = window.setTimeout;
+    window.setTimeout = function (f, ms) { return ms > 500 ? real(f, ms) : 0; };
+    try { return fn(); } finally { window.setTimeout = real; }
+  }
+  ui.confirm = () => Promise.resolve(true);      // auto-approve confirm dialogs
+  const luhn = (d14) => { let s = 0; for (let i = 0; i < 14; i++) { let x = +d14[i]; if (i % 2 === 1) { x *= 2; if (x > 9) x -= 9; } s += x; } return String((10 - (s % 10)) % 10); };
+  const imeiFrom = (base14) => { const b = String(base14).padEnd(14, '0').slice(0, 14); return b + luhn(b); };
+  const qtyOf = (b, p) => stock.qty(b, p);
+  const avgOf = (b, p) => { const r = db.first('branch_stock', (s) => s.branch_id == b && s.product_id == p); return r ? r.avg_cost : 0; };
+
+  try {
+    db.reset();
+    session.logout();
+    session.login(db.find('users', 1));   // super admin, active branch 1 (MB)
+    log('setup  db reset, logged in as ' + session.user().name + ' branch=' + session.branchCode());
+
+    const P_PHONE = 1, P_LAPTOP = 27, P_ACC = 25;
+    log('setup  products: ' + db.productLabel(P_PHONE) + ' / ' + db.productLabel(P_LAPTOP) + ' / ' + db.productLabel(P_ACC));
+    ok('fixture phone is imei-serialized', db.isSerialized(P_PHONE) && db.serialType(db.product(P_PHONE)) === 'imei');
+    ok('fixture laptop is serial-serialized', db.isSerialized(P_LAPTOP) && db.serialType(db.product(P_LAPTOP)) === 'serial');
+    ok('fixture accessory is not serialized', !db.isSerialized(P_ACC));
+
+    /* ================================================================ 1. PURCHASE */
+    await loadPage('purchase-create.html');
+    const before = {
+      phoneQty: qtyOf(1, P_PHONE), phoneAvg: avgOf(1, P_PHONE),
+      lapQty: qtyOf(1, P_LAPTOP), lapAvg: avgOf(1, P_LAPTOP),
+      accQty: qtyOf(1, P_ACC), accAvg: avgOf(1, P_ACC),
+      supBal: db.find('suppliers', 1).balance,
+      units: db.all('product_imeis').length,
+    };
+    const pc = mount('purchaseCreatePage', {});
+    pc.form.supplier_id = '1';
+    pc.form.branch_id = '1';
+    pc.addLine(P_PHONE); pc.addLine(P_LAPTOP); pc.addLine(P_ACC);
+    eq('purchase: 3 lines added', pc.lines.length, 3);
+    const lPhone = pc.lines.find((l) => l.product_id === P_PHONE);
+    const lLap = pc.lines.find((l) => l.product_id === P_LAPTOP);
+    const lAcc = pc.lines.find((l) => l.product_id === P_ACC);
+    ok('purchase: phone line serialized + IMEI label', lPhone.serialized && lPhone.serialLabel === 'IMEI', lPhone.serialLabel);
+    ok('purchase: laptop line serialized + Serial label', lLap.serialized && lLap.serialLabel === 'Serial No.', lLap.serialLabel);
+    ok('purchase: accessory line not serialized', !lAcc.serialized);
+
+    // --- validation: 14 digits / duplicate / already registered
+    const existing = db.all('product_imeis').find((i) => i.product_id == P_PHONE);
+    const IM1 = imeiFrom('35900000000001'), IM2 = imeiFrom('35900000000002');
+    log('info   generated IMEIs ' + IM1 + ' (' + IM1.length + ') / ' + IM2 + ' (' + IM2.length + ')');
+    lPhone.unitsText = ['35123456789012', IM1, IM1, existing.imei].join('\n'); // 14-digit, dup, registered
+    pc.revalidate();
+    const u = lPhone.units;
+    ok('validation: 14-digit IMEI rejected', u[0] && !u[0].ok && /15 digits/i.test(u[0].error), u[0] && u[0].error);
+    ok('validation: first valid IMEI accepted', u[1] && u[1].ok, u[1] && u[1].error);
+    ok('validation: duplicate in same purchase rejected', u[2] && !u[2].ok && /Duplicate/i.test(u[2].error), u[2] && u[2].error);
+    ok('validation: already-registered IMEI rejected', u[3] && !u[3].ok && /Already registered/i.test(u[3].error), u[3] && u[3].error);
+    eq('validation: invalidCount', lPhone.invalidCount, 3);
+    ok('validation: save blocked while invalid', (pc.revalidate(), !pc.validate()), JSON.stringify(pc.errors.lines || ''));
+
+    // --- fix it up: 2 IMEIs, 2 laptop serials, 5 accessories
+    lPhone.unitsText = [IM1, IM2].join('\n');
+    lPhone.expected = 2;
+    lPhone.unit_cost = 260000;
+    const S1 = 'DRV-LAP-0001', S2 = 'DRV-LAP-0002';
+    lLap.unitsText = [S1, S2].join('\n');
+    lLap.expected = 2;
+    lLap.unit_cost = 90000;
+    lAcc.qty = 5; lAcc.unit_cost = 200;
+    pc.revalidate();
+    eq('purchase: phone qty from valid IMEIs', lPhone.qty, 2);
+    eq('purchase: laptop qty from valid serials', lLap.qty, 2);
+    ok('serial validation: laptop serials accepted (not 15-digit rule)', lLap.units.every((x) => x.ok), JSON.stringify(lLap.units.map((x) => x.error)));
+    pc.form.discount = 1000; pc.form.tax = 500;
+    const expSubtotal = r2(2 * 260000 + 2 * 90000 + 5 * 200);
+    const expTotal = r2(expSubtotal - 1000 + 500);
+    eq('purchase: subtotal', pc.totals.subtotal, expSubtotal);
+    eq('purchase: total', pc.totals.total, expTotal);
+    pc.form.pay_amount = 300000; pc.form.pay_method = 'cash';
+    pc.opts.updateCost = false;
+    ok('purchase: validate() passes', pc.validate(), JSON.stringify(pc.errors));
+    const purCountBefore = db.all('purchases').length;
+    noNav(() => pc.save());
+    const pur = utils.sortBy(db.all('purchases'), 'id', 'desc')[0];
+    ok('purchase: row created', db.all('purchases').length === purCountBefore + 1 && !!pur && pur.status === 'received', 'purchases ' + purCountBefore + ' -> ' + db.all('purchases').length);
+    ok('purchase: number follows PUR-<branch>-######', /^PUR-MB-\d{6}$/.test(pur.purchase_no), pur.purchase_no);
+    eq('purchase: total stored', pur.total, expTotal);
+    eq('purchase: paid stored', pur.paid_amount, 300000);
+    eq('purchase: subtotal stored', pur.subtotal, expSubtotal);
+
+    // stock + avg cost
+    eq('purchase: phone stock +2', qtyOf(1, P_PHONE), before.phoneQty + 2);
+    eq('purchase: phone avg_cost weighted', avgOf(1, P_PHONE), r2((before.phoneAvg * before.phoneQty + 260000 * 2) / (before.phoneQty + 2)), 0.02);
+    eq('purchase: laptop stock +2', qtyOf(1, P_LAPTOP), before.lapQty + 2);
+    eq('purchase: laptop avg_cost weighted', avgOf(1, P_LAPTOP), r2((before.lapAvg * before.lapQty + 90000 * 2) / (before.lapQty + 2)), 0.02);
+    eq('purchase: accessory stock +5', qtyOf(1, P_ACC), before.accQty + 5);
+    eq('purchase: accessory avg_cost weighted', avgOf(1, P_ACC), r2((before.accAvg * before.accQty + 200 * 5) / (before.accQty + 5)), 0.02);
+
+    // units registered at the right branch, with the right serial type
+    const newUnits = [IM1, IM2, S1, S2].map((v) => db.first('product_imeis', (i) => String(i.imei).toUpperCase() === v.toUpperCase()));
+    ok('purchase: all 4 units registered', newUnits.every(Boolean));
+    ok('purchase: units at receiving branch, available', newUnits.every((x) => x && Number(x.branch_id) === 1 && x.status === 'available'), newUnits.map((x) => x && x.branch_id + '/' + x.status).join(','));
+    ok('purchase: phone units serial_type=imei', newUnits.slice(0, 2).every((x) => x.serial_type === 'imei'));
+    ok('purchase: laptop units serial_type=serial', newUnits.slice(2).every((x) => x.serial_type === 'serial'), newUnits.slice(2).map((x) => x.serial_type).join(','));
+    ok('purchase: units linked to purchase_item', newUnits.every((x) => !!x.purchase_item_id));
+    const pItems = db.where('purchase_items', { purchase_id: pur.id });
+    eq('purchase: 3 purchase_items', pItems.length, 3);
+    ok('purchase: serialized items carry imeis[]', pItems.filter((i) => (i.imeis || []).length).length === 2);
+
+    // supplier ledger
+    const sup = db.find('suppliers', 1);
+    eq('purchase: supplier balance = before + total - paid', sup.balance, r2(before.supBal + expTotal - 300000), 0.01);
+    const tx = db.all('supplier_transactions').filter((t) => t.reference_type === 'purchase' && t.reference_id == pur.id);
+    eq('purchase: 2 ledger rows (purchase + payment)', tx.length, 2);
+    eq('purchase: ledger credit = total', tx[0].credit, expTotal);
+    eq('purchase: ledger payment debit = paid', tx[1].debit, 300000);
+    eq('purchase: ledger balance_after', tx[1].balance_after, sup.balance, 0.01);
+    const movs = db.all('stock_movements').filter((m) => m.reference_type === 'purchase' && m.reference_id == pur.id);
+    eq('purchase: 5 stock movements (2+2+1 line)', movs.length, 5);
+    ok('purchase: movements typed purchase', movs.every((m) => m.movement_type === 'purchase'));
+
+    /* ============================================================== 2. CANCEL */
+    await loadPage('purchase-view.html');
+    const pv = mount('purchaseViewPage', { id: String(pur.id) });
+    ok('cancel: purchase loads in view', !!pv.p && pv.p.id === pur.id);
+    eq('cancel: units received tile', pv.totalUnits, 9);
+    eq('cancel: balance due', pv.due, r2(expTotal - 300000));
+    ok('cancel: cancellable', pv.cancelCheck.ok, JSON.stringify(pv.cancelCheck.reasons));
+    await pv.cancelPurchase();
+    const purAfter = db.find('purchases', pur.id);
+    eq('cancel: status cancelled', purAfter.status, 'cancelled');
+    eq('cancel: phone stock restored', qtyOf(1, P_PHONE), before.phoneQty);
+    eq('cancel: laptop stock restored', qtyOf(1, P_LAPTOP), before.lapQty);
+    eq('cancel: accessory stock restored', qtyOf(1, P_ACC), before.accQty);
+    ok('cancel: units removed from registry', [IM1, IM2, S1, S2].every((v) => !db.first('product_imeis', (i) => String(i.imei).toUpperCase() === v.toUpperCase())));
+    eq('cancel: unit count back to baseline', db.all('product_imeis').length, before.units);
+    eq('cancel: supplier balance = before - paid (payment stays a credit)', db.find('suppliers', 1).balance, r2(before.supBal - 300000), 0.01);
+
+    /* ============================================================ 3. TRANSFER */
+    await loadPage('transfer-create.html');
+    await loadPage('transfer-view.html');
+    const tBefore = { src: qtyOf(1, P_PHONE), dst: qtyOf(2, P_PHONE) };
+    const tc = mount('transferCreatePage', {});
+    tc.form.to_branch_id = '2';
+    tc.form.from_branch_id = '1';
+    tc.addLine(P_PHONE, true);
+    const tl = tc.lines[0];
+    ok('transfer: line added', !!tl && tl.serialized, tl && tl.label);
+    tl.qty = 3; tc.recalc();
+    tc.openPicker(0);
+    tc.selectFirst();
+    eq('transfer: 3 units pre-picked', tc.picker.selected.length, 3);
+    tc.applyPicker();
+    noNav(() => tc.save());
+    const trf = utils.sortBy(db.all('stock_transfers'), 'id', 'desc')[0];
+    ok('transfer: created pending', !!trf && trf.status === 'pending', trf && trf.transfer_no);
+    ok('transfer: number follows TRF-<from>-######', /^TRF-MB-\d{6}$/.test(trf.transfer_no), trf.transfer_no);
+    const tItem = db.where('transfer_items', { transfer_id: trf.id })[0];
+    eq('transfer: requested qty 3', tItem.quantity, 3);
+    eq('transfer: 3 units pre-selected on the item', (tItem.imei_ids || []).length, 3);
+    const pickedIds = [...tItem.imei_ids];
+
+    const tv = mount('transferViewPage', { id: String(trf.id) });
+    ok('transfer: view loads', tv.state === 'ok');
+    ok('transfer: can approve', tv.canApprove);
+    await tv.approve();
+    eq('transfer: approved', db.find('stock_transfers', trf.id).status, 'approved');
+    tv.load();
+    ok('transfer: can ship', tv.canShip);
+    tv.openShip();
+    eq('transfer: ship modal picked 3', tv.shipTotals.units, 3);
+    tv.doShip();
+    const trfShipped = db.find('stock_transfers', trf.id);
+    eq('transfer: shipped', trfShipped.status, 'shipped');
+    eq('transfer: source stock -3 at shipping', qtyOf(1, P_PHONE), tBefore.src - 3);
+    eq('transfer: destination unchanged at shipping', qtyOf(2, P_PHONE), tBefore.dst);
+    const shippedItem = db.where('transfer_items', { transfer_id: trf.id })[0];
+    eq('transfer: shipped_quantity recorded', shippedItem.shipped_quantity, 3);
+    ok('transfer: units in_transit', shippedItem.imei_ids.every((id) => db.find('product_imeis', id).status === 'in_transit'), shippedItem.imei_ids.map((id) => db.find('product_imeis', id).status).join(','));
+
+    tv.load();
+    ok('transfer: can receive', tv.canReceive);
+    tv.openReceive();
+    const rl = tv.recv.lines[0];
+    eq('transfer: receive modal lists 3 units', rl.units.length, 3);
+    const uOk = rl.units[0], uMiss = rl.units[1], uDmg = rl.units[2];
+    uOk.condition = 'ok'; uMiss.condition = 'missing'; uDmg.condition = 'damaged';
+    eq('transfer: receive totals ok/missing/damaged', [tv.recvTotals.ok, tv.recvTotals.missing, tv.recvTotals.damaged].join('/'), '1/1/1');
+    tv.doReceive();
+    const trfDone = db.find('stock_transfers', trf.id);
+    eq('transfer: received', trfDone.status, 'received');
+    const recvItem = db.where('transfer_items', { transfer_id: trf.id })[0];
+    eq('transfer: received_quantity (ok + damaged)', recvItem.received_quantity, 2);
+    eq('transfer: missing_quantity', recvItem.missing_quantity, 1);
+    eq('transfer: damaged_quantity', recvItem.damaged_quantity, 1);
+    const rOk = db.find('product_imeis', uOk.id), rMiss = db.find('product_imeis', uMiss.id), rDmg = db.find('product_imeis', uDmg.id);
+    ok('transfer: OK unit available at destination', rOk.status === 'available' && Number(rOk.branch_id) === 2, rOk.status + '/' + rOk.branch_id);
+    ok('transfer: missing unit back at source, available', rMiss.status === 'available' && Number(rMiss.branch_id) === 1, rMiss.status + '/' + rMiss.branch_id);
+    ok('transfer: damaged unit defective', rDmg.status === 'defective', rDmg.status + '/' + rDmg.branch_id);
+    eq('transfer: destination stock +1 (ok only, damaged not counted)', qtyOf(2, P_PHONE), tBefore.dst + 1);
+    eq('transfer: source stock net -2 (missing returned)', qtyOf(1, P_PHONE), tBefore.src - 2);
+    const phoneUnitsSrc = db.all('product_imeis').filter((i) => i.product_id == P_PHONE && Number(i.branch_id) === 1 && stock.SELLABLE.includes(i.status)).length;
+    eq('transfer: source sellable units == branch_stock', phoneUnitsSrc, qtyOf(1, P_PHONE));
+    const phoneUnitsDst = db.all('product_imeis').filter((i) => i.product_id == P_PHONE && Number(i.branch_id) === 2 && stock.SELLABLE.includes(i.status)).length;
+    eq('transfer: destination sellable units == branch_stock', phoneUnitsDst, qtyOf(2, P_PHONE));
+    log('info   picked ids ' + pickedIds.join(',') + ' ok=' + uOk.id + ' missing=' + uMiss.id + ' damaged=' + uDmg.id);
+
+    /* ========================================================== 4. ADJUSTMENT */
+    await loadPage('stock.html');
+    const sp = mount('stockPage', {});
+    const accRow = sp.rows.find((r) => r.id === P_ACC);
+    ok('adjust: accessory row found on stock.html', !!accRow, accRow && accRow.label + ' qty=' + accRow.qty);
+    const adjBeforeQty = qtyOf(1, P_ACC);
+    eq('adjust: stock.html qty == branch_stock', accRow.qty, adjBeforeQty);
+    sp.openAdjust(accRow);
+    ok('adjust: modal opened', sp.adj.open);
+    sp.adj.qty = adjBeforeQty - 3;
+    sp.adj.reason = 'Stock take / physical count';
+    eq('adjust: diff computed', sp.adjDiff, -3);
+    sp.saveAdjust();
+    eq('adjust: branch_stock updated', qtyOf(1, P_ACC), adjBeforeQty - 3);
+    const lastMov = utils.sortBy(db.all('stock_movements').filter((m) => m.product_id == P_ACC && m.branch_id == 1), 'id', 'desc')[0];
+    eq('adjust: movement type', lastMov.movement_type, 'adjustment');
+    eq('adjust: movement quantity = difference', lastMov.quantity, -3);
+    eq('adjust: movement balance_after', lastMov.balance_after, adjBeforeQty - 3);
+    const audit = utils.sortBy(db.all('audit_logs'), 'id', 'desc')[0];
+    eq('adjust: audit written', audit.action, 'stock.adjust');
+    // positive adjustment re-values average cost
+    const avgB = avgOf(1, P_ACC), qB = qtyOf(1, P_ACC);
+    const accRow2 = (sp.refresh(), sp.rows.find((r) => r.id === P_ACC));
+    sp.openAdjust(accRow2); sp.adj.qty = qB + 10; sp.adj.unitCost = 300; sp.saveAdjust();
+    eq('adjust: positive adjustment adds stock', qtyOf(1, P_ACC), qB + 10);
+    eq('adjust: positive adjustment reweights avg cost', avgOf(1, P_ACC), r2((avgB * qB + 300 * 10) / (qB + 10)), 0.02);
+
+    /* ============================= 4b. PAY THE BALANCE OF A RECEIVED PURCHASE */
+    const pc2 = mount('purchaseCreatePage', {});
+    pc2.form.supplier_id = '3'; pc2.form.branch_id = '1';
+    pc2.addLine(P_ACC);
+    pc2.lines[0].qty = 3; pc2.lines[0].unit_cost = 250; pc2.opts.updateCost = false;
+    pc2.form.pay_amount = 100;
+    ok('pay: second purchase validates', pc2.validate(), JSON.stringify(pc2.errors));
+    noNav(() => pc2.save());
+    const pur2 = utils.sortBy(db.all('purchases'), 'id', 'desc')[0];
+    eq('pay: purchase total', pur2.total, 750);
+    const supBal2 = db.find('suppliers', 3).balance;
+    const pv2 = mount('purchaseViewPage', { id: String(pur2.id) });
+    eq('pay: due before payment', pv2.due, 650);
+    pv2.openPay();
+    ok('pay: modal prefilled with the balance', pv2.pay.open && pv2.pay.amount === 650, String(pv2.pay.amount));
+    pv2.pay.amount = 650; pv2.pay.method = 'cash';
+    pv2.savePay();
+    eq('pay: paid_amount updated', db.find('purchases', pur2.id).paid_amount, 750);
+    eq('pay: supplier balance reduced by the payment', db.find('suppliers', 3).balance, r2(supBal2 - 650), 0.01);
+    pv2.load();
+    eq('pay: due is now zero', pv2.due, 0);
+    eq('pay: pay status', pv2.payStatus, 'paid');
+
+    /* ================= 4c. A PURCHASE WHOSE UNITS MOVED CANNOT BE CANCELLED */
+    const pc3 = mount('purchaseCreatePage', {});
+    pc3.form.supplier_id = '1'; pc3.form.branch_id = '1';
+    pc3.addLine(P_PHONE);
+    const IM3 = imeiFrom('35900000000003');
+    pc3.lines[0].unitsText = IM3; pc3.lines[0].expected = 1; pc3.lines[0].unit_cost = 250000;
+    pc3.opts.updateCost = false; pc3.revalidate();
+    pc3.form.pay_amount = 0;
+    ok('cancel-guard: purchase validates', pc3.validate(), JSON.stringify(pc3.errors));
+    noNav(() => pc3.save());
+    const pur3 = utils.sortBy(db.all('purchases'), 'id', 'desc')[0];
+    const unit3 = db.first('product_imeis', (i) => String(i.imei) === IM3);
+    ok('cancel-guard: unit registered', !!unit3);
+    stock.markDefective(unit3.id, 'driver: damaged before cancel');
+    const pv3 = mount('purchaseViewPage', { id: String(pur3.id) });
+    ok('cancel-guard: cancel is blocked once a unit left available stock', !pv3.cancelCheck.ok, pv3.cancelCheck.reasons.join('; '));
+    const stockBeforeBlocked = qtyOf(1, P_PHONE);
+    await pv3.cancelPurchase();
+    eq('cancel-guard: purchase still received', db.find('purchases', pur3.id).status, 'received');
+    eq('cancel-guard: no stock moved by the blocked cancel', qtyOf(1, P_PHONE), stockBeforeBlocked);
+    stock.restoreImei(unit3.id, 'driver: restored');
+
+    /* ============ 4d. NON-SERIALIZED TRANSFER WITH A SHORT (PARTIAL) RECEIPT */
+    const nBefore = { src: qtyOf(1, P_ACC), dst: qtyOf(2, P_ACC) };
+    const tc2 = mount('transferCreatePage', {});
+    tc2.form.to_branch_id = '2'; tc2.form.from_branch_id = '1';
+    tc2.addLine(P_ACC, true);
+    tc2.lines[0].qty = 10; tc2.recalc();
+    noNav(() => tc2.save());
+    const trf2 = utils.sortBy(db.all('stock_transfers'), 'id', 'desc')[0];
+    const tv2 = mount('transferViewPage', { id: String(trf2.id) });
+    await tv2.approve(); tv2.load();
+    tv2.openShip();
+    eq('transfer2: non-serialized ship qty defaults to requested', tv2.shipTotals.units, 10);
+    tv2.doShip();
+    eq('transfer2: source -10 at shipping', qtyOf(1, P_ACC), nBefore.src - 10);
+    const ti2 = db.where('transfer_items', { transfer_id: trf2.id })[0];
+    eq('transfer2: shipped_quantity', ti2.shipped_quantity, 10);
+    ok('transfer2: unit_cost captured from source avg cost', Number(ti2.unit_cost) > 0, String(ti2.unit_cost));
+    tv2.load(); tv2.openReceive();
+    tv2.recv.lines[0].qty = 7;   // 3 short
+    ok('transfer2: over-receipt is rejected', (tv2.recv.lines[0].qty = 12, !!tv2.recvLineError(tv2.recv.lines[0])), tv2.recvLineError(tv2.recv.lines[0]));
+    tv2.recv.lines[0].qty = 7;
+    tv2.doReceive();
+    const ti2b = db.where('transfer_items', { transfer_id: trf2.id })[0];
+    eq('transfer2: received_quantity 7', ti2b.received_quantity, 7);
+    eq('transfer2: missing_quantity 3', ti2b.missing_quantity, 3);
+    eq('transfer2: destination +7', qtyOf(2, P_ACC), nBefore.dst + 7);
+    eq('transfer2: source keeps the 3 short units', qtyOf(1, P_ACC), nBefore.src - 7);
+    const shortMov = utils.sortBy(db.all('stock_movements').filter((m) => m.reference_type === 'transfer' && m.reference_id == trf2.id && m.branch_id == 1 && m.quantity > 0), 'id', 'desc')[0];
+    ok('transfer2: short units come back as a transfer_return movement', shortMov && shortMov.movement_type === 'transfer_return' && shortMov.quantity === 3, shortMov && shortMov.movement_type + '/' + shortMov.quantity);
+
+    /* ========== 4e. "UPDATE PRODUCT COST PRICE" MUST KEEP cost <= min sale <= retail */
+    await loadPage('products.html');
+    const P_CHG = 18;   // 20W USB-C Charger: cost 3200, retail 4500, min_sale 3296
+    const chgBefore = { ...db.find('products', P_CHG) };
+    log('info   charger before: cost=' + chgBefore.cost_price + ' min_sale=' + chgBefore.min_sale_price + ' retail=' + chgBefore.retail_price);
+    const pc4 = mount('purchaseCreatePage', {});
+    pc4.form.supplier_id = '3'; pc4.form.branch_id = '1';
+    pc4.addLine(P_CHG);
+    pc4.lines[0].qty = 4; pc4.lines[0].unit_cost = 4000;   // cost rises ABOVE the current min sale price
+    pc4.opts.updateCost = true; pc4.form.pay_amount = 0;
+    ok('cost-update: purchase validates', pc4.validate(), JSON.stringify(pc4.errors));
+    noNav(() => pc4.save());
+    const chgAfter = db.find('products', P_CHG);
+    eq('cost-update: catalog cost updated', chgAfter.cost_price, 4000);
+    ok('cost-update: price floor still >= cost (cost <= min sale <= retail)', Number(chgAfter.min_sale_price) >= Number(chgAfter.cost_price), 'cost=' + chgAfter.cost_price + ' min_sale=' + chgAfter.min_sale_price + ' retail=' + chgAfter.retail_price);
+    ok('cost-update: price floor still <= retail', Number(chgAfter.min_sale_price) <= Number(chgAfter.retail_price), 'min_sale=' + chgAfter.min_sale_price + ' retail=' + chgAfter.retail_price);
+    // the product form must accept the product it just wrote
+    const ppChk = mount('productsPage', {});
+    ppChk.openEdit(P_CHG);
+    ok('cost-update: product still passes the product form validation', ppChk.validate(), JSON.stringify(ppChk.modal.errors));
+    ppChk.closeModal();
+
+    /* ======================================================= 5. READ MODELS */
+    // stock.html quantities == branch_stock (all branches matrix)
+    sp.branchSel = 'all'; sp.refresh();
+    let mismatch = 0, checked = 0;
+    db.all('branch_stock').forEach((s) => {
+      const row = sp.rows.find((r) => r.id === s.product_id);
+      if (!row) { if (s.quantity > 0) mismatch++; return; }
+      checked++;
+      if (row.per[s.branch_id] && row.per[s.branch_id].qty !== s.quantity) mismatch++;
+    });
+    ok('read: stock.html matrix quantities == branch_stock', mismatch === 0, 'rows=' + checked + ' mismatch=' + mismatch);
+    const grandUnits = db.all('branch_stock').reduce((a, s) => a + s.quantity, 0);
+    eq('read: stock.html tile units == sum(branch_stock)', sp.tiles.units, grandUnits);
+    eq('read: stock.html tile value == sum(qty*avg)', sp.tiles.value, utils.sum(db.all('branch_stock'), (s) => s.quantity * s.avg_cost), 0.05);
+
+    // imeis.html status counts == product_imeis
+    await loadPage('imeis.html');
+    const ip = mount('imeisPage', {});
+    ip.f.branch = 'all'; ip.refresh();
+    const byStatus = {};
+    db.all('product_imeis').forEach((i) => { byStatus[i.status] = (byStatus[i.status] || 0) + 1; });
+    eq('read: imeis.html in-stock tile == available+returned', ip.tiles.inStock, (byStatus.available || 0) + (byStatus.returned || 0));
+    eq('read: imeis.html available tile', ip.tiles.available, byStatus.available || 0);
+    eq('read: imeis.html in-transit tile', ip.tiles.inTransit, byStatus.in_transit || 0);
+    eq('read: imeis.html defective tile', ip.tiles.defective, byStatus.defective || 0);
+    eq('read: imeis.html sold tile', ip.tiles.soldTotal, byStatus.sold || 0);
+    eq('read: imeis.html rows == registry size', ip.rows.length, db.all('product_imeis').length);
+
+    // imeis.html register modal must accept a SERIAL-type product (laptop)
+    ip.openRegister();
+    ip.reg.product_id = String(P_LAPTOP);
+    ip.onRegProductChange();
+    ip.reg.branch_id = '1';
+    ip.reg.text = 'DRV-REG-0001\nDRV-REG-0002';
+    ok('read: imeis.html validates laptop serials as serials (not 15-digit IMEIs)', ip.parsed.invalid === 0, JSON.stringify(ip.parsed.lines));
+    const lapQtyBefore = qtyOf(1, P_LAPTOP);
+    ip.register();
+    eq('read: imeis.html registered 2 laptop serials', qtyOf(1, P_LAPTOP), lapQtyBefore + 2);
+    ok('read: registered laptop units have serial_type=serial', ['DRV-REG-0001', 'DRV-REG-0002'].every((v) => { const x = db.first('product_imeis', (i) => String(i.imei).toUpperCase() === v); return x && x.serial_type === 'serial' && x.status === 'available'; }));
+    // an IMEI-type product must still be validated with IMEI rules
+    ip.reg.product_id = String(P_PHONE); ip.onRegProductChange();
+    ip.reg.text = 'ABCD1234';
+    ok('read: imeis.html still rejects a non-IMEI for an IMEI product', ip.parsed.invalid === 1, JSON.stringify(ip.parsed.lines));
+
+    // list pages reconcile with the documents they summarise
+    await loadPage('purchases.html');
+    const plp = mount('purchasesPage', {});
+    plp.f.branch = 'all'; plp.range.set('all'); plp.compute();
+    eq('read: purchases.html lists every purchase', plp.rows.length, db.all('purchases').length);
+    const liveP = db.all('purchases').filter((p) => p.status !== 'cancelled');
+    eq('read: purchases.html KPI value == sum(total) of live purchases', plp.k.value, utils.sum(liveP, 'total'), 0.05);
+    eq('read: purchases.html KPI paid == sum(paid_amount)', plp.k.paid, utils.sum(liveP, 'paid_amount'), 0.05);
+    eq('read: purchases.html KPI due == sum(total-paid)', plp.k.due, r2(utils.sum(liveP, (p) => Math.max(0, p.total - p.paid_amount))), 0.05);
+    eq('read: purchases.html payables == sum(positive supplier balances)', plp.k.payables, utils.sum(db.all('suppliers').filter((s) => s.balance > 0), 'balance'), 0.05);
+
+    await loadPage('transfers.html');
+    const tlp = mount('transfersPage', {});
+    tlp.f.branch = 'all'; tlp.range.set('all'); tlp.compute();
+    eq('read: transfers.html lists every transfer', tlp.rows.length, db.all('stock_transfers').length);
+    const recvRows = tlp.rows.filter((t) => t.status === 'received');
+    const expRecvUnits = db.all('transfer_items').filter((i) => { const t = db.find('stock_transfers', i.transfer_id); return t && t.status === 'received'; }).reduce((a, i) => a + (Number(i.received_quantity) || 0), 0);
+    eq('read: transfers.html received units == sum(received_quantity)', tlp.k.receivedUnits, expRecvUnits);
+    ok('read: transfers.html counts the short receipt as variance', tlp.k.variance >= 4, 'variance=' + tlp.k.variance + ' rows=' + recvRows.length);
+
+    // product-view.html per-branch table
+    await loadPage('product-view.html');
+    const pvScoped = mount('productViewPage', { id: String(P_PHONE) });
+    eq('read: product-view branch-scoped tile == that branch stock', pvScoped.totals.qty, qtyOf(1, P_PHONE));
+    eq('read: product-view branch-scoped units == branch-scoped stock', pvScoped.totals.imeiSellable, qtyOf(1, P_PHONE));
+    const pvw = mount('productViewPage', { id: String(P_PHONE) });
+    pvw.scope = 'all'; pvw.load();
+    let pvMismatch = 0;
+    pvw.stockRows.forEach((r) => {
+      const s = db.first('branch_stock', (x) => x.branch_id == r.branch_id && x.product_id == P_PHONE);
+      const q = s ? s.quantity : 0, a = s ? s.avg_cost : 0;
+      if (r.qty !== q || r2(r.avg_cost) !== r2(a) || r2(r.value) !== r2(q * a)) pvMismatch++;
+    });
+    ok('read: product-view per-branch table == branch_stock', pvMismatch === 0, 'branches=' + pvw.stockRows.length + ' mismatch=' + pvMismatch);
+    eq('read: product-view total qty', pvw.totals.qty, db.all('branch_stock').filter((s) => s.product_id == P_PHONE).reduce((a, s) => a + s.quantity, 0));
+    const pvSellable = db.all('product_imeis').filter((i) => i.product_id == P_PHONE && stock.SELLABLE.includes(i.status)).length;
+    eq('read: product-view sellable units == total stock qty', pvw.totals.imeiSellable, pvw.totals.qty);
+    eq('read: product-view sellable units == registry', pvw.totals.imeiSellable, pvSellable);
+
+    // valuation report
+    await loadPage('report-stock-valuation.html');
+    const vp = mount('stockValuationPage', {});
+    vp.f.branch = 'all'; vp.compute();
+    const expWa = r2(db.all('branch_stock').filter((s) => s.quantity > 0 && db.isStockTracked(db.product(s.product_id))).reduce((a, s) => a + s.quantity * s.avg_cost, 0));
+    eq('read: valuation weighted total == sum(qty*avg_cost)', vp.totals.cost, expWa, 0.5);
+    eq('read: valuation waTotal matches', vp.waTotal, expWa, 0.5);
+    eq('read: valuation units == sum(qty)', vp.totals.units, db.all('branch_stock').filter((s) => s.quantity > 0 && db.isStockTracked(db.product(s.product_id))).reduce((a, s) => a + s.quantity, 0));
+    vp.method = 'actual'; vp.compute();
+    const actualSerialised = r2(db.all('product_imeis').filter((i) => stock.SELLABLE.includes(i.status)).reduce((a, i) => a + (Number(i.cost_price) || 0), 0));
+    const actualRows = vp.rows.filter((r) => r.serialized > 0);
+    eq('read: valuation actual method sums per-unit cost of serialized stock', r2(utils.sum(actualRows, 'value')), actualSerialised, 1);
+
+    /* ================================================= 6. PRODUCTS.HTML MODAL */
+    const pp = mount('productsPage', {});
+    // 6a. add a new serialized laptop through the modal — every field must persist
+    pp.openAdd();
+    const f = pp.modal.form;
+    pp.setType('device');
+    f.device_type = 'laptop'; pp.onDeviceTypeChange();
+    f.category_id = '4'; pp.onCategoryChange();
+    f.brand_id = '12'; f.name = 'Drive Test Laptop'; f.model = 'DTL-1'; f.variant = 'i7/16/512'; f.color = 'Black';
+    f.description = 'Driven by tests'; f.tags = ['drive', 'qa']; f.sku = 'DRV-LAPTOP-900'; pp.modal.skuTouched = true;
+    f.barcode = '880999000111'; f.unit = 'pcs'; f.serial_prefix = 'dtl';
+    f.specs.processor = 'Intel Core i7-1165G7'; f.specs.ram = '16GB'; f.specs.storage = '512GB';
+    f.condition = 'refurbished'; f.warranty_months = 6;
+    f.cost_price = 100000; f.retail_price = 130000; f.wholesale_price = 120000; f.min_sale_price = 110000; f.tax_rate = 5;
+    f.min_stock = 2; f.max_stock = 8; f.reorder_qty = 4; f.supplier_id = '5';
+    pp.modal.custom = [{ uid: 1, key: 'Weight', value: '1.4 kg' }];
+    ok('products: serial type auto-selected for laptop', f.is_serialized === 1 && f.serial_type === 'serial', f.serial_type);
+    pp.save();
+    const np = db.all('products').find((x) => x.sku === 'DRV-LAPTOP-900');
+    ok('products: product created', !!np);
+    if (np) {
+      const checks = {
+        product_type: 'device', device_type: 'laptop', category_id: 4, brand_id: 12, name: 'Drive Test Laptop', model: 'DTL-1',
+        variant: 'i7/16/512', color: 'Black', description: 'Driven by tests', barcode: '880999000111', unit: 'pcs',
+        is_serialized: 1, serial_type: 'serial', is_imei_tracked: 1, serial_prefix: 'DTL', is_stock_tracked: 1,
+        condition: 'refurbished', warranty_months: 6, cost_price: 100000, retail_price: 130000, wholesale_price: 120000,
+        min_sale_price: 110000, tax_rate: 5, min_stock: 2, max_stock: 8, reorder_qty: 4, supplier_id: 5, is_active: 1,
+      };
+      const bad = Object.keys(checks).filter((k) => String(np[k]) !== String(checks[k]));
+      ok('products: modal wrote EVERY field', bad.length === 0, bad.map((k) => k + '=' + JSON.stringify(np[k])).join(', '));
+      ok('products: tags saved', JSON.stringify(np.tags) === '["drive","qa"]', JSON.stringify(np.tags));
+      ok('products: standard + custom specs saved', np.specs.processor === 'Intel Core i7-1165G7' && np.specs.ram === '16GB' && np.specs.weight === '1.4 kg', JSON.stringify(np.specs));
+    }
+    // 6b. price rule cost <= min sale <= retail
+    pp.openEdit(np.id);
+    pp.modal.form.min_sale_price = 90000;   // below cost
+    ok('products: min sale below cost rejected', !pp.validate() && !!pp.modal.errors.min_sale_price, pp.modal.errors.min_sale_price);
+    pp.modal.form.min_sale_price = 140000;  // above retail
+    ok('products: min sale above retail rejected', !pp.validate() && !!pp.modal.errors.min_sale_price, pp.modal.errors.min_sale_price);
+    pp.modal.form.min_sale_price = 110000;
+    pp.modal.form.wholesale_price = 100000; // below min sale
+    ok('products: wholesale below min sale rejected', !pp.validate() && !!pp.modal.errors.wholesale_price, pp.modal.errors.wholesale_price);
+    pp.modal.form.wholesale_price = 120000;
+    ok('products: valid price ladder passes', pp.validate(), JSON.stringify(pp.modal.errors));
+    pp.closeModal();
+
+    // 6c. serialized / serial type must be LOCKED once units exist
+    pp.refresh();
+    pp.openEdit(P_PHONE);
+    ok('products: hasUnits detected for a product with registered units', pp.modal.hasUnits, 'units=' + pp.modal.unitCount);
+    pp.toggleSerialized();
+    ok('products: serialized switch is locked', pp.modal.form.is_serialized === 1);
+    const beforeType = db.find('products', P_PHONE);
+    pp.setType('accessory');   // changing the product type must NOT silently un-serialize
+    ok('products: type change keeps serialization while units exist', pp.modal.form.is_serialized === 1, 'is_serialized=' + pp.modal.form.is_serialized + ' type=' + pp.modal.form.product_type);
+    pp.modal.form.category_id = '6';
+    if (pp.validate()) {
+      pp.save();
+      const after = db.find('products', P_PHONE);
+      ok('products: saved product still serialized', after.is_serialized === 1 && after.serial_type === 'imei', 'is_serialized=' + after.is_serialized + ' serial_type=' + after.serial_type);
+      const stillCounts = db.all('product_imeis').filter((i) => i.product_id == P_PHONE && stock.SELLABLE.includes(i.status)).length;
+      eq('products: registry still reconciles with branch stock after edit', stillCounts, db.all('branch_stock').filter((s) => s.product_id == P_PHONE).reduce((a, s) => a + s.quantity, 0));
+      db.update('products', P_PHONE, { product_type: beforeType.product_type, category_id: beforeType.category_id, device_type: beforeType.device_type });
+    } else {
+      log('info   type change to accessory blocked by validation: ' + JSON.stringify(pp.modal.errors));
+      ok('products: type change blocked OR serialization preserved', pp.modal.form.is_serialized === 1);
+    }
+    pp.closeModal();
+  } catch (e) {
+    fail++;
+    log('ERROR ' + (e && e.stack ? e.stack : e));
+  }
+
+  log('TOTAL pass=' + pass + ' fail=' + fail);
+  console.log('RESULT: ' + (fail === 0 ? 'PASS' : 'FAIL'));
+  document.getElementById('out').textContent = L.join('\n');
+})();
+</script></body></html>

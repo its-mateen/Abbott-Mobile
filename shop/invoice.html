@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Invoice · Abbott Mobiles</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    /* the invoice itself is produced by SHOP.invoiceHtml() and shown in an iframe,
+       so what you see here is exactly what downloads, prints and gets emailed */
+    .inv-frame { width: 100%; border: 0; background: #fff; border-radius: .9rem; min-height: 60vh; }
+    @media print {
+      .noprint { display: none !important; }
+      body { background: #fff !important; padding: 0 !important; }
+      .inv-frame { border-radius: 0; min-height: 100vh; }
+    }
+  </style>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-invoice">
+
+  <div data-shop-header class="noprint"></div>
+
+  <main class="flex-1" x-data="shopInvoice()">
+
+    <template x-if="!order">
+      <div class="shop-container py-16">
+        <div class="shop-card shop-card-pad max-w-lg mx-auto text-center">
+          <div class="shop-empty">
+            <span x-html="SHOP.icon('document','')"></span>
+            <div class="shop-empty-title">Invoice not available</div>
+            <p class="text-sm mt-2">We could not match that order number and phone number. Sign in, or open the invoice from your tracking link.</p>
+            <div class="flex flex-wrap justify-center gap-2 mt-5">
+              <a href="order.html" class="shop-btn">Track an order</a>
+              <a href="login.html" class="shop-btn shop-btn-outline">Sign in</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="order">
+      <div class="shop-container py-6 sm:py-10">
+
+        <!-- toolbar -->
+        <div class="noprint flex flex-wrap items-center gap-2 mb-5">
+          <div class="min-w-0 mr-auto">
+            <div class="shop-eyebrow">Invoice</div>
+            <h1 class="shop-h3" x-text="order.order_no"></h1>
+          </div>
+          <button type="button" class="shop-btn shop-btn-sm" @click="printIt()">
+            <span x-html="SHOP.icon('printer','')"></span>Print / Save as PDF
+          </button>
+          <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" @click="download()">
+            <span x-html="SHOP.icon('download','')"></span>Download
+          </button>
+          <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" @click="email()" x-show="order.customer.email" x-cloak>
+            <span x-html="SHOP.icon('mail','')"></span>Email to me
+          </button>
+          <a :href="SHOP.trackUrl(order)" class="shop-btn shop-btn-ghost shop-btn-sm">Track</a>
+        </div>
+        <p class="noprint text-xs text-slate-500 mb-4" x-show="note" x-cloak x-text="note"></p>
+
+        <iframe class="inv-frame" x-ref="frame" title="Invoice document"></iframe>
+      </div>
+    </template>
+  </main>
+
+  <div data-shop-footer class="mt-auto noprint"></div>
+
+  <script>
+    function shopInvoice() {
+      const { utils } = ABM;
+      return {
+        order: null, note: '',
+        init() {
+          const no = utils.qs('no'), phone = utils.qs('phone');
+          this.order = no ? SHOP.findOrder(no, phone) : null;
+          if (!this.order && no && SHOP.auth.isLoggedIn()) {
+            this.order = SHOP.auth.orders().find((o) => o.order_no === no) || null;
+          }
+          if (!this.order) return;
+          document.title = 'Invoice ' + this.order.order_no + ' · Abbott Mobile';
+          this.$nextTick(() => this.render());
+        },
+        render() {
+          const frame = this.$refs.frame;
+          if (!frame) return;
+          const doc = frame.contentDocument || frame.contentWindow.document;
+          doc.open();
+          doc.write(SHOP.invoiceHtml(this.order, { trackUrl: location.origin + location.pathname.replace(/[^/]*$/, '') + SHOP.trackUrl(this.order) }));
+          doc.close();
+          // grow the iframe to fit its content so the page scrolls, not the frame
+          const fit = () => { try { frame.style.height = (doc.documentElement.scrollHeight + 24) + 'px'; } catch (e) { /* ignore */ } };
+          setTimeout(fit, 60); setTimeout(fit, 400);
+        },
+        printIt() {
+          const frame = this.$refs.frame;
+          try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+          catch (e) { window.print(); }
+        },
+        download() { SHOP.downloadInvoice(this.order); this.note = 'Invoice downloaded. Open the file to print it or save it as a PDF.'; },
+        email() {
+          try { const row = SHOP.emailInvoice(this.order); this.note = 'Invoice sent to ' + row.to + '.'; SHOP.toast('Invoice emailed.'); }
+          catch (e) { SHOP.toast(e.message, 'error'); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

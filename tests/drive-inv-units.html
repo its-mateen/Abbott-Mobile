@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: IMEI / serial units</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the real Alpine components of imeis.html, report-imei-history.html and product-view.html:
+    // registering units with IMEI 2 and condition details, correcting a unit (IMEI typo, cost, grade, PTA,
+    // price), voiding a unit registered by mistake, the history of a resold unit, the range bars and CSV exports.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x ? '  [' + x + ']' : '')); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m, tol) => ok(Math.abs(Number(a) - Number(b)) <= (tol || 0.011), m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, ui, stock } = ABM;
+      db.reset();
+      try { Object.keys(localStorage).filter((k) => /^abm\.range\./.test(k)).forEach((k) => localStorage.removeItem(k)); } catch (e) { /* ignore */ }
+      const toasts = [];
+      ui.toast = (m, t) => { toasts.push({ m, t }); }; ui.confirm = async () => true;
+      const downloads = [];
+      utils.download = (name, content) => { downloads.push({ name, content }); return true; };
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+      const BID = Number(session.branchId());
+      const ME = session.user().id;
+
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file, { cache: 'no-store' })).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+      const luhn = (d14) => { let s = 0; for (let i = 0; i < 14; i++) { let x = +d14[i]; if (i % 2 === 1) { x *= 2; if (x > 9) x -= 9; } s += x; } return String((10 - (s % 10)) % 10); };
+      const imei = (n) => { const b = ('3591' + String(n).padStart(10, '0')).slice(0, 14); return b + luhn(b); };
+      const bs = (b, p) => db.first('branch_stock', (s) => s.branch_id == b && s.product_id == p) || { quantity: 0, avg_cost: 0 };
+      const unitBy = (v) => db.first('product_imeis', (i) => String(i.imei) === String(v));
+      const lastAudit = () => utils.sortBy(db.all('audit_logs'), 'id', 'desc')[0];
+      const valueGap = (b, p) => { const r = bs(b, p); const units = db.all('product_imeis').filter((i) => i.branch_id == b && i.product_id == p && stock.SELLABLE.includes(i.status)); return utils.round2(utils.sum(units, 'cost_price') - r.quantity * r.avg_cost); };
+
+      await source('imeis.html', 'imeisPage');
+      await source('report-imei-history.html', 'imeiHistoryPage');
+      await source('product-view.html', 'productViewPage');
+
+      const P = 1;   // an IMEI-tracked phone
+      ok(db.serialType(db.find('products', P)) === 'imei', 'fixture: product 1 is IMEI-tracked');
+      const gapBefore = valueGap(BID, P);
+
+      /* ========================= 1. register with IMEI 2 and batch details ========================= */
+      log('=== TEST 1: registering units');
+      let ip = mk(imeisPage, '');
+      const A1 = imei(1), A2 = imei(2), B1 = imei(3), C1 = imei(4), C2 = imei(5), D1 = imei(6), E1 = imei(7), F1 = imei(8), G1 = imei(9), N1 = imei(10), H1 = imei(11);
+      const seedWith2 = db.all('product_imeis').find((i) => i.imei2);
+      ip.openRegister();
+      ip.reg.product_id = String(P); ip.onRegProductChange();
+      ip.reg.branch_id = String(BID); ip.reg.unit_cost = 100000;
+      ip.reg.text = [D1 + ', ' + D1, E1 + ', 12345', seedWith2.imei2, A1 + ', ' + A2, B1 + ', ' + A2, C1 + ',' + C2 + ',' + imei(99)].join('\n');
+      let pr = ip.parsed;
+      eq(pr.lines[0].error, 'IMEI 2 repeats IMEI 1', 'T1: IMEI 2 equal to IMEI 1 is refused');
+      eq(pr.lines[1].error, 'IMEI 2: not 15 digits', 'T1: a short IMEI 2 is refused');
+      eq(pr.lines[2].error, 'Already registered (as IMEI 2)', 'T1: a number already on the books as someone\'s IMEI 2 is refused');
+      eq(pr.lines[3].error, '', 'T1: "IMEI 1, IMEI 2" is accepted');
+      eq(pr.lines[3].imei2, A2, 'T1: and the second number is read as IMEI 2');
+      eq(pr.lines[4].error, 'IMEI 2 duplicate in list', 'T1: the same IMEI 2 twice in a batch is refused');
+      eq(pr.lines[5].error, 'At most two IMEIs per line', 'T1: three numbers on a line are refused');
+      ip.register();
+      eq(db.all('product_imeis').filter((i) => [A1, B1, C1].includes(i.imei)).length, 0, 'T1: nothing is registered while lines are invalid');
+      ip.removeInvalid();
+      eq(ip.parsed.lines.length, 1, 'T1: "remove invalid" keeps only the good line');
+      eq(ip.reg.text, A1 + ', ' + A2, 'T1: and keeps its IMEI 2');
+      // scanning in pairs
+      ip.reg.pair = true; ip.reg.waiting = false;
+      ip.reg.scan = B1; ip.appendScan();
+      ip.reg.scan = C1; ip.appendScan();
+      ip.reg.scan = C2; ip.appendScan();
+      pr = ip.parsed;
+      eq(pr.lines.length, 3, 'T1: dual-SIM scanning builds lines');
+      eq(pr.lines[1].imei2, C1, 'T1: the second scan of a pair becomes IMEI 2 of the line above');
+      eq(pr.lines[2].imei, C2, 'T1: the next scan starts a new line');
+      ip.reg.pair = false;
+      ip.reg.text = [A1 + ', ' + A2, B1, C1 + ' ' + C2].join('\n');
+      eq(ip.parsed.lines[2].imei2, C2, 'T1: two 15-digit numbers separated by a space are a pair');
+      eq(ip.parsed.valid, 3, 'T1: three valid lines');
+      ip.reg.grade = 'B'; ip.reg.battery_health = '91'; ip.reg.pta_status = 'non_pta'; ip.reg.accessories = 'Box';
+      ip.reg.battery_health = '150'; ip.register();
+      ok(!!ip.reg.errors.battery_health, 'T1: battery above 100% is refused');
+      ip.reg.battery_health = '91';
+      const q0 = bs(BID, P).quantity, avg0 = bs(BID, P).avg_cost;
+      ip.register();
+      eq(ip.reg.open, false, 'T1: the batch registers');
+      const uA = unitBy(A1), uB = unitBy(B1), uC = unitBy(C1);
+      ok(uA && uB && uC, 'T1: all three units exist');
+      eq(uA.imei2, A2, 'T1: unit A keeps its IMEI 2');
+      eq(uB.imei2, null, 'T1: unit B has no IMEI 2');
+      eq(uC.imei2, C2, 'T1: unit C keeps its IMEI 2');
+      ok([uA, uB, uC].every((u) => u.grade === 'B' && u.battery_health === 91 && u.pta_status === 'non_pta' && u.accessories === 'Box' && u.source === 'opening'), 'T1: grade, battery, PTA, accessories and source are stored on every unit');
+      eq(bs(BID, P).quantity, q0 + 3, 'T1: branch stock +3');
+      near(bs(BID, P).avg_cost, utils.round2((avg0 * q0 + 300000) / (q0 + 3)), 'T1: average cost re-weighted', 0.02);
+      ok(db.all('stock_movements').filter((m) => [uA.id, uB.id, uC.id].includes(m.imei_id)).every((m) => m.movement_type === 'opening'), 'T1: registered as opening stock');
+      eq(lastAudit().action, 'imei.register', 'T1: audited');
+
+      /* ========================= 2. registry: filters, lookup, range bar ========================= */
+      log('=== TEST 2: the registry list');
+      ip = mk(imeisPage, '');
+      ip.f.grade = 'B';
+      eq(ip.filtered.map((r) => r.id).sort().join(','), [uA.id, uB.id, uC.id].sort().join(','), 'T2: the grade filter finds the graded units');
+      ip.f.grade = 'none';
+      ok(ip.filtered.length > 0 && ip.filtered.every((r) => !r.grade), 'T2: "not graded" finds the rest');
+      ip.f.grade = ''; ip.f.pta = 'non_pta';
+      ok(ip.filtered.some((r) => r.id === uA.id) && ip.filtered.every((r) => r.pta === 'non_pta'), 'T2: the PTA filter works');
+      ip.f.pta = 'approved';
+      ok(ip.filtered.length > 0 && !ip.filtered.some((r) => r.id === uA.id), 'T2: approved units exclude the non-PTA batch');
+      ip.f.pta = '';
+      const rowA = ip.rows.find((r) => r.id === uA.id);
+      eq(rowA.grade + '/' + rowA.pta + '/' + rowA.battery_health, 'B/non_pta/91', 'T2: the list row carries grade, PTA and battery');
+      eq(rowA.price, db.find('products', P).retail_price, 'T2: without a unit price it sells at the product price');
+      ip.look.q = A2; ip.lookup();
+      ok(ip.look.result && ip.look.result.id === uA.id && ip.look.result.matchedOn === 'imei2', 'T2: the lookup finds a unit by its IMEI 2');
+      eq(ip.look.result.grade, 'B', 'T2: and the lookup card shows its grade');
+      ip.range.set('yesterday');
+      ok(!ip.filtered.some((r) => r.id === uA.id), 'T2: a period before today hides today\'s registrations');
+      ip.range.set('today');
+      ok(ip.filtered.some((r) => r.id === uA.id) && ip.filtered.every((r) => utils.inRange(r.created_at, utils.rangeFor('today'))), 'T2: "Today" shows only today\'s registrations');
+      let ip2 = mk(imeisPage, '');
+      eq(ip2.range.preset, 'today', 'T2: the period is remembered');
+      ip2 = mk(imeisPage, '?product=' + P);
+      eq(ip2.range.preset, 'all', 'T2: a ?product= deep link shows every period');
+      eq(ip2.f.product, String(P), 'T2: and filters the product');
+      ok(ip2.filtered.some((r) => utils.dayOf(r.created_at) < utils.today()), 'T2: older units of the product are listed');
+      ip2 = mk(imeisPage, '?status=sold');
+      ok(ip2.f.status === 'sold' && ip2.range.preset === 'all' && ip2.filtered.length > 0 && ip2.filtered.every((r) => r.status === 'sold'), 'T2: ?status= still works');
+      ip2 = mk(imeisPage, '?imei=' + A1);
+      ok(ip2.look.result && ip2.look.result.id === uA.id, 'T2: ?imei= opens the lookup');
+      ip.range.set('all');
+
+      /* ========================= 3. correcting a unit ========================= */
+      log('=== TEST 3: edit unit');
+      ip = mk(imeisPage, '');
+      ip.openEdit(ip.allRows.find((r) => r.id === uA.id));
+      eq(ip.ed.open, true, 'T3: the edit dialog opens');
+      eq(ip.ed.locks.id + '|' + ip.ed.locks.cost, '|', 'T3: a unit only registered can have its IMEI and cost corrected');
+      const someone = db.all('product_imeis').find((i) => i.id !== uA.id && i.status !== 'voided');
+      ip.ed.form.imei = someone.imei; ip.saveEdit();
+      ok(/already registered/.test(ip.ed.errors.imei || ''), 'T3: an IMEI that belongs to another unit is refused', ip.ed.errors.imei);
+      ip.ed.form.imei = '12345'; ip.saveEdit();
+      ok(/15 digits/.test(ip.ed.errors.imei || ''), 'T3: a malformed IMEI is refused');
+      ip.ed.form.imei = N1; ip.ed.form.imei2 = N1; ip.saveEdit();
+      ok(/differ/.test(ip.ed.errors.imei2 || ''), 'T3: IMEI 2 must differ from IMEI 1');
+      ip.ed.form.imei2 = A2; ip.ed.form.battery_health = '120'; ip.saveEdit();
+      ok(!!ip.ed.errors.battery_health, 'T3: battery above 100 is refused');
+      ip.ed.form.battery_health = '95'; ip.ed.form.sale_price = '-5'; ip.saveEdit();
+      ok(!!ip.ed.errors.sale_price, 'T3: a negative price is refused');
+      eq(unitBy(A1) && unitBy(A1).id, uA.id, 'T3: nothing was saved while invalid');
+      const qA = bs(BID, P).quantity, avgA = bs(BID, P).avg_cost;
+      ip.ed.form.sale_price = '150000'; ip.ed.form.cost_price = 120000; ip.ed.form.grade = 'A'; ip.ed.form.pta_status = 'approved';
+      ip.ed.form.accessories = 'Box, charger'; ip.ed.form.notes = 'IMEI typo fixed';
+      ip.saveEdit();
+      eq(ip.ed.open, false, 'T3: a valid correction saves');
+      let a = db.find('product_imeis', uA.id);
+      eq(a.imei, N1, 'T3: the IMEI typo is corrected');
+      eq(a.cost_price, 120000, 'T3: the cost is corrected');
+      eq([a.grade, a.battery_health, a.pta_status, a.sale_price, a.accessories, a.notes].join('|'), 'A|95|approved|150000|Box, charger|IMEI typo fixed', 'T3: grade, battery, PTA, price, accessories and notes saved');
+      eq(bs(BID, P).quantity, qA, 'T3: the stock quantity does not change');
+      near(bs(BID, P).avg_cost, utils.round2((avgA * qA + 20000) / qA), 'T3: the branch average cost follows the new unit cost', 0.05);
+      const fix = db.all('stock_movements').filter((m) => m.imei_id === uA.id && m.reference_type === 'product_imei');
+      eq(fix.map((m) => m.quantity + '@' + m.unit_cost + ':' + m.reason_code).join(','), '-1@100000:recount,1@120000:recount', 'T3: booked as a remove at the old cost and an add at the new cost');
+      ok(lastAudit().action === 'imei.edit' && /→/.test(lastAudit().details) && lastAudit().details.includes(A1) && lastAudit().details.includes(N1), 'T3: the audit shows before → after', lastAudit().details);
+      ip.refresh();
+      const rA = ip.allRows.find((r) => r.id === uA.id);
+      ok(rA.customPrice && rA.price === 150000, 'T3: the unit price shows in the registry');
+      // cost can be corrected again while it is still on the shelf
+      ip.openEdit(rA); eq(ip.ed.locks.cost, '', 'T3: a corrected unit can be corrected again');
+      ip.ed.open = false;
+
+      // a sold unit: identifiers and cost are frozen, the rest may change
+      const sold = ip.allRows.find((r) => r.status === 'sold' && Number(r.branch_id) === BID);
+      ip.openEdit(sold);
+      ok(!!ip.ed.locks.id && !!ip.ed.locks.cost, 'T3: a sold unit\'s IMEI and cost are locked', ip.ed.locks.id);
+      ip.ed.form.imei = imei(55); ip.saveEdit();
+      ok(/Cannot change/.test(ip.ed.errors.imei || ''), 'T3: changing a sold unit\'s IMEI is refused');
+      ip.ed.form.imei = sold.imei; ip.ed.form.grade = 'C'; ip.saveEdit();
+      eq(db.find('product_imeis', sold.id).grade, 'C', 'T3: a sold unit can still be graded');
+      eq(db.find('product_imeis', sold.id).imei, sold.imei, 'T3: its IMEI is unchanged');
+
+      // a purchased unit: the goods-received note follows its corrected number
+      const bought = ip.allRows.find((r) => r.status === 'available' && Number(r.branch_id) === BID && r.purchase_item_id && !r.hist.extra && !r.hist.transferred && !r.hist.counted && !r.hist.sold && db.serialType(db.find('products', r.product_id)) === 'imei');
+      ok(!!bought, 'fixture: an untouched purchased phone unit');
+      ok(!bought.voidable.ok && /purchase/.test(bought.voidable.reason), 'T3: a purchased unit cannot be voided (cancel the purchase instead)', bought.voidable.reason);
+      ip.openEdit(bought);
+      ip.ed.form.imei = H1; ip.saveEdit();
+      const pi = db.find('purchase_items', bought.purchase_item_id);
+      ok(pi.imeis.includes(H1) && !pi.imeis.includes(bought.imei), 'T3: the purchase line lists the corrected IMEI');
+
+      /* ========================= 4. approval limit ========================= */
+      log('=== TEST 4: large corrections need approval');
+      const mgr = db.all('roles').find((r) => r.key === 'branch_manager');
+      const savedPerms = mgr.permissions.slice();
+      mgr.permissions = savedPerms.filter((p) => p !== 'inventory.approve'); db.save();
+      db.setSetting('adjustment_approval_limit', 10000);
+      let lim = mk(imeisPage, '');
+      lim.openEdit(lim.allRows.find((r) => r.id === uA.id));
+      lim.ed.form.cost_price = 150000; lim.saveEdit();
+      ok(/approve/.test(lim.ed.errors.cost_price || ''), 'T4: a cost change above the limit needs an approver', lim.ed.errors.cost_price);
+      eq(db.find('product_imeis', uA.id).cost_price, 120000, 'T4: and is not saved');
+      ok(!lim.allRows.find((r) => r.id === uB.id).voidable.ok, 'T4: voiding a unit worth more than the limit needs an approver');
+      mgr.permissions = savedPerms; db.save();
+      db.setSetting('adjustment_approval_limit', 50000);
+
+      /* ========================= 5. voiding a mistaken unit ========================= */
+      log('=== TEST 5: void');
+      ip = mk(imeisPage, '');
+      let rowB = ip.allRows.find((r) => r.id === uB.id);
+      ok(rowB.voidable.ok, 'T5: a unit whose only history is its registration can be voided', rowB.voidable.reason);
+      const qB = bs(BID, P).quantity;
+      const gapMid = valueGap(BID, P);
+      ip.openVoid(rowB);
+      eq(ip.vd.check.ok, true, 'T5: the void dialog allows it');
+      ip.saveVoid();
+      ok(!!ip.vd.error, 'T5: a reason is required');
+      ip.vd.reason = 'Scanned under the wrong model';
+      ip.saveVoid();
+      const b = db.find('product_imeis', uB.id);
+      eq(b.status, 'voided', 'T5: the unit is voided');
+      eq(b.voided_imei, B1, 'T5: its number is kept on the row');
+      ok(/^VOID-/.test(b.imei), 'T5: and freed for the right unit', b.imei);
+      eq(b.void_reason, 'Scanned under the wrong model', 'T5: the reason is stored');
+      eq(bs(BID, P).quantity, qB - 1, 'T5: it comes off stock');
+      near(valueGap(BID, P), gapMid, 'T5: the branch stock value drops by exactly its cost', 0.5);
+      const vm = utils.sortBy(db.all('stock_movements').filter((m) => m.imei_id === uB.id), 'id', 'desc')[0];
+      eq([vm.movement_type, vm.quantity, vm.unit_cost, vm.reason_code, vm.notes].join('|'), 'adjustment|-1|100000|recount|Voided: registered by mistake', 'T5: booked as a recount adjustment at its own cost');
+      eq(lastAudit().action, 'imei.void', 'T5: audited');
+      eq(stock.findSellable(B1, BID), null, 'T5: it can never be sold');
+      eq(stock.findSellable(b.imei, BID), null, 'T5: not even by its stored value');
+      ok(!ip.filtered.some((r) => r.id === uB.id), 'T5: voided units are hidden from the registry');
+      ip.f.status = 'voided';
+      ok(ip.filtered.some((r) => r.id === uB.id), 'T5: the status filter shows them');
+      eq(ip.tiles.voided, 1, 'T5: and the defective tile counts them');
+      ok(ip.registeredCount === ip.rows.length - 1, 'T5: the registered count leaves them out');
+      ip.f.status = '';
+      ip.look.q = B1; ip.lookup();
+      ok(ip.look.result && ip.look.result.id === uB.id && ip.look.result.status === 'voided', 'T5: the lookup still finds the voided record');
+      // the right unit can now be registered with that number
+      ip.openRegister(); ip.reg.product_id = String(P); ip.onRegProductChange(); ip.reg.text = B1;
+      eq(ip.parsed.invalid, 0, 'T5: the freed number validates again');
+      ip.register();
+      const b2 = unitBy(B1);
+      ok(b2 && b2.id !== uB.id && b2.status === 'available', 'T5: and is registered as a new unit');
+      ip.look.q = B1; ip.lookup();
+      eq(ip.look.result && ip.look.result.id, b2.id, 'T5: the lookup prefers the live unit');
+
+      // blocked voids
+      stock.markDefective(uC.id, 'test'); stock.restoreImei(uC.id, 'test');
+      ip.refresh();
+      let rowC = ip.allRows.find((r) => r.id === uC.id);
+      ok(!rowC.voidable.ok && /history/.test(rowC.voidable.reason), 'T5: a unit marked defective and restored cannot be voided', rowC.voidable.reason);
+      ok(!ip.allRows.find((r) => r.id === sold.id).voidable.ok, 'T5: a sold unit cannot be voided');
+      // a unit on a stock count
+      ip.openRegister(); ip.reg.product_id = String(P); ip.onRegProductChange(); ip.reg.text = G1; ip.register();
+      const uG = unitBy(G1);
+      const cnt = db.insert('stock_counts', { count_no: 'CNT-DRV-1', branch_id: BID, status: 'in_progress' });
+      db.insert('stock_count_items', { count_id: cnt.id, product_id: P, scanned: [G1] });
+      ip.refresh();
+      const rowG = ip.allRows.find((r) => r.id === uG.id);
+      ok(!rowG.voidable.ok && /stock take/.test(rowG.voidable.reason), 'T5: a unit on a stock count cannot be voided', rowG.voidable.reason);
+      ip.openEdit(rowG);
+      ok(/CNT-DRV-1/.test(ip.ed.locks.id), 'T5: nor can its IMEI change while the count is open', ip.ed.locks.id);
+      ip.ed.open = false;
+      let voidBtn = mk(imeisPage, '');
+      ip.openVoid(ip.allRows.find((r) => r.id === uG.id));
+      ip.vd.reason = 'x'; ip.saveVoid();
+      eq(db.find('product_imeis', uG.id).status, 'available', 'T5: saving a blocked void changes nothing');
+
+      /* ========================= 6. history of a resold unit ========================= */
+      log('=== TEST 6: the history of a unit sold twice');
+      const cust = db.all('customers').find((c) => !c.is_walkin);
+      const mkSale = (no, price) => {
+        const s = db.insert('sales', { invoice_no: no, branch_id: BID, customer_id: cust.id, user_id: ME, sale_date: utils.now(), subtotal: price, discount_amount: 0, tax_amount: 0, total: price, paid_amount: price, due_amount: 0, status: 'completed' });
+        const it = db.insert('sale_items', { sale_id: s.id, product_id: P, imei_id: uC.id, imei: C1, quantity: 1, unit_price: price, unit_cost: 100000, discount_amount: 0, total: price, returned_quantity: 0, warranty_months: 12 });
+        stock.sellImei(uC.id, BID, it.id, s.id);
+        return { s, it };
+      };
+      const s1 = mkSale('INV-DRV-000001', 150000);
+      const ret = db.insert('sale_returns', { return_no: 'RET-DRV-000001', sale_id: s1.s.id, branch_id: BID, customer_id: cust.id, user_id: ME, return_date: utils.now(), refund_amount: 150000, refund_method: 'cash', reason: 'Changed mind' });
+      db.insert('sale_return_items', { return_id: ret.id, sale_item_id: s1.it.id, product_id: P, imei_id: uC.id, quantity: 1, unit_price: 150000, total: 150000, condition: 'good' });
+      stock.returnImei(uC.id, BID, 'good', { type: 'sale_return', id: ret.id }, 'Return RET-DRV-000001');
+      const s2 = mkSale('INV-DRV-000002', 140000);
+      stock.returnImei(uC.id, BID, 'good', { type: 'sale', id: s2.s.id }, 'Void INV-DRV-000002: wrong price');
+      db.update('sales', s2.s.id, { status: 'void' });
+      const s3 = mkSale('INV-DRV-000003', 138000);
+      let h = mk(imeiHistoryPage, '?imei=' + C1);
+      eq(h.unit && h.unit.id, uC.id, 'T6: the history opens on the unit');
+      const sales = h.events.filter((e) => e.title === 'Sold to a customer');
+      eq(sales.map((e) => e.hrefLabel).join(','), 'INV-DRV-000001,INV-DRV-000002,INV-DRV-000003', 'T6: each sale shows its own invoice (not the first one three times)');
+      ok(sales[0].details[0].includes('150,000') && sales[1].details[0].includes('140,000') && sales[2].details[0].includes('138,000'), 'T6: and its own price');
+      eq(sales[1].badge, 'void', 'T6: the voided invoice is marked void');
+      const retEv = h.events.find((e) => e.title === 'Returned by the customer');
+      ok(retEv && retEv.hrefLabel === 'RET-DRV-000001', 'T6: the return links to its credit note');
+      ok(h.events.some((e) => e.title === 'Sale voided — back in stock' && e.hrefLabel === 'INV-DRV-000002'), 'T6: the void shows as its own event');
+      ok(h.events.some((e) => e.title === 'Marked defective') && h.events.some((e) => e.title === 'Back in stock'), 'T6: defective and restore are shown');
+      const order = h.events.map((e) => e.title);
+      ok(order.indexOf('Registered as opening stock') === 0 && order.lastIndexOf('Sold to a customer') === order.length - 1, 'T6: oldest first, registration to the last sale', order.join(' > '));
+      eq(h.warrantyUntil.slice(0, 5), 'until', 'T6: warranty runs from the latest sale');
+
+      // corrections and voids in the trail
+      h = mk(imeiHistoryPage, '?imei=' + N1);
+      ok(h.events.some((e) => e.title === 'Cost corrected' && /100,000.*120,000/.test(e.details[0])), 'T6: a cost correction shows once, old → new');
+      eq(h.events.filter((e) => e.title === 'Cost corrected').length, 1, 'T6: the remove/add pair is one event');
+      ok(h.events.some((e) => e.title === 'Unit details corrected' && e.details[0].includes(N1)), 'T6: the IMEI correction is in the history');
+      h = mk(imeiHistoryPage, '?imei=' + B1);
+      eq(h.unit && h.unit.id, b2.id, 'T6: a number re-registered after a void opens the live unit');
+      eq(h.others.length, 1, 'T6: and points at the voided record');
+      h = mk(imeiHistoryPage, '?unit=' + uB.id);
+      ok(h.unit && h.unit.status === 'voided' && h.shownImei === B1, 'T6: ?unit= opens the voided record under its original number');
+      ok(h.events.some((e) => e.title === 'Voided — registered by mistake'), 'T6: the void is in its history');
+
+      /* ========================= 7. history period + CSV ========================= */
+      log('=== TEST 7: history period and export');
+      const seedSold = db.all('product_imeis').find((i) => i.status === 'sold' && utils.dayOf(i.created_at) < utils.isoDate(utils.addDays(new Date(), -3)));
+      h = mk(imeiHistoryPage, '?imei=' + seedSold.imei);
+      eq(h.range.preset, 'all', 'T7: an ?imei= link shows the whole life');
+      const allN = h.events.length;
+      ok(allN >= 2, 'T7: an older unit has its purchase and sale', String(allN));
+      h.range.set('today');
+      ok(h.shown.length < allN && h.shown.every((e) => utils.inRange(e.at, utils.rangeFor('today'))), 'T7: the period limits the events shown');
+      h.range.set('all');
+      eq(h.shown.length, allN, 'T7: "All" shows everything again');
+      h.range.set('last_month');
+      let h2 = mk(imeiHistoryPage, '');
+      eq(h2.range.preset, 'last_month', 'T7: the period is remembered for a plain visit');
+      h2 = mk(imeiHistoryPage, '?imei=' + seedSold.imei);
+      eq(h2.range.preset, 'all', 'T7: but not over a deep link');
+      h2 = mk(imeiHistoryPage, '?imei=' + seedSold.imei + '&range=today');
+      eq(h2.range.preset, 'today', 'T7: unless the link names a period');
+      h = mk(imeiHistoryPage, '?imei=' + C1);
+      downloads.length = 0;
+      h.exportCsv();
+      ok(downloads.length === 1 && /unit-history-/.test(downloads[0].name), 'T7: the history exports to CSV', downloads[0] && downloads[0].name);
+      const csvLines = downloads[0].content.split('\n');
+      eq(csvLines.length, h.shown.length + 1, 'T7: one row per event plus the header');
+      ok(/"Date","Time","Event"/.test(csvLines[0]) && downloads[0].content.includes('INV-DRV-000002'), 'T7: with the event and its document');
+
+      /* ========================= 8. product-view ========================= */
+      log('=== TEST 8: product-view.html');
+      let pv = mk(productViewPage, '?id=' + P);
+      const pa = pv.imeis.find((i) => i.id === uA.id);
+      ok(pa && pa.grade === 'A' && pa.pta === 'approved' && pa.customPrice && pa.price === 150000 && pa.battery_health === 95, 'T8: the unit list carries grade, PTA, battery and unit price');
+      ok(!pv.imeiFiltered.some((i) => i.id === uB.id), 'T8: voided units are hidden');
+      pv.imeiFilter.status = 'voided';
+      ok(pv.imeiFiltered.length === 1 && pv.imeiFiltered[0].shownImei === B1, 'T8: and shown by the status filter under their number');
+      pv.imeiFilter.status = ''; pv.imeiFilter.grade = 'A';
+      ok(pv.imeiFiltered.length >= 1 && pv.imeiFiltered.every((i) => i.grade === 'A'), 'T8: the grade filter works');
+      pv.imeiFilter.grade = ''; pv.imeiFilter.pta = 'non_pta';
+      ok(pv.imeiFiltered.length >= 1 && pv.imeiFiltered.every((i) => i.pta === 'non_pta'), 'T8: the PTA filter works');
+      pv.imeiFilter.pta = '';
+      eq(pv.totals.imeiVoided, 1, 'T8: the tile counts the voided unit separately');
+      eq(pv.totals.imeiSellable, bs(BID, P).quantity, 'T8: sellable units still equal branch stock');
+      // the sales history is the full list of this product's sale lines (the old link went to an empty sales search)
+      const liveLines = db.all('sale_items').filter((i) => i.product_id == P).filter((i) => { const s = db.find('sales', i.sale_id); return s && s.status !== 'void' && s.branch_id == BID; });
+      eq(pv.sales.length, liveLines.length, 'T8: the sales history lists every live sale line of the product');
+      ok(pv.sales.length > 0 && pv.sales.some((l) => l.invoice_no === 'INV-DRV-000003'), 'T8: including today\'s');
+      ok(!pv.sales.some((l) => l.invoice_no === 'INV-DRV-000002'), 'T8: a voided invoice is left out');
+      ok(/^report-sales\.html\?range=all.*#product$/.test(pv.salesReportHref), 'T8: the report link opens sales by product for the same period', pv.salesReportHref);
+      pv.range.set('today');
+      ok(pv.sales.length >= 2 && pv.sales.every((l) => utils.inRange(l.sale_date, utils.rangeFor('today'))), 'T8: the period bar filters the sales history');
+      ok(pv.moves.length > 0 && pv.moves.every((m) => utils.inRange(m.created_at, utils.rangeFor('today'))), 'T8: and the movements');
+      ok(pv.salesReportHref.includes('range=today'), 'T8: the report link follows the period');
+      pv.range.set('all');
+      eq(pv.moves.length, db.all('stock_movements').filter((m) => m.product_id == P && m.branch_id == BID).length, 'T8: "All" shows every movement');
+      // price history
+      const before = { ...db.find('products', P) };
+      db.recordPrices(before, { retail_price: before.retail_price + 5000, cost_price: before.cost_price }, 'product_edit');
+      const pur = db.all('purchases').find((x) => x.branch_id == BID);
+      db.recordPrices({ ...before, retail_price: before.retail_price + 5000 }, { cost_price: before.cost_price - 1000 }, 'purchase', { type: 'purchase', id: pur.id });
+      pv = mk(productViewPage, '?id=' + P);
+      eq(pv.prices.length, 2, 'T8: price changes are listed');
+      const retailRow = pv.prices.find((x) => x.field === 'retail_price');
+      ok(retailRow && retailRow.fieldLabel === 'Retail' && retailRow.sourceLabel === 'Product edit' && retailRow.delta === 5000 && retailRow.old_value === before.retail_price, 'T8: with old → new, source and change');
+      eq(db.userName(retailRow.user_id), session.user().name, 'T8: and who made it');
+      const costRow = pv.prices.find((x) => x.field === 'cost_price');
+      ok(costRow && costRow.ref && costRow.ref.label === pur.purchase_no, 'T8: a purchase price change links to the purchase');
+      // CSV exports
+      downloads.length = 0;
+      pv.exportUnits(); pv.exportMoves(); pv.exportSales(); pv.exportPrices();
+      eq(downloads.map((d) => d.name.split('-')[0]).join(','), 'units,movements,sales,prices', 'T8: units, movements, sales and prices export');
+      eq(downloads[0].content.split('\n').length, pv.imeiFiltered.length + 1, 'T8: the units file has one row per listed unit');
+      ok(/"Grade","Battery %","PTA"/.test(downloads[0].content.split('\n')[0]), 'T8: with grade, battery and PTA columns');
+      eq(downloads[1].content.split('\n').length, pv.moves.length + 1, 'T8: the movements file has one row per movement');
+      ok(downloads[1].content.includes('Recount correction'), 'T8: with the adjustment reason');
+      downloads.length = 0;
+      ip = mk(imeisPage, '');
+      ip.exportCsv();
+      ok(downloads.length === 1 && /"Grade","Battery %","PTA"/.test(downloads[0].content), 'T8: the registry export carries the new columns');
+
+      /* ========================= 9. permissions + books ========================= */
+      log('=== TEST 9: permissions and the books');
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'cashier'));
+      const cp = mk(imeisPage, '');
+      ok(!cp.canEdit && !cp.canVoid && !cp.canRegister, 'T9: a cashier cannot edit, void or register units');
+      ok(!cp.canVoidRow(cp.allRows.find((r) => r.id === uG.id)), 'T9: and gets no void button');
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+      near(valueGap(BID, P), gapBefore, 'T9: branch stock value still equals the cost of the units on the shelf', 0.5);
+      eq(db.all('product_imeis').filter((i) => i.product_id == P && i.branch_id == BID && stock.SELLABLE.includes(i.status)).length, bs(BID, P).quantity, 'T9: sellable units still equal branch stock');
+      ok(toasts.every((t) => t.t !== 'error' || /cannot|required|Please|Fix|approve|Nothing|refused|not allowed|15 digits|Luhn|differ|already|number|price|whole/.test(t.m)), 'T9: no unexpected error toasts', toasts.filter((t) => t.t === 'error').map((t) => t.m).join(' / '));
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 800);
+  </script>
+</body>
+</html>

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>DRIVE money / customer ledger</title></head>
+<body>
+<pre id="log"></pre>
+<script>
+/* Throwaway QA driver — drives the REAL customer-view.html page through an iframe and asserts the DB. */
+const TAG = 'DRIVE';
+let fails = 0, checks = 0;
+const L = (...a) => { const s = a.join(' '); console.log(TAG + ' ' + s); document.getElementById('log').textContent += s + '\n'; };
+const ok = (cond, msg, extra) => { checks++; if (!cond) { fails++; L('FAIL ' + msg + (extra ? '  [' + extra + ']' : '')); } else L('ok   ' + msg + (extra ? '  [' + extra + ']' : '')); };
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const near = (a, b, tol) => Math.abs(r2(a) - r2(b)) <= (tol === undefined ? 0.01 : tol);
+
+function load(url, opts) {
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    const f = document.createElement('iframe');
+    f.width = 1400; f.height = 900; f.style.border = '1px solid #ccc';
+    f.onload = () => {
+      const w = f.contentWindow;
+      if (opts.plain) return resolve({ f, w, st: null });
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        let st = null;
+        try {
+          const el = w.document.querySelector('main[x-data]');
+          if (el) st = (w.Alpine && w.Alpine.$data) ? w.Alpine.$data(el) : (el._x_dataStack || [])[0];
+        } catch (e) { /* ignore */ }
+        if (st) { clearInterval(t); resolve({ f, w, st }); }
+        else if (n > 120) { clearInterval(t); reject(new Error('Alpine component never appeared on ' + url)); }
+      }, 25);
+    };
+    f.src = url;
+    document.body.appendChild(f);
+  });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function clickConfirm(w, which) {
+  for (let i = 0; i < 80; i++) {
+    const b = w.document.querySelector('.modal-backdrop [data-act="' + (which || 'ok') + '"]');
+    if (b) { b.click(); return true; }
+    await sleep(25);
+  }
+  return false;
+}
+
+(async function () {
+  try {
+    /* ---------- 0. reset the mock DB and log in ---------- */
+    const boot = await load('autologin.html?as=admin&reset=1', { plain: true });
+    const A = boot.w.ABM;
+    L('seeded; customers=' + A.db.all('customers').length + ' ctx=' + A.db.all('customer_transactions').length);
+
+    /* ---------- 1. LEDGER INTEGRITY over the seeded data ---------- */
+    const key = (t) => String(t.created_at) + '|' + String(t.id).padStart(8, '0');
+    let balMismatch = 0, afterMismatch = 0, worstAfter = null;
+    A.db.all('customers').forEach((c) => {
+      const tx = A.db.all('customer_transactions').filter((t) => String(t.customer_id) === String(c.id)).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+      let run = 0;
+      tx.forEach((t) => {
+        run = r2(run + (Number(t.debit) || 0) - (Number(t.credit) || 0));
+        if (!near(run, t.balance_after)) { afterMismatch++; if (!worstAfter) worstAfter = 'cust ' + c.id + ' tx#' + t.id + ' ' + t.type + ' ' + t.created_at.slice(0, 10) + ' balance_after=' + t.balance_after + ' replay=' + run; }
+      });
+      if (!near(run, Number(c.balance) || 0)) { balMismatch++; L('  balance drift: customer ' + c.id + ' ' + c.name + ' stored=' + c.balance + ' replay=' + run); }
+    });
+    ok(balMismatch === 0, 'every customer.balance equals the replay of its ledger', balMismatch + ' drifting');
+    ok(afterMismatch === 0, 'every customer_transactions.balance_after matches the chronological running balance', afterMismatch + ' rows; first: ' + worstAfter);
+
+    /* ---------- 2. pick a customer with dues ---------- */
+    const openBy = {};
+    A.db.all('sales').filter((s) => s.status !== 'void' && Number(s.due_amount) > 0.005).forEach((s) => { (openBy[s.customer_id] = openBy[s.customer_id] || []).push(s); });
+    const cand = A.db.all('customers').filter((c) => Number(c.balance) > 1000 && (openBy[c.id] || []).length >= 2)
+      .sort((a, b) => (openBy[b.id].length - openBy[a.id].length));
+    if (!cand.length) throw new Error('no customer with >=2 open invoices in the seed');
+    const CID = cand[0].id;
+    const invs = openBy[CID].slice().sort((a, b) => (a.sale_date < b.sale_date ? -1 : 1));
+    L('target customer ' + CID + ' "' + cand[0].name + '" balance=' + cand[0].balance + ' openInvoices=' + invs.length + ' [' + invs.map((s) => s.invoice_no + ':' + s.due_amount).join(', ') + ']');
+
+    /* ---------- 3. PARTIAL PAYMENT through the real page ---------- */
+    const p1 = await load('../customer-view.html?id=' + CID);
+    const W = p1.w, S = p1.st, D = W.ABM;
+    ok(S.c && String(S.c.id) === String(CID), 'customer-view loaded the right customer', S.c && S.c.name);
+    ok(near(S.closing, Number(S.c.balance)), 'ledger running balance (closing) == customer balance', 'closing=' + S.closing + ' balance=' + S.c.balance);
+    ok(S.openInvoices.length === invs.length, 'page sees the same open invoices', S.openInvoices.map((s) => s.invoice_no).join(','));
+    ok(String(S.openInvoices[0].invoice_no) === String(invs[0].invoice_no), 'open invoices are oldest-first', S.openInvoices[0].invoice_no + ' vs ' + invs[0].invoice_no);
+
+    const bal0 = Number(S.c.balance);
+    const ctx0 = D.db.all('customer_transactions').length;
+    const oldest = invs[0];
+    const part = r2(Number(oldest.due_amount) / 2);
+    S.openPay();
+    await sleep(60);
+    S.pay.amount = part; S.pay.method = 'cash'; S.pay.allocate = true;
+    S.savePay();
+    await sleep(120);
+    const t1 = D.db.all('customer_transactions').slice(-1)[0];
+    ok(D.db.all('customer_transactions').length === ctx0 + 1, 'partial payment wrote exactly one ledger row');
+    ok(t1.type === 'payment' && near(t1.credit, part) && near(t1.debit, 0), 'partial payment row is credit ' + part, 'debit=' + t1.debit + ' credit=' + t1.credit);
+    ok(near(t1.balance_after, bal0 - part), 'balance_after = old balance - payment', t1.balance_after + ' vs ' + r2(bal0 - part));
+    ok(near(D.db.find('customers', CID).balance, bal0 - part), 'customer.balance updated', D.db.find('customers', CID).balance);
+    ok(t1.payment_method === 'cash', 'payment_method stored', t1.payment_method);
+    ok(Number(t1.branch_id) === Number(D.session.branchId()), 'ledger row carries the branch', t1.branch_id);
+    const s1 = D.db.find('sales', oldest.id);
+    ok(near(s1.due_amount, Number(oldest.due_amount) - part) && near(s1.paid_amount, Number(oldest.paid_amount) + part), 'oldest invoice allocated the partial amount', s1.invoice_no + ' due ' + oldest.due_amount + '->' + s1.due_amount);
+    ok(/applied to/.test(t1.notes) && t1.notes.indexOf(oldest.invoice_no) >= 0, 'ledger note records the allocation', t1.notes);
+    ok(!!D.db.all('audit_logs').slice(-1)[0] && D.db.all('audit_logs').slice(-1)[0].action === 'customer.payment', 'audit row written');
+    ok(near(S.closing, Number(S.c.balance)), 'after payment: running balance still == customer balance', 'closing=' + S.closing + ' balance=' + S.c.balance);
+
+    /* ---------- 4. FULL PAYMENT (settle the whole balance) ---------- */
+    const bal1 = Number(D.db.find('customers', CID).balance);
+    S.openPay();
+    await sleep(60);
+    ok(near(Number(S.pay.amount), bal1), 'Receive payment prefills the outstanding balance', S.pay.amount + ' vs ' + bal1);
+    S.pay.method = 'cash'; S.pay.allocate = true;
+    S.savePay();
+    await sleep(120);
+    const cAfterFull = D.db.find('customers', CID);
+    ok(near(cAfterFull.balance, 0), 'full payment clears the balance', cAfterFull.balance);
+    const stillOpen = D.db.all('sales').filter((s) => String(s.customer_id) === String(CID) && s.status !== 'void' && Number(s.due_amount) > 0.005);
+    L('  invoices still open after full payment: ' + stillOpen.length + ' [' + stillOpen.map((s) => s.invoice_no + ':' + s.due_amount).join(', ') + ']');
+    ok(stillOpen.length === 0, 'paying the whole balance clears every open invoice');
+
+    /* ---------- 5. OVERPAYMENT -> store credit ---------- */
+    S.openPay();
+    await sleep(60);
+    S.pay.amount = 5000; S.pay.method = 'cash'; S.pay.allocate = true;
+    S.savePay();
+    await sleep(120);
+    const cOver = D.db.find('customers', CID);
+    ok(near(cOver.balance, -5000), 'overpayment leaves a negative balance', cOver.balance);
+    ok(near(D.ledger.customerStoreCredit(CID), 5000), 'ABM.ledger.customerStoreCredit reports the store credit', D.ledger.customerStoreCredit(CID));
+    ok(near(S.storeCredit, 5000) && near(S.outstanding, 0), 'page shows store credit, no outstanding', 'storeCredit=' + S.storeCredit + ' outstanding=' + S.outstanding);
+    const tOver = D.db.all('customer_transactions').slice(-1)[0];
+    ok(near(tOver.balance_after, -5000), 'overpayment balance_after is negative', tOver.balance_after);
+
+    /* ---------- 6. ADJUSTMENT ---------- */
+    S.openAdjust();
+    await sleep(60);
+    S.adj.dir = 'increase'; S.adj.amount = 1234.5; S.adj.reason = 'QA driver adjustment';
+    S.saveAdjust();
+    await sleep(120);
+    const tAdj = D.db.all('customer_transactions').slice(-1)[0];
+    const cAdj = D.db.find('customers', CID);
+    ok(tAdj.type === 'adjustment' && near(tAdj.debit, 1234.5) && near(tAdj.credit, 0), 'increase adjustment is a debit', 'debit=' + tAdj.debit + ' credit=' + tAdj.credit);
+    ok(near(cAdj.balance, -5000 + 1234.5), 'balance moved by the adjustment', cAdj.balance);
+    ok(near(tAdj.balance_after, cAdj.balance), 'adjustment balance_after == customer balance', tAdj.balance_after);
+    S.openAdjust();
+    await sleep(60);
+    S.adj.dir = 'decrease'; S.adj.amount = 234.5; S.adj.reason = 'QA driver reverse';
+    S.saveAdjust();
+    await sleep(120);
+    const tAdj2 = D.db.all('customer_transactions').slice(-1)[0];
+    ok(tAdj2.type === 'adjustment' && near(tAdj2.credit, 234.5) && near(tAdj2.debit, 0), 'decrease adjustment is a credit', 'debit=' + tAdj2.debit + ' credit=' + tAdj2.credit);
+    ok(near(D.db.find('customers', CID).balance, -4000), 'balance after both adjustments', D.db.find('customers', CID).balance);
+
+    /* ---------- 7. the driven customer replays cleanly ---------- */
+    const txN = D.db.all('customer_transactions').filter((t) => String(t.customer_id) === String(CID)).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+    let run = 0, bad = 0;
+    txN.forEach((t) => { run = r2(run + (Number(t.debit) || 0) - (Number(t.credit) || 0)); if (!near(run, t.balance_after)) bad++; });
+    ok(near(run, D.db.find('customers', CID).balance), 'driven customer: replay == stored balance', run);
+    L('  driven customer rows whose balance_after != replay: ' + bad + ' of ' + txN.length);
+
+    /* ---------- 8. validation guards ---------- */
+    S.openPay(); await sleep(40);
+    S.pay.amount = 0; S.savePay(); await sleep(40);
+    ok(!!S.pay.errors.amount, 'zero payment is rejected', S.pay.errors.amount);
+    S.pay.amount = 100; S.pay.method = 'bank_transfer'; S.pay.reference = ''; S.savePay(); await sleep(40);
+    ok(!!S.pay.errors.reference, 'non-cash payment requires a reference', S.pay.errors.reference);
+    S.closePay();
+    S.openAdjust(); await sleep(40);
+    S.adj.amount = 50; S.adj.reason = 'ab'; S.saveAdjust(); await sleep(40);
+    ok(!!S.adj.errors.reason, 'adjustment requires a reason', S.adj.errors.reason);
+    S.closeAdjust();
+
+    /* ---------- 9. date-range bar really filters ---------- */
+    S.range.set('all'); await sleep(80);
+    const nAll = S.ledger.length;
+    S.range.set('today'); await sleep(80);
+    const nToday = S.ledger.length;
+    S.range.set('this_month'); await sleep(80);
+    const nMonth = S.ledger.length;
+    const todayIso = D.utils.today();
+    const rawToday = D.db.all('customer_transactions').filter((t) => String(t.customer_id) === String(CID) && String(t.created_at).slice(0, 10) === todayIso).length;
+    ok(nToday === rawToday, 'ledger Today count matches raw rows dated today', nToday + ' vs ' + rawToday);
+    ok(nToday <= nMonth && nMonth <= nAll, 'Today <= This Month <= All', nToday + ' / ' + nMonth + ' / ' + nAll);
+    ok(nAll > nToday, 'All really is wider than Today', nAll + ' vs ' + nToday);
+    S.range.set('all'); await sleep(60);
+    ok(near(S.opening, 0), 'All-time opening balance is zero', S.opening);
+
+    L('checks=' + checks + ' fails=' + fails);
+    L('RESULT: ' + (fails ? 'FAIL' : 'PASS'));
+  } catch (e) {
+    L('EXCEPTION ' + (e && e.message) + '\n' + (e && e.stack));
+    L('RESULT: FAIL');
+  }
+})();
+</script>
+</body>
+</html>

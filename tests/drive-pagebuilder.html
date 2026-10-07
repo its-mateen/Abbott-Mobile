@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: CMS page sections</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+  <script defer src="../assets/js/shop.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Builds a "Hot Sale" page with a product grid + banner through ABM.db.saveCms, the same way
+    // website.html does, so shop/page.html has something real to render.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      try {
+        ABM.db.reset();
+        var cms = ABM.db.cms();
+        var picks = ABM.db.all('products').filter(function (p) { return p.is_active && ABM.db.productType(p) === 'device'; }).slice(0, 4).map(function (p) { return p.id; });
+        var page = {
+          id: 99, slug: 'hot-sale', title: 'Hot Sale', content_html: '<p>Limited-time prices on our best sellers.</p>',
+          blocks: [
+            { id: 1, type: 'banner', title: 'Up to 20% off', subtitle: 'This week only', link: 'products.html', cta_text: 'Shop the sale', color: '#e11d48' },
+            { id: 2, type: 'products', title: 'Hand-picked deals', subtitle: 'While stocks last', mode: 'pick', product_ids: picks, limit: 8 },
+            { id: 3, type: 'products', title: 'All smartphones', mode: 'category', category_id: '1', limit: 4 },
+            { id: 4, type: 'cta', title: 'Need help choosing?', subtitle: 'Our team replies in minutes.', link: 'contact.html', cta_text: 'Contact us' },
+            { id: 5, type: 'richtext', title: 'Sale terms', html: '<p>Prices valid while stocks last. <script>alert(1)<\/script></p>' },
+          ],
+          is_published: 1, show_in_menu: 1, sort_order: 99, updated_at: ABM.utils.now(),
+        };
+        ABM.db.saveCms({ pages: cms.pages.concat([page]) });
+
+        var saved = ABM.db.cms().pages.filter(function (p) { return p.slug === 'hot-sale'; })[0];
+        ok('page saved with blocks', !!saved && saved.blocks.length === 5, saved ? saved.blocks.length + ' blocks' : 'missing');
+        ok('storefront can find the page', !!SHOP.page('hot-sale'));
+        ok('picked products resolve', picks.length === 4, picks.join(','));
+        ok('category block has a real category', ABM.db.all('categories').some(function (c) { return String(c.id) === '1'; }));
+        ok('sanitizer strips script from a text block', SHOP.sanitize(saved.blocks[4].html).indexOf('<script') < 0, SHOP.sanitize(saved.blocks[4].html));
+        ok('unpublished pages stay hidden', !SHOP.page('privacy'), 'privacy is unpublished in the seed');
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

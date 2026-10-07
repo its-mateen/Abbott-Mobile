@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Unit History &middot; Abbott Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="report-imei-history" data-title="IMEI / Serial History" data-perm="reports.view">
+  <main x-data="imeiHistoryPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">IMEI / Serial History</h2>
+        <p class="page-subtitle">Trace one unit from the day it arrived to the day it left the shop</p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>Reports</a>
+        <a href="imeis.html" class="btn btn-secondary"><span x-html="ABM.icon('qr')"></span>Unit registry</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!shown.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" @click="ABM.ui.print()" :disabled="!found"><span x-html="ABM.icon('printer')"></span>Print history</button>
+      </div>
+    </div>
+
+    <!-- Search -->
+    <div class="card mb-4 no-print">
+      <div class="card-body">
+        <form @submit.prevent="search()" novalidate>
+          <label class="label" for="imei-input">Scan or type an IMEI or serial number</label>
+          <div class="flex flex-col sm:flex-row gap-2">
+            <div class="input-icon flex-1 min-w-0">
+              <span x-html="ABM.icon('scan')"></span>
+              <input id="imei-input" x-ref="box" type="search" class="input input-lg mono" autocomplete="off" autofocus
+                     placeholder="e.g. 351234567890123 or DL5420ABC1234" x-model="query" @input="error = ''" :class="error && 'is-invalid'">
+            </div>
+            <button type="submit" class="btn btn-primary btn-lg sm:w-auto" :disabled="busy"><span x-html="ABM.icon('search')"></span>Look up</button>
+            <button type="button" class="btn btn-secondary btn-lg sm:w-auto" x-show="query || searched" @click="reset()"><span x-html="ABM.icon('x')"></span>Clear</button>
+          </div>
+          <p class="field-error" x-show="error" x-text="error"></p>
+          <p class="help">Works with mobile IMEIs (15 digits), laptop / desktop serial numbers and the second IMEI of dual-SIM phones.</p>
+        </form>
+
+        <div class="mt-4 pt-3 border-t border-slate-200" x-show="recent.length" x-cloak>
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Recent lookups</div>
+            <button type="button" class="btn btn-ghost btn-sm" @click="clearRecent()"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Clear</button>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="r in recent" :key="r.value">
+              <button type="button" class="btn btn-secondary btn-sm mono max-w-full" @click="query = r.value; search()">
+                <span class="truncate" x-text="r.value"></span>
+                <span class="text-[10px] text-slate-400 hidden sm:inline" x-text="r.label"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Not found -->
+    <div class="card" x-show="searched && !found" x-cloak>
+      <div class="empty">
+        <span x-html="ABM.icon('search')"></span>
+        <div class="empty-title">No unit found for &ldquo;<span class="break-all" x-text="lastQuery"></span>&rdquo;</div>
+        <div class="text-sm mt-2 max-w-md mx-auto">
+          Nothing in the registry, and no repair job, matches that number. Check that you scanned the whole code, that the IMEI has 15 digits, and that letters O / 0 and I / 1 were not swapped in a serial number.
+        </div>
+        <div class="mt-4 flex justify-center gap-2 flex-wrap no-print">
+          <a href="imeis.html" class="btn btn-secondary btn-sm">Browse the unit registry</a>
+          <a href="products.html" class="btn btn-secondary btn-sm">Search products</a>
+          <a href="repairs.html" class="btn btn-secondary btn-sm">Search repair jobs</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Result -->
+    <template x-if="found">
+    <div class="print-area">
+      <!-- Print header -->
+      <div class="hidden print:block mb-4">
+        <div class="text-lg font-bold" x-text="company"></div>
+        <div class="text-sm">Unit history &middot; <span class="mono" x-text="shownImei || lastQuery"></span> &middot; <span x-text="range.label"></span></div>
+        <div class="text-xs" x-text="'Printed ' + ABM.utils.datetime(new Date())"></div>
+      </div>
+
+      <!-- Unit card -->
+      <template x-if="unit">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+            <span class="chip chip-navy !w-12 !h-12 flex-none" x-html="ABM.icon(unitIcon,'w-6 h-6')"></span>
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <a :href="'product-view.html?id=' + unit.product_id" class="text-lg font-bold text-slate-900 hover:text-navy-700 min-w-0 truncate" x-text="productLabel"></a>
+                <span x-html="$badge(unit.status)"></span>
+                <template x-if="product && product.condition && product.condition !== 'new'">
+                  <span x-html="$badge(product.condition)"></span>
+                </template>
+              </div>
+              <div class="mono text-sm text-slate-600 mt-1 break-all"><span x-text="serialLabel"></span>: <b x-text="shownImei"></b></div>
+              <div class="mono text-xs text-slate-400 break-all" x-show="shownImei2">IMEI 2: <span x-text="shownImei2"></span></div>
+              <div class="mt-1.5 flex flex-wrap items-center gap-1.5" x-show="unit.grade || ptaShown || hasBattery || customPrice">
+                <template x-if="unit.grade"><span class="badge" :class="gradeClass(unit.grade)" x-text="'Grade ' + unit.grade"></span></template>
+                <template x-if="hasBattery"><span class="badge badge-slate" x-text="'Battery ' + unit.battery_health + '%'"></span></template>
+                <template x-if="ptaShown"><span x-html="$badge(pta === 'unknown' ? 'pending' : pta, pta === 'approved' ? 'PTA approved' : pta === 'non_pta' ? 'Non-PTA' : 'PTA unknown')"></span></template>
+                <template x-if="customPrice"><span class="badge badge-green" x-text="'Unit price ' + $money(unit.sale_price, {decimals:0})"></span></template>
+              </div>
+              <div class="text-xs text-slate-500 mt-1" x-show="unit.accessories" x-text="'Accessories: ' + unit.accessories"></div>
+              <div class="text-xs text-slate-500 mt-1" x-show="unit.notes" x-text="unit.notes"></div>
+              <div class="text-xs text-rose-700 mt-1" x-show="unit.status === 'voided'" x-text="'Voided ' + (unit.voided_at ? ABM.utils.date(unit.voided_at) : '') + (unit.voided_by ? ' by ' + ABM.db.userName(unit.voided_by) : '') + (unit.void_reason ? ' — ' + unit.void_reason : '')"></div>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-2 gap-2 sm:w-64 flex-none">
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-2.5 min-w-0">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Branch</div>
+                <div class="text-sm font-bold text-slate-900 truncate" x-text="ABM.db.branchName(unit.branch_id)"></div>
+              </div>
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-2.5 min-w-0">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Unit cost</div>
+                <div class="text-sm font-bold text-slate-900 truncate tabular" x-text="$money(unit.cost_price, {decimals:0})"></div>
+              </div>
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-2.5 min-w-0">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Warranty</div>
+                <div class="text-sm font-bold text-slate-900 truncate" x-text="warrantyText"></div>
+                <div class="text-[10px] text-slate-500 truncate" x-show="warrantyUntil" x-text="warrantyUntil"></div>
+              </div>
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-2.5 min-w-0">
+                <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Events</div>
+                <div class="text-sm font-bold text-slate-900 truncate" x-text="range.preset === 'all' ? events.length : shown.length + ' of ' + events.length"></div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2 no-print">
+            <a :href="'imeis.html?product=' + unit.product_id" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('qr','w-4 h-4')"></span>Other units of this product</a>
+            <a :href="'product-view.html?id=' + unit.product_id" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('cube','w-4 h-4')"></span>Product</a>
+            <a :href="'repair-create.html?serial=' + encodeURIComponent(shownImei)" class="btn btn-ghost btn-sm" x-show="ABM.session.can('repairs.add') && unit.status !== 'voided'"><span x-html="ABM.icon('wrench','w-4 h-4')"></span>Book a repair</a>
+          </div>
+        </div>
+      </div>
+      </template>
+
+      <!-- Other (voided) records of the same number -->
+      <div class="alert alert-warning mt-4 no-print" x-show="others.length" x-cloak>
+        <span x-html="ABM.icon('info')"></span>
+        <div class="min-w-0">This number was also on <b x-text="others.length"></b> record<span x-text="others.length === 1 ? '' : 's'"></span> voided as registered by mistake:
+          <template x-for="o in others" :key="o.id"><a :href="'report-imei-history.html?unit=' + o.id" class="font-semibold underline ml-1" x-text="ABM.db.productLabel(o.product_id) + ' (' + ABM.db.branchCode(o.branch_id) + ')'"></a></template>
+        </div>
+      </div>
+
+      <!-- No registry unit but repair jobs matched -->
+      <div class="alert alert-info mt-4" x-show="!unit && jobs.length" x-cloak>
+        <span x-html="ABM.icon('info')"></span>
+        <div>This number is not in the stock registry (the device was not sold by us), but it appears on <b x-text="jobs.length"></b> repair job<span x-text="jobs.length === 1 ? '' : 's'"></span>.</div>
+      </div>
+
+      <!-- Timeline -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div class="min-w-0"><div class="card-title">Life of this unit</div><div class="card-subtitle">Oldest first &middot; <span x-text="shown.length"></span> event<span x-text="shown.length === 1 ? '' : 's'"></span> &middot; <span x-text="range.label"></span></div></div>
+        </div>
+        <div class="card-body">
+          <!-- Period of the history shown (standard range bar) -->
+          <div class="range-bar mb-4 no-print">
+            <div class="tabs-pill">
+              <template x-for="p in range.presets" :key="p.key">
+                <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+              </template>
+            </div>
+            <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+              <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+              <span class="text-xs text-slate-500">to</span>
+              <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+            </div>
+            <span class="range-label" x-text="range.label"></span>
+          </div>
+          <div class="timeline">
+            <template x-for="(e, i) in shown" :key="e.key">
+              <div class="timeline-item" :class="i < shown.length - 1 && 'done'">
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                  <span class="chip !w-7 !h-7 flex-none" :class="e.chip" x-html="ABM.icon(e.icon,'w-3.5 h-3.5')"></span>
+                  <span class="font-semibold text-slate-900" x-text="e.title"></span>
+                  <template x-if="e.badge">
+                    <span x-html="$badge(e.badge, e.badgeLabel)"></span>
+                  </template>
+                  <span class="text-xs text-slate-400 ml-auto whitespace-nowrap" x-text="$date(e.at) + ' ' + ABM.utils.time(e.at)"></span>
+                </div>
+                <div class="mt-1 pl-9 text-sm text-slate-600 min-w-0">
+                  <template x-for="(d, di) in e.details" :key="e.key + 'd' + di">
+                    <div class="break-words" x-text="d"></div>
+                  </template>
+                  <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <template x-if="e.href">
+                      <a :href="e.href" class="text-xs font-semibold text-navy-700 hover:underline mono" x-text="e.hrefLabel"></a>
+                    </template>
+                    <span class="text-xs text-slate-400" x-show="e.user" x-text="'by ' + e.user"></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <template x-if="!shown.length">
+              <div class="empty py-8">
+                <div class="empty-title" x-text="events.length ? 'Nothing happened to this unit in ' + range.label : 'No recorded events'"></div>
+                <div class="text-sm mt-1" x-text="events.length ? events.length + ' event' + (events.length === 1 ? '' : 's') + ' fall outside this period.' : 'This unit has no stock movements yet.'"></div>
+                <button type="button" class="btn btn-secondary btn-sm mt-3 no-print" x-show="events.length && range.preset !== 'all'" @click="range.set('all')">Show the whole history</button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+    </template>
+  </main>
+
+  <script>
+    function imeiHistoryPage() {
+      const { db, utils, ui } = ABM;
+      const RECENT_KEY = 'abm.imei.recent';
+      const CHIP = { in: 'chip-money', out: 'chip-danger', move: 'chip-info', warn: 'chip-warning', repair: 'chip-navy', slate: 'chip-slate' };
+      const SELF_REF = 'product_imei';   // corrections made on the unit registry (cost fix, void)
+      const PTA_DEVICES = ['mobile', 'tablet', 'smartwatch'];
+      const timeOf = (v) => { const d = utils.parseDate(v); return d ? d.getTime() : 0; };
+      return {
+        company: db.setting('company_name', 'Abbott Mobile'),
+        query: '', lastQuery: '', error: '', busy: false, searched: false,
+        unit: null, product: null, jobs: [], events: [], recent: [], others: [],
+        range: null,
+
+        get found() { return !!(this.unit || this.jobs.length); },
+        get productLabel() { return this.unit ? db.productLabel(this.unit.product_id) : ''; },
+        get serialLabel() { return this.product ? db.serialLabel(this.product) : 'IMEI'; },
+        get shownImei() { const u = this.unit; return u ? (u.status === 'voided' ? (u.voided_imei || u.imei) : u.imei) : ''; },
+        get shownImei2() { const u = this.unit; return u ? (u.status === 'voided' ? (u.voided_imei2 || '') : (u.imei2 || '')) : ''; },
+        get pta() {
+          const u = this.unit, p = this.product;
+          if (!u) return 'not_applicable';
+          return u.pta_status || (p && p.pta_status) || (p && PTA_DEVICES.includes(p.device_type) ? 'unknown' : 'not_applicable');
+        },
+        get ptaShown() { return this.pta !== 'not_applicable'; },
+        get hasBattery() { return !!this.unit && this.unit.battery_health != null && this.unit.battery_health !== ''; },
+        get customPrice() { return !!this.unit && Number(this.unit.sale_price) > 0; },
+        gradeClass(g) { return ({ A: 'badge-green', B: 'badge-blue', C: 'badge-amber', D: 'badge-red' })[g] || 'badge-slate'; },
+        get unitIcon() {
+          const t = this.product ? this.product.device_type : null;
+          return t === 'laptop' || t === 'desktop' ? 'laptop' : t === 'tablet' ? 'desktop' : 'phone';
+        },
+        get warrantyText() {
+          const m = this.product ? Number(this.product.warranty_months) || 0 : 0;
+          return m ? m + ' month' + (m === 1 ? '' : 's') : 'None';
+        },
+        /** Warranty end of the unit's latest (live) sale. */
+        get warrantyUntil() {
+          const u = this.unit; if (!u || u.status !== 'sold' || !u.sale_item_id) return '';
+          const it = db.find('sale_items', u.sale_item_id); const s = it && db.find('sales', it.sale_id);
+          const months = Number((it && it.warranty_months) != null ? it.warranty_months : (this.product || {}).warranty_months) || 0;
+          if (!s || s.status === 'void' || !months) return '';
+          const d = utils.parseDate(s.sale_date); if (!d) return '';
+          const end = new Date(d); end.setMonth(end.getMonth() + months);
+          return (end < new Date() ? 'ended ' : 'until ') + utils.date(end);
+        },
+        /** Events inside the chosen period. */
+        get shown() { return this.range ? this.events.filter((e) => this.range.contains(e.at)) : this.events; },
+
+        init() {
+          this.range = ABM.range('all', null, 'imei-history');
+          this.loadRecent();
+          const unitId = utils.qs('unit');
+          const q = utils.qs('imei') || utils.qs('serial') || utils.qs('q');
+          // a link to one unit shows its whole life unless the link itself names a period
+          if ((unitId || q) && !utils.qs('range')) this.range.preset = 'all';
+          if (unitId && db.find('product_imeis', unitId)) { this.openUnit(db.find('product_imeis', unitId)); return; }
+          if (q) { this.query = String(q); this.search(); }
+        },
+
+        loadRecent() {
+          try { const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); this.recent = Array.isArray(raw) ? raw.slice(0, 8) : []; }
+          catch (e) { this.recent = []; }
+        },
+        pushRecent(value, label) {
+          this.recent = [{ value, label: label || '', at: utils.now() }].concat(this.recent.filter((r) => r.value !== value)).slice(0, 8);
+          try { localStorage.setItem(RECENT_KEY, JSON.stringify(this.recent)); } catch (e) { /* storage blocked */ }
+        },
+        clearRecent() { this.recent = []; try { localStorage.removeItem(RECENT_KEY); } catch (e) { /* ignore */ } },
+
+        reset() { this.query = ''; this.error = ''; this.searched = false; this.unit = null; this.product = null; this.jobs = []; this.events = []; this.others = []; this.$nextTick(() => { if (this.$refs.box) this.$refs.box.focus(); }); },
+
+        /** Voided records (registered by mistake) that carried this number before it was freed. */
+        voidedWith(v) {
+          const V = String(v || '').toUpperCase();
+          return utils.sortBy(db.all('product_imeis').filter((i) => i.status === 'voided' && (String(i.voided_imei || '').toUpperCase() === V || String(i.voided_imei2 || '').toUpperCase() === V)), 'id', 'desc');
+        },
+        /** Show one specific unit record (used by ?unit= links, e.g. for a voided unit). */
+        openUnit(u) {
+          this.unit = u;
+          this.product = db.find('products', u.product_id);
+          this.lastQuery = this.shownImei;
+          this.query = this.shownImei;
+          const ids = [this.shownImei, this.shownImei2].filter(Boolean).map((s) => s.toUpperCase());
+          this.jobs = db.all('repair_jobs').filter((j) => ids.includes(String(j.serial || '').toUpperCase()));
+          this.others = this.voidedWith(this.shownImei).filter((o) => o.id !== u.id);
+          this.events = this.buildEvents();
+          this.searched = true;
+        },
+
+        search() {
+          const raw = String(this.query || '').trim();
+          if (!raw) { this.error = 'Enter an IMEI or serial number to look up.'; return; }
+          if (raw.length < 4) { this.error = 'Enter at least 4 characters.'; return; }
+          this.busy = true; this.error = '';
+          try {
+            const v = raw.replace(/\s+/g, '');
+            this.lastQuery = v;
+            // the live unit wins; a number that only lives on a voided record still shows that record
+            const live = ABM.stock.findUnit(v);
+            const voided = this.voidedWith(v);
+            this.unit = live || voided[0] || null;
+            this.product = this.unit ? db.find('products', this.unit.product_id) : null;
+            this.others = voided.filter((o) => !this.unit || o.id !== this.unit.id);
+            const ids = [v.toUpperCase()].concat(this.unit ? [this.shownImei, this.shownImei2].filter(Boolean).map((s) => s.toUpperCase()) : []);
+            this.jobs = db.all('repair_jobs').filter((j) => ids.includes(String(j.serial || '').toUpperCase()));
+            this.events = this.buildEvents();
+            this.searched = true;
+            if (this.found) this.pushRecent(this.unit ? this.shownImei : v, this.unit ? db.productLabel(this.unit.product_id) : 'Repair job');
+            else ui.warn('No unit or repair job matches that number.');
+          } catch (e) {
+            this.error = e.message || 'Lookup failed.';
+          } finally {
+            this.busy = false;
+          }
+        },
+
+        /**
+         * Every event in the unit's life, oldest first. Each stock movement is matched to ITS OWN document through
+         * the movement's reference — a unit sold, returned and sold again shows two different invoices.
+         */
+        buildEvents() {
+          const out = [];
+          let seq = 0;
+          const add = (o) => { out.push(Object.assign({ key: 'e' + seq, seq: seq++, at: null, icon: 'archive', chip: CHIP.move, title: '', details: [], href: null, hrefLabel: '', user: '', badge: null, badgeLabel: '', branch: '' }, o)); };
+          const u = this.unit;
+          if (u) {
+            const sid = String(u.id);
+            const saleItems = utils.sortBy(db.all('sale_items').filter((i) => String(i.imei_id) === sid), (i) => { const s = db.find('sales', i.sale_id); return timeOf(s ? s.sale_date : null) * 1e3 + Number(i.id); });
+            const returnItems = db.all('sale_return_items').filter((i) => String(i.imei_id) === sid);
+            const movements = db.all('stock_movements').filter((m) => String(m.imei_id) === sid).slice()
+              .sort((a, b) => (timeOf(a.created_at) - timeOf(b.created_at)) || (Number(a.id) - Number(b.id)));
+            const usedItems = new Set();
+            const saleItemFor = (m) => {
+              let it = m.reference_type === 'sale' && m.reference_id != null ? saleItems.find((i) => String(i.sale_id) === String(m.reference_id) && !usedItems.has(i.id)) : null;
+              if (!it) it = saleItems.find((i) => !usedItems.has(i.id) && timeOf((db.find('sales', i.sale_id) || {}).sale_date) <= timeOf(m.created_at) + 60000) || null; // legacy row without a reference
+              if (it) usedItems.add(it.id);
+              return it;
+            };
+            const returnFor = (m) => {
+              const ret = m.reference_type === 'sale_return' ? db.find('sale_returns', m.reference_id) : null;
+              const ri = ret ? returnItems.find((r) => String(r.return_id) === String(ret.id)) : null;
+              return { ret, ri };
+            };
+            const countRef = (m) => { const c = m.reference_type === 'stock_count' ? db.find('stock_counts', m.reference_id) : null; return c ? { href: 'stock-count-view.html?id=' + c.id, hrefLabel: c.count_no || ('Count #' + c.id) } : {}; };
+            const transferRef = (m) => { const t = m.reference_type === 'transfer' ? db.find('stock_transfers', m.reference_id) : null; return t; };
+            const supplierRef = (m) => { const r = m.reference_type === 'supplier_return' ? db.find('supplier_returns', m.reference_id) : null; return r ? { href: 'supplier-return-view.html?id=' + r.id, hrefLabel: r.return_no, sup: r } : {}; };
+
+            movements.forEach((m, mi) => {
+              const branch = db.branchName(m.branch_id);
+              const qty = Number(m.quantity) || 0;
+              const e = { key: 'm' + m.id, at: m.created_at, icon: 'archive', chip: CHIP.move, title: utils.titleCase(m.movement_type), details: [], href: null, hrefLabel: '', user: m.user_id ? db.userName(m.user_id) : '', badge: null, badgeLabel: '', branch: db.branchCode(m.branch_id) };
+              switch (m.movement_type) {
+                case 'purchase': case 'opening': {
+                  const p = m.reference_type === 'purchase' ? db.find('purchases', m.reference_id) : null;
+                  e.icon = 'truck'; e.chip = CHIP.in;
+                  e.title = m.movement_type === 'opening' ? 'Registered as opening stock' : 'Purchased and registered';
+                  e.details.push('Received at ' + branch + ' at a unit cost of ' + utils.money(m.unit_cost));
+                  if (p) { e.details.push('Supplier: ' + db.supplierName(p.supplier_id) + (p.supplier_invoice_no ? ' (invoice ' + p.supplier_invoice_no + ')' : '')); e.href = 'purchase-view.html?id=' + p.id; e.hrefLabel = p.purchase_no; }
+                  break;
+                }
+                case 'sale': {
+                  const item = saleItemFor(m);
+                  const sale = item ? db.find('sales', item.sale_id) : (m.reference_type === 'sale' ? db.find('sales', m.reference_id) : null);
+                  e.icon = 'receipt'; e.chip = CHIP.out; e.title = 'Sold to a customer';
+                  if (item) e.details.push('Sold for ' + utils.money(item.unit_price) + (item.discount_amount ? ' less ' + utils.money(item.discount_amount) + ' discount' : '') + ' (cost ' + utils.money(m.unit_cost) + ')');
+                  if (sale) {
+                    e.details.push('Customer: ' + db.customerName(sale.customer_id) + ' at ' + db.branchName(sale.branch_id));
+                    e.href = 'sale-view.html?id=' + sale.id; e.hrefLabel = sale.invoice_no;
+                    e.user = db.userName(sale.user_id);
+                    if (sale.status === 'void') e.badge = 'void';
+                    if (sale.online_order_id || sale.source === 'online') e.details.push('Online order');
+                  }
+                  break;
+                }
+                case 'sale_return': {
+                  if (m.reference_type === 'sale') {
+                    // voiding the invoice put the unit back on the shelf
+                    const sale = db.find('sales', m.reference_id);
+                    e.icon = 'refresh'; e.chip = CHIP.warn; e.title = 'Sale voided — back in stock'; e.badge = 'void';
+                    e.details.push('Returned to ' + branch + ' at its cost of ' + utils.money(m.unit_cost) + (m.notes ? ' - ' + m.notes : ''));
+                    if (sale) { e.href = 'sale-view.html?id=' + sale.id; e.hrefLabel = sale.invoice_no; }
+                    break;
+                  }
+                  const { ret, ri } = returnFor(m);
+                  e.icon = 'return'; e.chip = CHIP.warn; e.title = 'Returned by the customer';
+                  e.badge = ri ? (ri.condition === 'good' ? 'good' : 'defective') : 'good'; e.badgeLabel = 'Back in stock';
+                  if (ri) e.details.push('Condition on return: ' + utils.titleCase(ri.condition));
+                  if (ret) {
+                    const sale = db.find('sales', ret.sale_id);
+                    e.details.push('Refund ' + utils.money(ret.refund_amount) + ' by ' + ui.statusLabel(ret.refund_method) + (ret.reason ? ' - ' + ret.reason : ''));
+                    if (sale) e.details.push('Against ' + sale.invoice_no);
+                    e.href = 'sale-view.html?id=' + ret.sale_id; e.hrefLabel = ret.return_no;
+                    e.user = db.userName(ret.user_id);
+                  }
+                  break;
+                }
+                case 'defective': {
+                  if (m.reference_type === 'sale_return') {
+                    const { ret, ri } = returnFor(m);
+                    e.icon = 'return'; e.chip = CHIP.warn; e.title = 'Returned by the customer'; e.badge = 'defective';
+                    e.details.push('Condition on return: ' + utils.titleCase(ri ? ri.condition : 'defective') + ' - not put back in stock');
+                    if (ret) {
+                      const sale = db.find('sales', ret.sale_id);
+                      e.details.push('Refund ' + utils.money(ret.refund_amount) + ' by ' + ui.statusLabel(ret.refund_method) + (ret.reason ? ' - ' + ret.reason : ''));
+                      if (sale) e.details.push('Against ' + sale.invoice_no);
+                      e.href = 'sale-view.html?id=' + ret.sale_id; e.hrefLabel = ret.return_no; e.user = db.userName(ret.user_id);
+                    }
+                    break;
+                  }
+                  e.icon = 'warning'; e.chip = CHIP.warn; e.title = 'Marked defective'; e.badge = 'defective';
+                  e.details.push('Taken off sellable stock at ' + branch + (m.notes ? ' - ' + m.notes : ''));
+                  break;
+                }
+                case 'transfer_out': {
+                  const t = transferRef(m);
+                  e.icon = 'transfer'; e.chip = CHIP.warn; e.title = 'Shipped on a stock transfer';
+                  e.details.push(t ? db.branchName(t.from_branch_id) + ' to ' + db.branchName(t.to_branch_id) : 'Shipped out of ' + branch);
+                  if (t) { e.href = 'transfer-view.html?id=' + t.id; e.hrefLabel = t.transfer_no; }
+                  break;
+                }
+                case 'transfer_in': case 'transfer_return': {
+                  const t = transferRef(m);
+                  e.icon = 'transfer'; e.chip = CHIP.in;
+                  e.title = m.movement_type === 'transfer_return' ? 'Back at the sending branch' : /not received/i.test(m.notes || '') ? 'Booked in on a transfer (not received)' : /revert|called back/i.test(m.notes || '') ? 'Transfer called back' : 'Received on a stock transfer';
+                  e.details.push('Now held at ' + branch + (m.notes ? ' - ' + m.notes : ''));
+                  if (t) { e.href = 'transfer-view.html?id=' + t.id; e.hrefLabel = t.transfer_no; }
+                  break;
+                }
+                case 'transit_loss': {
+                  const t = transferRef(m);
+                  e.icon = 'warning'; e.chip = CHIP.out; e.title = 'Lost in transit'; e.badge = 'missing';
+                  e.details.push('Shipped but never arrived at ' + branch + ' - written off at ' + utils.money(m.unit_cost) + (m.notes ? ' (' + m.notes + ')' : ''));
+                  if (t) { e.href = 'transfer-view.html?id=' + t.id; e.hrefLabel = t.transfer_no; }
+                  break;
+                }
+                case 'count_out': {
+                  Object.assign(e, countRef(m));
+                  e.icon = 'calculator'; e.chip = CHIP.out; e.title = qty < 0 && /another branch|counted at/i.test(m.notes || '') ? 'Moved by a stock take' : 'Not found in a stock take'; e.badge = 'missing';
+                  e.details.push((m.notes || 'Written off the shelf') + ' at ' + branch);
+                  break;
+                }
+                case 'count_in': {
+                  Object.assign(e, countRef(m));
+                  e.icon = 'calculator'; e.chip = CHIP.in; e.title = mi === 0 ? 'Registered by a stock take' : 'Found by a stock take';
+                  e.details.push((m.notes || 'Back on the shelf') + ' at ' + branch + ' (cost ' + utils.money(m.unit_cost) + ')');
+                  break;
+                }
+                case 'supplier_return': {
+                  const s = supplierRef(m);
+                  e.href = s.href || null; e.hrefLabel = s.hrefLabel || '';
+                  e.icon = 'return'; e.chip = CHIP.warn;
+                  e.title = /cancel/i.test(m.notes || '') ? 'Supplier return cancelled' : 'Sent back to the supplier';
+                  e.details.push((s.sup ? 'Supplier: ' + db.supplierName(s.sup.supplier_id) : 'From ' + branch) + (m.notes ? ' - ' + m.notes : ''));
+                  break;
+                }
+                case 'supplier_replacement': {
+                  const s = supplierRef(m);
+                  e.href = s.href || null; e.hrefLabel = s.hrefLabel || '';
+                  e.icon = 'truck'; e.chip = CHIP.in; e.title = 'Arrived as a supplier replacement';
+                  e.details.push('Added to ' + branch + ' at ' + utils.money(m.unit_cost) + (u.notes && /Replacement for/.test(u.notes) ? ' - ' + u.notes : ''));
+                  break;
+                }
+                case 'scrap': {
+                  const s = supplierRef(m);
+                  e.href = s.href || null; e.hrefLabel = s.hrefLabel || '';
+                  e.icon = 'trash'; e.chip = CHIP.out; e.title = 'Written off'; e.badge = 'scrapped';
+                  e.details.push('Written off at ' + utils.money(m.unit_cost) + (m.notes ? ' - ' + m.notes : ''));
+                  break;
+                }
+                case 'repair': {
+                  const j = db.find('repair_jobs', m.reference_id);
+                  e.icon = 'wrench'; e.chip = CHIP.repair; e.title = 'Used on a repair job';
+                  if (j) { e.details.push(j.brand + ' ' + j.model + ' - ' + j.problem_description); e.href = 'repair-view.html?id=' + j.id; e.hrefLabel = j.job_no; }
+                  break;
+                }
+                case 'adjustment': {
+                  if (m.reference_type === SELF_REF) {
+                    if (/^Voided/i.test(m.notes || '')) {
+                      e.icon = 'trash'; e.chip = CHIP.out; e.title = 'Voided — registered by mistake'; e.badge = 'voided';
+                      e.details.push('Taken off ' + branch + ' stock at its cost of ' + utils.money(m.unit_cost) + (u.void_reason ? ' - ' + u.void_reason : ''));
+                      break;
+                    }
+                    // a cost correction is a pair: off at the old cost, back on at the new one — show it once
+                    const next = movements[mi + 1];
+                    if (qty < 0 && next && next.reference_type === SELF_REF && Number(next.quantity) > 0) return;
+                    const prev = movements[mi - 1];
+                    e.icon = 'edit'; e.chip = CHIP.slate; e.title = 'Cost corrected';
+                    e.details.push(prev && prev.reference_type === SELF_REF && Number(prev.quantity) < 0 ? 'From ' + utils.money(prev.unit_cost) + ' to ' + utils.money(m.unit_cost) : (m.notes || 'Unit cost set to ' + utils.money(m.unit_cost)));
+                    break;
+                  }
+                  if (m.reference_type === 'purchase') {
+                    const p = db.find('purchases', m.reference_id);
+                    e.icon = 'x-circle'; e.chip = CHIP.out; e.title = 'Purchase cancelled';
+                    e.details.push('Removed from ' + branch + (m.notes ? ' - ' + m.notes : ''));
+                    if (p) { e.href = 'purchase-view.html?id=' + p.id; e.hrefLabel = p.purchase_no; }
+                    break;
+                  }
+                  e.icon = qty > 0 ? 'refresh' : 'edit'; e.chip = qty > 0 ? CHIP.in : CHIP.move;
+                  e.title = qty > 0 ? 'Back in stock' : qty < 0 ? 'Taken out of stock' : 'Stock adjustment';
+                  e.details.push((qty > 0 ? 'Added to ' : qty < 0 ? 'Removed from ' : 'Recorded at ') + branch + (m.notes ? ' - ' + m.notes : ''));
+                  if (m.reason_code && ABM.stock.ADJUST_REASONS && ABM.stock.ADJUST_REASONS[m.reason_code]) e.details.push('Reason: ' + ABM.stock.ADJUST_REASONS[m.reason_code]);
+                  break;
+                }
+                default: {
+                  e.icon = 'edit'; e.chip = CHIP.move; e.title = ui.statusLabel(m.movement_type);
+                  e.details.push((qty > 0 ? 'Added to ' : qty < 0 ? 'Removed from ' : 'Recorded at ') + branch + (m.notes ? ' - ' + m.notes : ''));
+                }
+              }
+              if (!e.details.length) e.details.push(branch);
+              add(e);
+            });
+            if (!movements.length) {
+              add({ key: 'u' + u.id, at: u.created_at, icon: 'qr', chip: CHIP.in, title: 'Registered in the unit registry', details: ['Held at ' + db.branchName(u.branch_id) + ' at a unit cost of ' + utils.money(u.cost_price)], branch: db.branchCode(u.branch_id) });
+            }
+            // corrections that change no stock (a typo fixed, grade or PTA set) are kept in the audit log
+            db.all('audit_logs').filter((a) => a.entity_type === 'product_imei' && String(a.entity_id) === sid && ['imei.edit', 'imei.notes'].includes(a.action)).forEach((a) => {
+              add({ key: 'a' + a.id, at: a.created_at, icon: 'edit', chip: CHIP.slate, title: a.action === 'imei.notes' ? 'Notes updated' : 'Unit details corrected', details: [String(a.details || '').replace(/^.*? corrected: /, '')], user: a.user_id ? db.userName(a.user_id) : '', branch: db.branchCode(a.branch_id) });
+            });
+          }
+
+          this.jobs.forEach((j) => {
+            add({
+              key: 'j' + j.id, at: j.received_at || j.created_at, icon: 'wrench', chip: CHIP.repair,
+              title: 'Booked in for repair', badge: j.status, badgeLabel: '',
+              details: [j.brand + ' ' + j.model + ' - ' + j.problem_description, 'Customer: ' + db.customerName(j.customer_id) + ' at ' + db.branchName(j.branch_id) + (j.technician_id ? ' - technician ' + db.userName(j.technician_id) : '')],
+              href: 'repair-view.html?id=' + j.id, hrefLabel: j.job_no, user: j.created_by ? db.userName(j.created_by) : '', branch: db.branchCode(j.branch_id),
+            });
+            if (j.delivered_at) {
+              add({
+                key: 'jd' + j.id, at: j.delivered_at, icon: 'check-circle', chip: CHIP.in,
+                title: 'Repair delivered to the customer', badge: 'delivered', badgeLabel: '',
+                details: ['Total ' + utils.money(j.total) + (j.warranty_days ? ' - ' + j.warranty_days + ' day repair warranty' : '')],
+                href: 'repair-view.html?id=' + j.id, hrefLabel: j.job_no, user: j.technician_id ? db.userName(j.technician_id) : '', branch: db.branchCode(j.branch_id),
+              });
+            }
+          });
+
+          return out.sort((a, b) => (timeOf(a.at) - timeOf(b.at)) || (a.seq - b.seq));
+        },
+
+        exportCsv() {
+          const rows = this.shown;
+          if (!rows.length) return;
+          const cols = [
+            { label: 'Date', value: (e) => utils.date(e.at, 'iso') }, { label: 'Time', value: (e) => utils.time(e.at) },
+            { label: 'Event', key: 'title' }, { label: 'Status', value: (e) => (e.badge ? (e.badgeLabel || ui.statusLabel(e.badge)) : '') },
+            { label: 'Details', value: (e) => e.details.join(' | ') }, { label: 'Document', key: 'hrefLabel' },
+            { label: 'Branch', key: 'branch' }, { label: 'By', key: 'user' },
+          ];
+          const id = (this.shownImei || this.lastQuery || 'unit').replace(/[^A-Za-z0-9-]+/g, '');
+          if (!utils.download('unit-history-' + id + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' event' + (rows.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

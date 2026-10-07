@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Checkout · Abbott Mobiles</title>
+  <meta name="description" content="Place your order with Abbott Mobile — cash on delivery, bank transfer, JazzCash or EasyPaisa. Fast delivery across Pakistan.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-checkout">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopCheckout()">
+
+    <!-- ================================================ ORDERS DISABLED -->
+    <template x-if="mode === 'disabled'">
+      <div class="shop-container py-12">
+        <div class="shop-card shop-card-pad max-w-xl mx-auto text-center">
+          <span class="shop-tile-icon mx-auto" x-html="SHOP.icon('info','')"></span>
+          <h1 class="shop-h2 mt-4">Online checkout is paused</h1>
+          <p class="shop-lead mt-3 text-sm">
+            We are not taking website orders at the moment, but everything in the catalog is still available.
+            Send us your list on WhatsApp or call the shop and we will reserve your items and arrange delivery.
+          </p>
+          <div class="flex flex-col sm:flex-row justify-center gap-2 mt-6">
+            <a :href="SHOP.waLink(waText)" target="_blank" rel="noopener" class="shop-btn shop-btn-accent" x-show="SHOP.waNumber()" x-cloak>
+              <span x-html="SHOP.socialIcon('whatsapp','')"></span>Send my list on WhatsApp
+            </a>
+            <a :href="'tel:' + SHOP.digits(contact.phone || '')" class="shop-btn shop-btn-outline" x-show="contact.phone" x-cloak>
+              <span x-html="SHOP.icon('phone-call','')"></span><span x-text="contact.phone"></span>
+            </a>
+          </div>
+          <div class="flex flex-wrap justify-center gap-2 mt-4">
+            <a href="cart.html" class="shop-btn shop-btn-ghost shop-btn-sm">Back to cart</a>
+            <a href="contact.html" class="shop-btn shop-btn-ghost shop-btn-sm">Contact &amp; branches</a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ======================================================= SUCCESS -->
+    <template x-if="mode === 'done'">
+      <div class="shop-container py-10">
+        <div class="max-w-3xl mx-auto">
+          <div class="shop-card overflow-hidden">
+            <div class="p-6 sm:p-8 text-center text-white shop-on-dark"
+                 style="background:linear-gradient(150deg, rgb(var(--shop-accent-600)), rgb(var(--shop-primary-900)))">
+              <span class="inline-flex w-14 h-14 rounded-2xl items-center justify-center bg-white/15 border border-white/25"
+                    x-html="SHOP.icon('check-circle','w-8 h-8')"></span>
+              <h1 class="shop-h2 mt-4 text-white">Thank you! Your order is placed.</h1>
+              <p class="text-sm text-white/75 mt-2">
+                We have received your order and will call you on <b class="text-white" x-text="order.customer.phone"></b> to confirm it.
+              </p>
+              <div class="flex flex-wrap justify-center gap-2 mt-5">
+                <span class="shop-badge shop-badge-solid !text-sm !py-1.5 !px-3" x-text="order.order_no"></span>
+                <span class="shop-badge !bg-white/15 !text-white !text-sm !py-1.5 !px-3" x-text="$money(order.total, {decimals:0})"></span>
+              </div>
+            </div>
+
+            <div class="p-5 sm:p-7">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="min-w-0">
+                  <div class="shop-label">Delivering to</div>
+                  <p class="text-sm font-bold text-slate-900 truncate" x-text="order.customer.name"></p>
+                  <p class="text-sm text-slate-600 break-words" x-text="order.customer.address"></p>
+                  <p class="text-sm text-slate-600" x-text="order.customer.city"></p>
+                </div>
+                <div class="min-w-0">
+                  <div class="shop-label">Payment</div>
+                  <p class="text-sm font-bold text-slate-900" x-text="methodLabel(order.payment_method)"></p>
+                  <p class="text-sm text-slate-600" x-text="order.payment_status === 'paid' ? 'Marked as paid — we will verify the reference.' : 'Pay on delivery.'"></p>
+                  <p class="text-xs text-slate-500 mt-0.5 break-words" x-show="order.payment_reference" x-cloak
+                     x-text="'Ref: ' + order.payment_reference"></p>
+                </div>
+              </div>
+
+              <h2 class="shop-h3 mt-6">What happens next</h2>
+              <ol class="mt-3 space-y-3">
+                <template x-for="(s, i) in nextSteps" :key="i">
+                  <li class="flex gap-3 min-w-0">
+                    <span class="w-7 h-7 flex-none rounded-full bg-slate-900/5 text-slate-600 font-extrabold text-xs flex items-center justify-center"
+                          x-text="i + 1"></span>
+                    <span class="min-w-0">
+                      <span class="block text-sm font-bold text-slate-900" x-text="s.title"></span>
+                      <span class="block text-xs text-slate-500 leading-relaxed" x-text="s.text"></span>
+                    </span>
+                  </li>
+                </template>
+              </ol>
+
+              <div class="shop-card shop-card-pad mt-6 !bg-slate-900/[.03]">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="text-sm font-bold text-slate-900">Order total</div>
+                    <div class="text-xs text-slate-500">
+                      <span x-text="order.items.length"></span> line<span x-show="order.items.length !== 1">s</span> ·
+                      delivery <span x-text="order.delivery_fee ? $money(order.delivery_fee, {decimals:0}) : 'free'"></span>
+                    </div>
+                  </div>
+                  <div class="shop-price shop-nowrap" x-text="$money(order.total, {decimals:0})"></div>
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row gap-2 mt-6">
+                <a :href="SHOP.trackUrl(order)" class="shop-btn shop-btn-lg flex-1">
+                  <span x-html="SHOP.icon('truck','')"></span>Track your order
+                </a>
+                <a :href="SHOP.waLink('Hello! I just placed order ' + order.order_no + '.')" target="_blank" rel="noopener"
+                   class="shop-btn shop-btn-accent shop-btn-lg flex-1" x-show="SHOP.waNumber()" x-cloak>
+                  <span x-html="SHOP.socialIcon('whatsapp','')"></span>WhatsApp us
+                </a>
+              </div>
+              <a href="products.html" class="shop-btn shop-btn-outline shop-btn-block mt-2">Continue shopping</a>
+              <p class="text-[11px] text-slate-500 mt-4 text-center">
+                Keep your order number <b x-text="order.order_no"></b> — you need it (with your phone number) to track the order.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ======================================================== CHECKOUT -->
+    <template x-if="mode === 'form'">
+      <div>
+        <div class="shop-container pt-5 pb-3">
+          <nav class="shop-crumbs" aria-label="Breadcrumb">
+            <a href="index.html">Home</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <a href="cart.html">Cart</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <span class="font-semibold text-slate-700">Checkout</span>
+          </nav>
+          <h1 class="shop-h2 mt-3">Checkout</h1>
+          <p class="text-sm text-slate-500 mt-1">
+            No account needed — just your delivery details. We confirm every order by phone before dispatch.
+          </p>
+        </div>
+
+        <div class="shop-container pb-10">
+          <!-- mobile order summary (collapsible) -->
+          <div class="shop-card mb-4 lg:hidden">
+            <button type="button" class="w-full flex items-center gap-3 p-4 text-left" @click="summaryOpen = !summaryOpen"
+                    :aria-expanded="summaryOpen">
+              <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('bag','w-4 h-4')"></span>
+              <span class="min-w-0 flex-1">
+                <span class="block text-sm font-bold text-slate-900">Order summary</span>
+                <span class="block text-xs text-slate-500"><span x-text="count"></span> item<span x-show="count !== 1">s</span></span>
+              </span>
+              <span class="shop-price shop-nowrap" x-text="$money(total, {decimals:0})"></span>
+              <span class="flex-none text-slate-400 transition-transform" :class="summaryOpen && 'rotate-180'" x-html="SHOP.icon('chevron-down','')"></span>
+            </button>
+            <div class="px-4 pb-4 border-t border-slate-200/70 pt-3" x-show="summaryOpen" x-cloak x-transition.opacity.duration.200ms>
+              <template x-for="l in lines" :key="l.product_id">
+                <div class="flex items-start gap-3 py-2 min-w-0">
+                  <span class="shop-media w-12 h-12 rounded-lg overflow-hidden flex-none" x-html="SHOP.image(l.product)"></span>
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-xs font-bold text-slate-900 shop-clamp-2" x-text="l.name"></span>
+                    <span class="block text-[11px] text-slate-500" x-text="'Qty ' + l.qty + ' × ' + $money(l.unit_price, {decimals:0})"></span>
+                    <span class="block shop-error" x-show="lineErrors[l.product_id]" x-cloak x-text="lineErrors[l.product_id]"></span>
+                  </span>
+                  <span class="text-xs font-bold text-slate-900 shop-nowrap" x-text="$money(l.total, {decimals:0})"></span>
+                </div>
+              </template>
+              <div class="shop-divider my-3"></div>
+              <dl class="space-y-1.5 text-xs">
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Subtotal</dt><dd class="font-bold text-slate-900" x-text="$money(subtotal, {decimals:0})"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Delivery</dt><dd class="font-bold" :class="fee ? 'text-slate-900' : 'text-emerald-600'" x-text="fee ? $money(fee, {decimals:0}) : 'Free'"></dd></div>
+                <div class="flex justify-between gap-3 pt-1"><dt class="font-extrabold text-slate-900">Total</dt><dd class="shop-price" x-text="$money(total, {decimals:0})"></dd></div>
+              </dl>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-start">
+
+            <!-- ------------------------------------------------- the form -->
+            <form id="checkout-form" class="lg:col-span-2 min-w-0 space-y-4" @submit.prevent="place()" novalidate>
+
+              <!-- contact & delivery -->
+              <section class="shop-card shop-card-pad">
+                <div class="flex items-center gap-2.5">
+                  <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('truck','w-4 h-4')"></span>
+                  <div class="min-w-0">
+                    <h2 class="shop-h3">Contact &amp; delivery</h2>
+                    <p class="text-xs text-slate-500">Where should we send your order?</p>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <div class="min-w-0">
+                    <label class="shop-label" for="co-name">Full name *</label>
+                    <input id="co-name" type="text" class="shop-input" x-model="form.name" @input="errors.name = ''"
+                           :class="errors.name && '!border-rose-500'" autocomplete="name" placeholder="e.g. Ahmed Raza">
+                    <p class="shop-error" x-show="errors.name" x-cloak x-text="errors.name"></p>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="co-phone">Mobile number *</label>
+                    <input id="co-phone" type="tel" inputmode="tel" class="shop-input" x-model="form.phone"
+                           @input="errors.phone = ''" @blur="formatPhone()" :class="errors.phone && '!border-rose-500'"
+                           autocomplete="tel" placeholder="03xx-xxxxxxx">
+                    <p class="shop-error" x-show="errors.phone" x-cloak x-text="errors.phone"></p>
+                    <p class="text-[11px] text-slate-500 mt-1" x-show="!errors.phone">We call this number to confirm your order.</p>
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <label class="shop-label" for="co-email">Email (optional)</label>
+                    <input id="co-email" type="email" class="shop-input" x-model="form.email" @input="errors.email = ''"
+                           :class="errors.email && '!border-rose-500'" autocomplete="email" placeholder="you@example.com">
+                    <p class="shop-error" x-show="errors.email" x-cloak x-text="errors.email"></p>
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <label class="shop-label" for="co-address">Delivery address *</label>
+                    <textarea id="co-address" class="shop-textarea !min-h-[5rem]" x-model="form.address" @input="errors.address = ''"
+                              :class="errors.address && '!border-rose-500'" autocomplete="street-address"
+                              placeholder="House / shop number, street, area, nearest landmark"></textarea>
+                    <p class="shop-error" x-show="errors.address" x-cloak x-text="errors.address"></p>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="co-city">City *</label>
+                    <select id="co-city" class="shop-select" x-model="form.city" @change="errors.city = ''"
+                            :class="errors.city && '!border-rose-500'">
+                      <option value="">Select your city…</option>
+                      <template x-for="c in cities" :key="c">
+                        <option :value="c" x-text="c"></option>
+                      </template>
+                    </select>
+                    <p class="shop-error" x-show="errors.city" x-cloak x-text="errors.city"></p>
+                  </div>
+                  <div class="min-w-0" x-show="form.city === 'Other'" x-cloak>
+                    <label class="shop-label" for="co-city-other">Which city? *</label>
+                    <input id="co-city-other" type="text" class="shop-input" x-model="form.city_other"
+                           @input="errors.city = ''" :class="errors.city && '!border-rose-500'" placeholder="Your city">
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <label class="shop-label" for="co-notes">Order notes (optional)</label>
+                    <textarea id="co-notes" class="shop-textarea !min-h-[4.5rem]" x-model="form.notes"
+                              placeholder="Delivery timing, colour preference, gift wrap…"></textarea>
+                  </div>
+                </div>
+
+                <!-- account: signed in, or offer to create one -->
+                <template x-if="account">
+                  <div class="mt-5 pt-4 border-t border-slate-200/70 flex flex-wrap items-center gap-2 text-sm">
+                    <span class="shop-badge shop-badge-accent">Signed in</span>
+                    <span class="text-slate-600">This order will be saved to
+                      <b x-text="account.name"></b>'s account.</span>
+                    <a href="account.html#orders" class="shop-link ml-auto">My orders</a>
+                  </div>
+                </template>
+
+                <template x-if="!account">
+                  <div class="mt-5 pt-4 border-t border-slate-200/70">
+                    <label class="shop-check">
+                      <input type="checkbox" x-model="createAccount">
+                      <span><b>Create an account</b> — track this order, download invoices and check out faster next time.</span>
+                    </label>
+                    <div x-show="createAccount" x-cloak class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                      <div class="min-w-0">
+                        <label class="shop-label" for="co-pw">Password *</label>
+                        <input id="co-pw" type="password" class="shop-input" x-model="accountPw"
+                               autocomplete="new-password" placeholder="At least 6 characters">
+                      </div>
+                      <div class="min-w-0">
+                        <label class="shop-label" for="co-pw2">Confirm password *</label>
+                        <input id="co-pw2" type="password" class="shop-input" x-model="accountPw2"
+                               autocomplete="new-password" placeholder="Repeat it">
+                      </div>
+                      <p class="text-xs text-rose-600 sm:col-span-2" x-show="accountError" x-cloak x-text="accountError"></p>
+                      <p class="text-xs text-slate-500 sm:col-span-2">
+                        Your account uses the email and phone number above.
+                        Already registered? <a href="login.html?next=checkout.html" class="shop-link">Sign in instead</a>.
+                      </p>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2" x-show="!createAccount" x-cloak>
+                      Already have an account?
+                      <a href="login.html?next=checkout.html" class="shop-link">Sign in</a> to fill this in automatically.
+                    </p>
+                  </div>
+                </template>
+              </section>
+
+              <!-- payment -->
+              <section class="shop-card shop-card-pad">
+                <div class="flex items-center gap-2.5">
+                  <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('wallet','w-4 h-4')"></span>
+                  <div class="min-w-0">
+                    <h2 class="shop-h3">Payment method</h2>
+                    <p class="text-xs text-slate-500">Choose how you would like to pay.</p>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 gap-2.5 mt-4">
+                  <template x-for="m in methods" :key="m.key">
+                    <label class="flex items-start gap-3 p-3 sm:p-4 rounded-xl border cursor-pointer transition-colors min-w-0"
+                           :class="payment === m.key ? 'border-transparent ring-2 ring-[rgb(var(--shop-primary-500))] bg-[rgb(var(--shop-primary-500)/.06)]' : 'border-slate-200 hover:border-slate-300'">
+                      <input type="radio" name="payment" class="mt-1 w-4 h-4 flex-none" :value="m.key" x-model="payment"
+                             @change="errors.reference = ''" style="accent-color: rgb(var(--shop-primary-600))">
+                      <span class="shop-tile-icon !w-9 !h-9 flex-none hidden sm:flex" x-html="SHOP.icon(m.icon,'w-4 h-4')"></span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-sm font-bold text-slate-900" x-text="m.label"></span>
+                        <span class="block text-xs text-slate-500 leading-relaxed break-words" x-text="m.note"></span>
+
+                        <!-- bank transfer details -->
+                        <span class="block mt-2.5" x-show="payment === 'bank_transfer' && m.key === 'bank_transfer'" x-cloak>
+                          <span class="block text-xs font-semibold text-slate-700 bg-slate-900/5 rounded-lg p-2.5 break-words"
+                                x-text="bankDetails"></span>
+                        </span>
+                        <!-- wallet details -->
+                        <span class="block mt-2.5" x-show="payment === m.key && (m.key === 'jazzcash' || m.key === 'easypaisa')" x-cloak>
+                          <span class="block text-xs font-semibold text-slate-700 bg-slate-900/5 rounded-lg p-2.5 break-words">
+                            Send to <b x-text="walletNumberFor(m.key)"></b> (<span x-text="walletName"></span>), then enter the transaction ID below.
+                          </span>
+                        </span>
+
+                        <!-- reference input -->
+                        <span class="block mt-2.5" x-show="payment === m.key && m.key !== 'cod'" x-cloak>
+                          <label class="shop-label" :for="'co-ref-' + m.key" x-text="m.key === 'bank_transfer' ? 'Transaction reference *' : 'Transaction ID *'"></label>
+                          <input :id="'co-ref-' + m.key" type="text" class="shop-input" x-model="reference"
+                                 @input="errors.reference = ''" :class="errors.reference && '!border-rose-500'"
+                                 :placeholder="m.key === 'bank_transfer' ? 'e.g. FT24051234567' : 'e.g. 123456789012'">
+                          <span class="block shop-error" x-show="errors.reference" x-cloak x-text="errors.reference"></span>
+                        </span>
+                      </span>
+                    </label>
+                  </template>
+                </div>
+
+                <p class="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                  Never share your CNIC, PIN or OTP with anyone. We only ask for the transaction ID shown in your wallet app.
+                </p>
+              </section>
+
+              <!-- terms + submit (desktop) -->
+              <section class="shop-card shop-card-pad">
+                <label class="shop-check !items-start">
+                  <input type="checkbox" class="mt-0.5" x-model="terms" @change="errors.terms = ''">
+                  <span class="min-w-0">
+                    I have read and accept the
+                    <a href="page.html?slug=return-policy" class="shop-link" target="_blank" rel="noopener">return policy</a>
+                    and the
+                    <a href="page.html?slug=warranty-policy" class="shop-link" target="_blank" rel="noopener">warranty policy</a>.
+                  </span>
+                </label>
+                <p class="shop-error" x-show="errors.terms" x-cloak x-text="errors.terms"></p>
+
+                <div class="alert alert-danger mt-3 text-xs" x-show="formError" x-cloak>
+                  <span x-html="SHOP.icon('x-circle','w-4 h-4')"></span>
+                  <span class="min-w-0" x-text="formError"></span>
+                </div>
+
+                <button type="submit" class="shop-btn shop-btn-lg shop-btn-block mt-4 hidden lg:inline-flex" :disabled="busy">
+                  <span x-html="SHOP.icon(busy ? 'refresh' : 'shield-check','')"></span>
+                  <span x-text="busy ? 'Placing your order…' : 'Place order · ' + $money(total, {decimals:0})"></span>
+                </button>
+                <p class="text-[11px] text-slate-500 mt-3 text-center hidden lg:block">
+                  By placing the order you agree to be contacted on the number above.
+                </p>
+              </section>
+            </form>
+
+            <!-- ------------------------------------ sticky order summary -->
+            <aside class="min-w-0 hidden lg:block">
+              <div class="shop-card shop-card-pad sticky top-24">
+                <h2 class="shop-h3">Order summary</h2>
+                <ul class="mt-4 divide-y divide-slate-200/70">
+                  <template x-for="l in lines" :key="l.product_id">
+                    <li class="flex items-start gap-3 py-2.5 min-w-0">
+                      <a :href="'product.html?id=' + l.product_id" class="shop-media w-12 h-12 rounded-lg overflow-hidden flex-none"
+                         x-html="SHOP.image(l.product)" :aria-label="l.name"></a>
+                      <span class="min-w-0 flex-1">
+                        <span class="block text-xs font-bold text-slate-900 shop-clamp-2" x-text="l.name"></span>
+                        <span class="block text-[11px] text-slate-500" x-text="'Qty ' + l.qty + ' × ' + $money(l.unit_price, {decimals:0})"></span>
+                        <span class="block shop-error" x-show="lineErrors[l.product_id]" x-cloak x-text="lineErrors[l.product_id]"></span>
+                      </span>
+                      <span class="text-xs font-bold text-slate-900 shop-nowrap" x-text="$money(l.total, {decimals:0})"></span>
+                    </li>
+                  </template>
+                </ul>
+
+                <dl class="mt-3 space-y-2 text-sm border-t border-slate-200/70 pt-3">
+                  <div class="flex justify-between gap-3"><dt class="text-slate-500">Subtotal</dt><dd class="font-bold text-slate-900 shop-nowrap" x-text="$money(subtotal, {decimals:0})"></dd></div>
+                  <div class="flex justify-between gap-3">
+                    <dt class="text-slate-500 min-w-0">Delivery</dt>
+                    <dd class="font-bold shop-nowrap" :class="fee ? 'text-slate-900' : 'text-emerald-600'" x-text="fee ? $money(fee, {decimals:0}) : 'Free'"></dd>
+                  </div>
+                  <div class="flex justify-between gap-3 pt-1 border-t border-slate-200/70">
+                    <dt class="font-extrabold text-slate-900">Total</dt>
+                    <dd class="shop-price shop-nowrap" x-text="$money(total, {decimals:0})"></dd>
+                  </div>
+                </dl>
+
+                <p class="text-[11px] text-slate-500 mt-3 leading-relaxed" x-show="freeAbove > 0 && fee > 0" x-cloak>
+                  Add <b x-text="$money(freeRemaining, {decimals:0})"></b> more to get free delivery.
+                </p>
+
+                <a href="cart.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm mt-4">
+                  <span x-html="SHOP.icon('arrow-left','')"></span>Edit cart
+                </a>
+
+                <div class="mt-4 pt-4 border-t border-slate-200/70 space-y-2">
+                  <template x-for="t in trust" :key="t.text">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-emerald-600 flex-none" x-html="SHOP.icon(t.icon,'w-4 h-4')"></span>
+                      <span class="text-[11px] text-slate-600 leading-tight min-w-0" x-text="t.text"></span>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <!-- ------------------------------ mobile sticky place-order bar -->
+        <div class="shop-sticky-bar lg:hidden">
+          <div class="min-w-0 flex-1">
+            <div class="text-[11px] text-slate-500 truncate">Total incl. delivery</div>
+            <div class="font-extrabold text-slate-900 truncate" x-text="$money(total, {decimals:0})"></div>
+          </div>
+          <button type="submit" form="checkout-form" class="shop-btn flex-none" :disabled="busy">
+            <span x-html="SHOP.icon(busy ? 'refresh' : 'shield-check','')"></span>
+            <span x-text="busy ? 'Placing…' : 'Place order'"></span>
+          </button>
+        </div>
+      </div>
+    </template>
+
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopCheckout() {
+      const { db, utils } = ABM;
+      const CUSTOMER_KEY = 'abm.shop.customer';
+      return {
+        mode: 'form', order: null, busy: false, summaryOpen: false,
+        account: null, createAccount: false, accountPw: '', accountPw2: '', accountError: '',
+        commerce: {}, contact: {}, methods: [], lines: [], lineErrors: {},
+        subtotal: 0, fee: 0, total: 0, count: 0, freeAbove: 0,
+        payment: 'cod', reference: '', terms: false, formError: '',
+        form: { name: '', phone: '', email: '', address: '', city: '', city_other: '', notes: '' },
+        errors: { name: '', phone: '', email: '', address: '', city: '', reference: '', terms: '' },
+        cities: ['Lahore', 'Karachi', 'Islamabad', 'Rawalpindi', 'Faisalabad', 'Multan', 'Gujranwala', 'Peshawar',
+          'Quetta', 'Sialkot', 'Hyderabad', 'Bahawalpur', 'Sargodha', 'Sukkur', 'Abbottabad', 'Other'],
+        trust: [], nextSteps: [],
+
+        init() {
+          this.commerce = SHOP.commerce();
+          this.contact = SHOP.contact();
+          this.methods = SHOP.paymentMethods();
+          this.payment = (this.methods[0] || {}).key || 'cod';
+          this.freeAbove = Number(this.commerce.free_delivery_above) || 0;
+          this.trust = [
+            { icon: 'shield-check', text: 'Genuine products with written warranty' },
+            { icon: 'phone-call', text: 'Every order confirmed by phone before dispatch' },
+            { icon: 'refresh', text: '7-day exchange on manufacturing faults' },
+          ];
+          this.nextSteps = [
+            { title: 'We call you to confirm', text: 'Usually within 30 minutes during shop hours (' + (this.contact.hours || 'Mon–Sat 10:00 – 21:00') + ').' },
+            { title: 'We pack and check your items', text: 'Serial / IMEI numbers are recorded on your invoice before packing.' },
+            { title: 'Out for delivery', text: 'Same day inside Lahore, 2–3 working days nationwide. You can track the status online.' },
+            { title: 'Pay and enjoy', text: 'Pay the rider (cash on delivery) or share your transfer reference. Your invoice comes in the box.' },
+          ];
+
+          if (!this.commerce.allow_orders) { this.mode = 'disabled'; this.refresh(); return; }
+
+          this.applyQuickOrder();
+          this.refresh();
+          if (!this.lines.length) { location.replace('cart.html'); return; }
+
+          this.restoreCustomer();
+          // QA aid (same family as ?__layout=1 / ?__click= in shop.js): prefill a valid demo order.
+          if (utils.qs('__demo') === '1') {
+            this.form = { name: 'Demo Customer', phone: '0300-1234567', email: 'demo@example.com',
+              address: 'House 12, Street 4, Model Town', city: 'Lahore', city_other: '', notes: 'Please call before delivery.' };
+            this.reference = 'TRX-DEMO-0001';
+            this.terms = true;
+          }
+          this._sync = () => this.refresh();
+          window.addEventListener('shop:cart', this._sync);
+        },
+
+        /**
+         * "Buy now" link: checkout.html?add=5,23:2 drops those products into the cart and goes
+         * straight to checkout. The parameter is stripped afterwards so a refresh never doubles up.
+         */
+        applyQuickOrder() {
+          const raw = utils.qs('add');
+          if (!raw) return;
+          String(raw).split(',').forEach((part) => {
+            const bits = String(part).split(':');
+            const id = Number(bits[0]);
+            const qty = Math.max(1, Number(bits[1]) || 1);
+            if (!id) return;
+            try { SHOP.cart.add(id, qty); } catch (e) { SHOP.toast(e.message, 'warning'); }
+          });
+          try {
+            const keep = new URLSearchParams(location.search);
+            keep.delete('add');
+            const q = keep.toString();
+            history.replaceState(null, '', 'checkout.html' + (q ? '?' + q : ''));
+          } catch (e) { /* ignore */ }
+        },
+
+        refresh() {
+          this.lines = SHOP.cart.lines();
+          this.count = this.lines.reduce((s, l) => s + l.qty, 0);
+          this.subtotal = utils.round2(this.lines.reduce((s, l) => s + l.total, 0));
+          this.fee = SHOP.deliveryFee(this.subtotal);
+          this.total = utils.round2(this.subtotal + this.fee);
+        },
+
+        get freeRemaining() { return this.freeAbove > 0 ? Math.max(0, utils.round2(this.freeAbove - this.subtotal)) : 0; },
+        get bankDetails() { return this.commerce.bank_details || 'Ask us on WhatsApp for the account details.'; },
+        /** Each wallet has its OWN account in the CMS — never send JazzCash money to the EasyPaisa number. */
+        walletNumberFor(key) {
+          const c = this.commerce;
+          const own = key === 'easypaisa' ? c.easypaisa_number : c.jazzcash_number;
+          return String(own || '').trim() || String(this.contact.whatsapp || this.contact.phone || '').trim() || 'our helpline';
+        },
+        get walletName() { return this.commerce.wallet_account_name || SHOP.site().name || 'Abbott Mobile'; },
+        get waText() {
+          const items = SHOP.cart.lines().map((l) => '• ' + l.name + ' x' + l.qty).join('\n');
+          return 'Hello! I would like to order:\n' + (items || '(my list)');
+        },
+        methodLabel(key) {
+          const m = SHOP.paymentMethods().filter((x) => x.key === key)[0];
+          return m ? m.label : utils.titleCase(key || '');
+        },
+
+        /* ------------------------------------------------------ helpers */
+        restoreCustomer() {
+          try {
+            const saved = JSON.parse(localStorage.getItem(CUSTOMER_KEY) || 'null');
+            if (saved && typeof saved === 'object') {
+              ['name', 'phone', 'email', 'address', 'city', 'city_other'].forEach((k) => {
+                if (saved[k]) this.form[k] = String(saved[k]);
+              });
+            }
+          } catch (e) { /* private mode */ }
+          // a signed-in customer's own details always win over whatever was cached
+          const u = SHOP.auth.user();
+          if (u) {
+            this.account = u;
+            this.form.name = u.name || this.form.name;
+            this.form.phone = u.phone || this.form.phone;
+            this.form.email = u.email || this.form.email;
+            if (u.address) this.form.address = u.address;
+            if (u.city) this.form.city = u.city;
+          }
+          if (this.form.city && !this.cities.includes(this.form.city)) {
+            this.form.city_other = this.form.city; this.form.city = 'Other';
+          }
+        },
+        rememberCustomer() {
+          try { localStorage.setItem(CUSTOMER_KEY, JSON.stringify(this.form)); } catch (e) { /* ignore */ }
+        },
+        normalisePhone(v) {
+          let d = SHOP.digits(v);
+          if (d.slice(0, 4) === '0092') d = d.slice(4);
+          if (d.slice(0, 2) === '92' && d.length === 12) d = '0' + d.slice(2);
+          if (d.length === 10 && d.charAt(0) === '3') d = '0' + d;
+          return d;
+        },
+        formatPhone() {
+          const d = this.normalisePhone(this.form.phone);
+          if (/^03\d{9}$/.test(d)) this.form.phone = d.slice(0, 4) + '-' + d.slice(4);
+        },
+
+        validate() {
+          const e = { name: '', phone: '', email: '', address: '', city: '', reference: '', terms: '' };
+          const name = String(this.form.name || '').trim();
+          if (name.length < 3) e.name = 'Please enter your full name.';
+          const phone = this.normalisePhone(this.form.phone);
+          if (!phone) e.phone = 'Please enter your mobile number.';
+          else if (!/^03\d{9}$/.test(phone)) e.phone = 'Enter a Pakistani mobile number in the format 03xx-xxxxxxx.';
+          const email = String(this.form.email || '').trim();
+          if (email && !/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) e.email = 'That email address does not look right.';
+          if (String(this.form.address || '').trim().length < 8) e.address = 'Please enter a complete address (house/shop, street, area).';
+          if (!this.form.city) e.city = 'Please choose your city.';
+          else if (this.form.city === 'Other' && String(this.form.city_other || '').trim().length < 3) e.city = 'Please type your city name.';
+          if (this.payment !== 'cod' && !String(this.reference || '').trim()) {
+            e.reference = this.payment === 'bank_transfer' ? 'Enter the bank transaction reference.' : 'Enter the transaction ID from your wallet app.';
+          }
+          if (!this.terms) e.terms = 'Please accept the return and warranty policies.';
+          this.errors = e;
+          return !Object.keys(e).some((k) => e[k]);
+        },
+
+        /** Re-check live stock for every line right before writing the order. */
+        checkStock() {
+          const problems = {};
+          this.lines.forEach((l) => {
+            const p = SHOP.product(l.product_id);
+            if (!p) { problems[l.product_id] = 'No longer available — please remove it from your cart.'; return; }
+            const max = SHOP.maxQty(p);
+            if (!max) problems[l.product_id] = 'Just went out of stock — please remove it from your cart.';
+            else if (l.qty > max) problems[l.product_id] = 'Only ' + max + ' left — reduce the quantity in your cart.';
+          });
+          this.lineErrors = problems;
+          return !Object.keys(problems).length;
+        },
+
+        async place() {
+          if (this.busy) return;
+          this.formError = '';
+          if (!this.validate()) {
+            this.formError = 'Please fix the highlighted fields and try again.';
+            const first = document.querySelector('#checkout-form .\\!border-rose-500') || document.querySelector('#checkout-form input');
+            if (first && first.focus) first.focus();
+            SHOP.toast('Please check the highlighted fields.', 'error');
+            return;
+          }
+          this.refresh();
+          if (!this.lines.length) { location.replace('cart.html'); return; }
+          if (!this.checkStock()) {
+            this.formError = 'Some items in your cart are no longer available. Please update your cart.';
+            this.summaryOpen = true;
+            SHOP.toast('Stock changed — please review your cart.', 'error');
+            return;
+          }
+
+          this.busy = true;
+          try {
+            const customer = {
+              name: String(this.form.name).trim(),
+              phone: this.formatPhoneValue(),
+              email: String(this.form.email || '').trim(),
+              address: String(this.form.address).trim(),
+              city: this.form.city === 'Other' ? String(this.form.city_other).trim() : this.form.city,
+              notes: String(this.form.notes || '').trim(),
+            };
+            // optional account creation, before the order so it is linked to the new account
+            if (this.createAccount && !this.account) {
+              try {
+                SHOP.auth.register({
+                  name: customer.name, email: customer.email, phone: customer.phone,
+                  password: this.accountPw, confirm: this.accountPw2,
+                  address: customer.address, city: customer.city,
+                });
+              } catch (err) {
+                this.accountError = err.message;
+                this.formError = err.message;
+                SHOP.toast(err.message, 'error');
+                this.busy = false;
+                return;
+              }
+            }
+            const ref = this.payment === 'cod' ? '' : this.reference;   // never store a stale wallet ref on a COD order
+            const order = SHOP.placeOrder(customer, SHOP.cart.get(), this.payment, ref);
+            this.order = order;
+            this.rememberCustomer();
+            SHOP.cart.clear();
+            SHOP.toast('Order ' + order.order_no + ' placed. Thank you!', 'success');
+            // the confirmation lives on its own page so it can be bookmarked, shared and reopened
+            location.href = 'thank-you.html?no=' + encodeURIComponent(order.order_no) +
+              '&phone=' + encodeURIComponent(order.customer.phone || '');
+            return;
+          } catch (e) {
+            this.formError = e.message;
+            SHOP.toast(e.message, 'error');
+          } finally {
+            this.busy = false;
+          }
+        },
+        formatPhoneValue() {
+          const d = this.normalisePhone(this.form.phone);
+          return /^03\d{9}$/.test(d) ? d.slice(0, 4) + '-' + d.slice(4) : String(this.form.phone || '').trim();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

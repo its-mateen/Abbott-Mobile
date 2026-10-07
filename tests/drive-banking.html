@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: banking &amp; cheques</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives ABM.bank: the account balance only ever moves through post(), and a cheque is not money
+    // until it clears — including what happens when one bounces.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || match.test(e.message), e.message); } }
+      var db = ABM.db, utils = ABM.utils, session = ABM.session, bank = ABM.bank;
+
+      try {
+        db.reset();
+        session.logout(); session.login(db.all('users').find(function (u) { return u.username === 'manager'; }));
+        var BID = session.branchId();
+
+        /* ---------------- seed ---------------- */
+        var accounts = db.all('bank_accounts');
+        ok('seed ships bank accounts', accounts.length >= 3, accounts.length + ' accounts');
+        ok('each account has a bank, title and number', accounts.every(function (a) { return a.bank_name && a.account_title && a.account_no; }));
+        ok('every account balance equals its transactions', accounts.every(function (a) {
+          var sum = db.where('bank_transactions', { account_id: a.id }).reduce(function (s, t) { return s + t.signed; }, 0);
+          return Math.abs(utils.round2(sum) - utils.round2(a.balance)) < 0.01;
+        }), accounts.map(function (a) {
+          var sum = db.where('bank_transactions', { account_id: a.id }).reduce(function (s, t) { return s + t.signed; }, 0);
+          return a.name + ': ' + utils.round2(sum) + ' vs ' + a.balance;
+        }).join(' | '));
+        ok('each row carries the running balance', db.all('bank_transactions').every(function (t) { return typeof t.balance_after === 'number'; }));
+        ok('the day-end deposits reached the bank', db.all('bank_transactions').some(function (t) { return t.reference_type === 'daily_closing' && t.type === 'deposit'; }));
+        ok('and so did the cash the shifts banked', db.all('bank_transactions').some(function (t) { return t.reference_type === 'cash_movement' && t.type === 'deposit'; }));
+        ok('every banked shift drop is in the bank exactly once', (function () {
+          var drops = db.all('cash_movements').filter(function (m) { return m.type === 'bank_drop'; });
+          return drops.every(function (m) {
+            return db.all('bank_transactions').filter(function (t) { return t.reference_type === 'cash_movement' && String(t.reference_id) === String(m.id); }).length === 1;
+          });
+        })());
+        var chqs = db.all('cheques');
+        ok('seed ships a cheque register', chqs.length >= 5, chqs.length + ' cheques');
+        ['pending', 'deposited', 'cleared', 'bounced'].forEach(function (s) {
+          ok('seed covers ' + s + ' cheques', chqs.some(function (c) { return c.status === s; }));
+        });
+        ok('issued and received cheques both exist', chqs.some(function (c) { return c.direction === 'issued'; }) && chqs.some(function (c) { return c.direction === 'received'; }));
+        ok('a cleared cheque has a bank transaction', chqs.filter(function (c) { return c.status === 'cleared'; }).every(function (c) {
+          return db.all('bank_transactions').some(function (t) { return String(t.cheque_id) === String(c.id); });
+        }));
+        ok('a pending cheque has NOT moved the bank', chqs.filter(function (c) { return c.status === 'pending'; }).every(function (c) {
+          return !db.all('bank_transactions').some(function (t) { return String(t.cheque_id) === String(c.id); });
+        }));
+
+        /* ---------------- posting ---------------- */
+        var acc = accounts[0];
+        var before = bank.balance(acc.id);
+        var dep = bank.deposit(acc.id, 25000, { reference: 'Test deposit', notes: 'cash to bank' });
+        ok('a deposit raises the balance', bank.balance(acc.id) === utils.round2(before + 25000), String(bank.balance(acc.id)));
+        ok('the row records the running balance', dep.balance_after === bank.balance(acc.id));
+        ok('and its direction', dep.signed === 25000);
+        bank.withdraw(acc.id, 5000, { reference: 'Counter' });
+        ok('a withdrawal lowers it', bank.balance(acc.id) === utils.round2(before + 20000));
+        bank.post(acc.id, { type: 'charges', amount: 250, reference: 'SMS alerts' });
+        ok('bank charges lower it too', bank.balance(acc.id) === utils.round2(before + 19750));
+        throws('a zero amount is refused', function () { bank.deposit(acc.id, 0, {}); }, /greater than zero/);
+        throws('an unknown type is refused', function () { bank.post(acc.id, { type: 'magic', amount: 10 }); }, /Unknown bank transaction/);
+        throws('an unknown account is refused', function () { bank.deposit(99999, 10, {}); }, /not found/);
+        throws('the account cannot be overdrawn', function () { bank.withdraw(acc.id, 99999999, {}); }, /overdraw/);
+
+        /* ---------------- transfers ---------------- */
+        var a2 = accounts[1];
+        var fromBefore = bank.balance(acc.id), toBefore = bank.balance(a2.id);
+        var tr = bank.transfer(acc.id, a2.id, 30000, { reference: 'TRF-TEST', notes: 'move' });
+        ok('a transfer leaves one account', bank.balance(acc.id) === utils.round2(fromBefore - 30000));
+        ok('and lands in the other', bank.balance(a2.id) === utils.round2(toBefore + 30000));
+        ok('both sides point at each other', String(tr.out.reference_id) === String(tr.into.id) && String(tr.into.reference_id) === String(tr.out.id));
+        ok('the two sides cancel out across the business', utils.round2(tr.out.signed + tr.into.signed) === 0);
+        throws('an account cannot transfer to itself', function () { bank.transfer(acc.id, acc.id, 100, {}); }, /two different/);
+
+        /* ---------------- reversing a mistake ---------------- */
+        var mistake = bank.deposit(acc.id, 7777, { reference: 'Typo' });
+        var afterMistake = bank.balance(acc.id);
+        var rev = bank.reverse(mistake.id, 'keyed twice');
+        ok('a reversal puts the balance back', bank.balance(acc.id) === utils.round2(afterMistake - 7777));
+        ok('the original is marked reversed', db.find('bank_transactions', mistake.id).reversed_by === rev.id);
+        ok('both rows stay for the trail', !!db.find('bank_transactions', mistake.id) && !!db.find('bank_transactions', rev.id));
+        throws('it cannot be reversed twice', function () { bank.reverse(mistake.id, 'again'); }, /already been reversed/);
+
+        /* ---------------- issuing a cheque ---------------- */
+        var supplier = db.all('suppliers')[0];
+        var balBefore = bank.balance(acc.id);
+        var issued = bank.cheque.issue({ account_id: acc.id, cheque_no: 'TEST-001', party_type: 'supplier', party_id: supplier.id, party_name: supplier.name, amount: 60000, issue_date: utils.today(), due_date: utils.today(), branch_id: BID });
+        ok('a cheque can be issued', issued.status === 'pending');
+        ok('issuing it does NOT move the bank balance', bank.balance(acc.id) === balBefore);
+        throws('the same cheque number cannot be issued twice', function () {
+          bank.cheque.issue({ account_id: acc.id, cheque_no: 'TEST-001', party_name: 'x', amount: 10, branch_id: BID });
+        }, /already recorded/);
+        throws('a cheque needs a number', function () { bank.cheque.issue({ account_id: acc.id, cheque_no: '', party_name: 'x', amount: 10 }); }, /cheque number/);
+        var cleared = bank.cheque.clear(issued.id, {});
+        ok('clearing it moves the money', bank.balance(acc.id) === utils.round2(balBefore - 60000), String(bank.balance(acc.id)));
+        ok('the cheque is marked cleared', cleared.cheque.status === 'cleared' && !!cleared.cheque.cleared_at);
+        ok('the bank row points back at the cheque', String(cleared.transaction.cheque_id) === String(issued.id));
+        ok('it is recorded as money out', cleared.transaction.type === 'payment' && cleared.transaction.signed < 0);
+        throws('a cleared cheque cannot clear again', function () { bank.cheque.clear(issued.id, {}); }, /already cleared/);
+
+        /* ---------------- receiving, depositing and clearing ---------------- */
+        var customer = db.all('customers').find(function (c) { return !c.is_walkin; });
+        var recv = bank.cheque.receive({ cheque_no: 'CUST-900', bank_name: 'HBL', party_type: 'customer', party_id: customer.id, party_name: customer.name, amount: 40000, branch_id: BID });
+        ok('a customer cheque can be recorded', recv.status === 'pending' && recv.direction === 'received');
+        ok('it is not in any account yet', !recv.account_id);
+        var dep2 = bank.cheque.deposit(recv.id, a2.id);
+        ok('depositing marks it deposited', dep2.status === 'deposited' && String(dep2.account_id) === String(a2.id));
+        ok('depositing still does not move money', bank.balance(a2.id) === utils.round2(toBefore + 30000));
+        var recvBefore = bank.balance(a2.id);
+        bank.cheque.clear(recv.id, {});
+        ok('clearing a received cheque brings money in', bank.balance(a2.id) === utils.round2(recvBefore + 40000));
+        throws('a cheque we received cannot be deposited twice', function () { bank.cheque.deposit(recv.id, a2.id); }, /cleared/);
+
+        /* ---------------- bouncing ---------------- */
+        var cust2 = db.all('customers').find(function (c) { return !c.is_walkin && c.id !== customer.id; });
+        var owedBefore = Number(db.find('customers', cust2.id).balance) || 0;
+        // postLedger: this cheque paid the customer's khata, so it lowered their balance when recorded
+        var bouncy = bank.cheque.receive({ cheque_no: 'CUST-901', bank_name: 'UBL', party_type: 'customer', party_id: cust2.id, party_name: cust2.name, amount: 15000, branch_id: BID, postLedger: true });
+        ok('a khata cheque lowers the balance when recorded', utils.round2(db.find('customers', cust2.id).balance) === utils.round2(owedBefore - 15000));
+        bank.cheque.deposit(bouncy.id, a2.id);
+        var beforeBounceClear = bank.balance(a2.id);
+        bank.cheque.clear(bouncy.id, {});
+        ok('it cleared first', bank.balance(a2.id) === utils.round2(beforeBounceClear + 15000));
+        bank.cheque.bounce(bouncy.id, 'Insufficient funds');
+        ok('bouncing takes the money back out of the bank', bank.balance(a2.id) === utils.round2(beforeBounceClear), String(bank.balance(a2.id)));
+        ok('the cheque reads bounced with a reason', db.find('cheques', bouncy.id).status === 'bounced' && /Insufficient/.test(db.find('cheques', bouncy.id).bounced_reason));
+        ok('and the customer owes it again', utils.round2(db.find('customers', cust2.id).balance) === utils.round2(owedBefore),
+          owedBefore + ' -> ' + db.find('customers', cust2.id).balance);
+        ok('the customer ledger explains why', db.all('customer_transactions').some(function (t) {
+          return t.reference_type === 'cheque' && String(t.reference_id) === String(bouncy.id) && /bounced/i.test(t.notes || '');
+        }));
+
+        // a cheque that bounces before clearing must not touch the bank at all
+        var cust3 = db.all('customers').find(function (c) { return !c.is_walkin && c.id !== customer.id && c.id !== cust2.id; });
+        var neverCleared = bank.cheque.receive({ cheque_no: 'CUST-902', party_type: 'customer', party_id: cust3.id, party_name: cust3.name, amount: 9000, branch_id: BID });
+        var bankBefore = bank.balance(a2.id);
+        bank.cheque.bounce(neverCleared.id, 'Signature mismatch');
+        ok('an uncleared cheque that bounces leaves the bank alone', bank.balance(a2.id) === bankBefore);
+
+        /* ---------------- cancelling ---------------- */
+        var toCancel = bank.cheque.issue({ account_id: acc.id, cheque_no: 'TEST-002', party_type: 'supplier', party_id: supplier.id, party_name: supplier.name, amount: 5000, branch_id: BID });
+        var balAtCancel = bank.balance(acc.id);
+        bank.cheque.cancel(toCancel.id, 'Spoiled');
+        ok('a pending cheque can be cancelled', db.find('cheques', toCancel.id).status === 'cancelled');
+        ok('cancelling moves no money', bank.balance(acc.id) === balAtCancel);
+        ok('the number can be reused after cancelling', (function () {
+          try { bank.cheque.issue({ account_id: acc.id, cheque_no: 'TEST-002', party_name: 'again', amount: 10, branch_id: BID }); return true; } catch (e) { return false; }
+        })());
+        throws('a cleared cheque cannot be cancelled', function () { bank.cheque.cancel(issued.id, 'no'); }, /cannot be cancelled/);
+
+        /* ---------------- what needs chasing ---------------- */
+        var due = bank.cheque.due(null, utils.today());
+        ok('due cheques are the uncleared ones dated today or earlier', due.every(function (c) {
+          return ['pending', 'deposited'].indexOf(c.status) >= 0 && c.due_date <= utils.today();
+        }), due.length + ' due');
+        ok('a post-dated cheque is not due yet', db.all('cheques').filter(function (c) { return c.due_date > utils.today(); })
+          .every(function (c) { return !due.some(function (d) { return d.id === c.id; }); }));
+
+        /* ---------------- consistency ---------------- */
+        ok('balances still equal their transactions after all of that', db.all('bank_accounts').every(function (a) {
+          var sum = db.where('bank_transactions', { account_id: a.id }).reduce(function (s, t) { return s + t.signed; }, 0);
+          return Math.abs(utils.round2(sum) - utils.round2(a.balance)) < 0.01;
+        }));
+        ok('no account went negative', db.all('bank_accounts').every(function (a) { return a.balance >= 0; }));
+        ok('every cheque-linked bank row has a cheque that exists', db.all('bank_transactions').filter(function (t) { return t.cheque_id; })
+          .every(function (t) { return !!db.find('cheques', t.cheque_id); }));
+        ok('bank.total() adds the active accounts up', utils.round2(bank.total(null)) === utils.round2(db.all('bank_accounts').filter(function (a) { return a.is_active; }).reduce(function (s, a) { return s + a.balance; }, 0)));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

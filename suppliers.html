@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Suppliers · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="suppliers" data-title="Suppliers" data-perm="suppliers.view">
+  <main x-data="suppliersPage()" @keydown.escape.window="closeForm()">
+
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Suppliers</h2>
+        <p class="page-subtitle">Payables ledger &amp; vendor book · activity for <b x-text="range.label"></b> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="report-payables.html" class="btn btn-secondary"><span x-html="ABM.icon('chart')"></span>Payables</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canAdd">
+          <button type="button" class="btn btn-primary" @click="openCreate()"><span x-html="ABM.icon('plus')"></span>New Supplier</button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <p class="help mt-1.5">Scopes the <b>purchases</b>, <b>value</b> and <b>last purchase</b> columns. Payable balances are always all-time.</p>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'suppliers.html?filter=all&' + range.query" class="stat stat-accent" title="Show every supplier">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Suppliers</div><div class="stat-value" x-text="ABM.utils.num(k.total)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('store')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.active"></span> active<span x-show="k.inactive"> · <span x-text="k.inactive"></span> inactive</span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-payables.html" class="stat stat-danger" title="Open the payables report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Total payable</div><div class="stat-value" :class="k.payable > 0 ? 'text-rose-600' : ''" x-text="$money(k.payable, {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta">owed to suppliers across all branches</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'suppliers.html?filter=payable&' + range.query" class="stat stat-warning" title="Show suppliers we still owe">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">With payable</div><div class="stat-value" x-text="ABM.utils.num(k.creditors)"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta"><span x-show="k.creditors">avg <b x-text="$money(k.avgPayable, {decimals:0})"></b> · </span><span x-text="k.settled"></span> settled</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchases.html?' + range.query" class="stat stat-money" title="Open purchases for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Purchased · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.purchased, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('truck')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.purchaseCount"></span> purchase<span x-text="k.purchaseCount === 1 ? '' : 's'"></span> · paid <b class="text-emerald-700" x-text="$money(k.paid, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="tabs-pill">
+            <template x-for="t in tabs" :key="t.key">
+              <button type="button" class="tab" :class="filter === t.key && 'active'" @click="filter = t.key">
+                <span x-text="t.label"></span><span class="count" x-text="counts[t.key]"></span>
+              </button>
+            </template>
+          </div>
+          <div class="relative flex-1 min-w-[13rem]">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search name, contact, phone, email or tax id…" x-model.debounce.200ms="q" aria-label="Search suppliers">
+          </div>
+          <template x-if="isSuperAdmin">
+            <select class="select !w-auto min-w-[10rem]" x-model="f.branch" x-init="$nextTick(() => { $el.value = f.branch })" aria-label="Activity branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <select class="select !w-auto min-w-[9rem]" x-model="sort" aria-label="Sort by">
+            <option value="name">Sort: Name</option>
+            <option value="balance">Sort: Payable</option>
+            <option value="recent">Sort: Last purchase</option>
+            <option value="value">Sort: Value</option>
+          </select>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> suppliers</span>
+          <span x-show="filteredTotals.payable > 0">payable <b class="text-rose-600" x-text="$money(filteredTotals.payable, {decimals:0})"></b></span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Supplier list</div><div class="card-subtitle">Click a name for the payables ledger, purchases and products supplied</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Supplier</th>
+              <th class="hidden lg:table-cell">Contact</th>
+              <th class="hidden sm:table-cell">Phone</th>
+              <th class="hidden 2xl:table-cell">Email</th>
+              <th class="hidden 2xl:table-cell">Tax ID</th>
+              <th class="num hidden md:table-cell" title="Purchases in the selected period">Purchases</th>
+              <th class="hidden lg:table-cell">Last purchase</th>
+              <th class="num">Payable</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="!r.is_active && 'opacity-60'">
+                <td>
+                  <div class="min-w-0 max-w-[13rem] sm:max-w-[18rem]">
+                    <a :href="'supplier-view.html?id=' + r.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate" x-text="r.name"></a>
+                    <div class="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-1.5">
+                      <span x-show="!r.is_active" class="badge badge-red">Inactive</span>
+                      <span class="lg:hidden" x-show="r.contact_person" x-text="r.contact_person"></span>
+                      <span class="sm:hidden" x-show="r.phone" x-text="r.phone"></span>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden lg:table-cell"><div class="truncate max-w-[10rem] text-slate-700" x-text="r.contact_person || '—'"></div></td>
+                <td class="hidden sm:table-cell whitespace-nowrap">
+                  <a :href="'tel:' + r.phone" class="text-slate-700 hover:text-navy-700" x-show="r.phone" x-text="r.phone"></a>
+                  <span class="text-slate-400" x-show="!r.phone">—</span>
+                </td>
+                <td class="hidden 2xl:table-cell"><a :href="'mailto:' + r.email" class="truncate max-w-[13rem] block text-slate-600 hover:text-navy-700" x-show="r.email" x-text="r.email"></a><span class="text-slate-400" x-show="!r.email">—</span></td>
+                <td class="hidden 2xl:table-cell mono text-xs text-slate-500 whitespace-nowrap" x-text="r.tax_id || '—'"></td>
+                <td class="num hidden md:table-cell">
+                  <a :href="'purchases.html?supplier=' + r.id + '&' + range.query" class="hover:underline" :class="r.purchases ? 'text-navy-700 font-semibold' : 'text-slate-400'" x-text="r.purchases"></a>
+                  <div class="text-[11px] text-slate-400 whitespace-nowrap" x-show="r.purchases" x-text="$money(r.value, {decimals:0})"></div>
+                </td>
+                <td class="hidden lg:table-cell whitespace-nowrap text-slate-600" x-text="r.lastPurchase ? $date(r.lastPurchase) : '—'"></td>
+                <td class="num whitespace-nowrap">
+                  <div class="font-semibold" :class="r.balance > 0 ? 'text-rose-600' : r.balance < 0 ? 'text-emerald-700' : 'text-slate-400'" x-text="$money(Math.abs(r.balance), {decimals:0})"></div>
+                  <div class="text-[11px]" :class="r.balance > 0 ? 'text-rose-500' : r.balance < 0 ? 'text-emerald-600' : 'text-slate-400'" x-text="r.balance > 0 ? 'We owe' : r.balance < 0 ? 'Advance' : 'Settled'"></div>
+                </td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'supplier-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="Open supplier" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canPurchase && r.is_active">
+                      <a :href="'purchase-create.html?supplier=' + r.id" class="btn btn-ghost btn-sm btn-icon hidden md:inline-flex" title="New purchase" x-html="ABM.icon('truck','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canPay && r.balance > 0">
+                      <a :href="'supplier-view.html?id=' + r.id + '&pay=1'" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Pay supplier" x-html="ABM.icon('banknotes','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canManage">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit supplier" @click="openEdit(r)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="canDelete && !canManage">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete supplier" @click="removeRow(r)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('store')"></span>
+                  <div class="empty-title">No suppliers found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or tab.' : 'Add the vendors you buy stock from to track payables.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <template x-if="canAdd"><button type="button" class="btn btn-primary btn-sm" @click="openCreate()">New supplier</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td>Totals</td>
+              <td class="hidden lg:table-cell"></td>
+              <td class="hidden sm:table-cell"></td>
+              <td class="hidden 2xl:table-cell"></td>
+              <td class="hidden 2xl:table-cell"></td>
+              <td class="num hidden md:table-cell"><span x-text="filteredTotals.purchases"></span><div class="text-[11px] font-normal text-slate-500 whitespace-nowrap" x-text="$money(filteredTotals.value, {decimals:0})"></div></td>
+              <td class="hidden lg:table-cell"></td>
+              <td class="num text-rose-600 whitespace-nowrap" x-text="$money(filteredTotals.payable, {decimals:0})"></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / edit supplier modal -->
+    <div x-show="form.open" x-cloak class="modal-backdrop" @click.self="closeForm()">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="supFormTitle">
+        <form @submit.prevent="save()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="supFormTitle" x-text="form.mode === 'create' ? 'New supplier' : 'Edit supplier'"></div>
+              <div class="text-xs text-slate-500 truncate" x-text="form.mode === 'create' ? 'Vendors you receive stock from' : form.data.name"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeForm()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="s-name">Supplier name <span class="req">*</span></label>
+                <input id="s-name" x-ref="nameInput" type="text" class="input" x-model="form.data.name" :class="form.errors.name && 'is-invalid'" placeholder="e.g. Hall Road Wholesale Traders" maxlength="100" autocomplete="off">
+                <p class="field-error" x-show="form.errors.name" x-text="form.errors.name"></p>
+                <p class="help text-amber-700" x-show="!form.errors.name && form.dupName" x-text="form.dupName"></p>
+              </div>
+              <div>
+                <label class="label" for="s-contact">Contact person</label>
+                <input id="s-contact" type="text" class="input" x-model="form.data.contact_person" placeholder="Sales rep name" maxlength="80" autocomplete="off">
+              </div>
+              <div>
+                <label class="label" for="s-phone">Phone <span class="req">*</span></label>
+                <input id="s-phone" type="tel" class="input" x-model="form.data.phone" @input="checkPhone()" :class="form.errors.phone && 'is-invalid'" placeholder="042-35761234 or 0321-4567890" maxlength="20" inputmode="tel" autocomplete="off">
+                <p class="field-error" x-show="form.errors.phone" x-text="form.errors.phone"></p>
+                <p class="help text-amber-700" x-show="!form.errors.phone && form.dupPhone" x-text="form.dupPhone"></p>
+              </div>
+              <div>
+                <label class="label" for="s-email">Email</label>
+                <input id="s-email" type="email" class="input" x-model="form.data.email" :class="form.errors.email && 'is-invalid'" placeholder="orders@vendor.pk" maxlength="80" autocomplete="off">
+                <p class="field-error" x-show="form.errors.email" x-text="form.errors.email"></p>
+              </div>
+              <div>
+                <label class="label" for="s-tax">Tax ID / NTN</label>
+                <input id="s-tax" type="text" class="input mono" x-model="form.data.tax_id" placeholder="NTN 0712345-6" maxlength="40">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="s-address">Address</label>
+                <input id="s-address" type="text" class="input" x-model="form.data.address" placeholder="Market, city" maxlength="140">
+              </div>
+              <div class="sm:col-span-2" x-show="form.mode === 'create'">
+                <label class="label" for="s-opening">Opening balance (we owe them)</label>
+                <div class="input-group"><span class="addon addon-left">Rs.</span><input id="s-opening" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.data.opening" :class="form.errors.opening && 'is-invalid'"></div>
+                <p class="field-error" x-show="form.errors.opening" x-text="form.errors.opening"></p>
+                <p class="help" x-show="!form.errors.opening">Carried over from your previous books — posted to the supplier ledger as an opening balance at <b x-text="branchName"></b>.</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="s-notes">Notes</label>
+                <textarea id="s-notes" class="textarea" rows="2" maxlength="300" x-model="form.data.notes" placeholder="Payment terms, product lines, delivery days…"></textarea>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="flex items-center gap-3 cursor-pointer select-none">
+                  <button type="button" class="switch" :class="form.data.is_active && 'on'" @click="form.data.is_active = form.data.is_active ? 0 : 1" role="switch" :aria-checked="form.data.is_active ? 'true' : 'false'" aria-label="Active supplier"></button>
+                  <span class="min-w-0">
+                    <span class="text-sm font-semibold text-slate-800">Active</span>
+                    <span class="block text-xs text-slate-500">Inactive suppliers stay in reports but cannot be picked on a new purchase.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div class="alert alert-info" x-show="form.mode === 'edit'">
+              <span x-html="ABM.icon('info')"></span>
+              <div class="min-w-0">Current payable <b x-text="$money(Math.abs(form.balance))"></b> <span x-text="form.balance > 0 ? '(we owe)' : form.balance < 0 ? '(advance paid)' : '(settled)'"></span>. Balances change through purchases, payments, returns and adjustments — use the supplier page to post them.</div>
+            </div>
+            <div class="alert alert-warning" x-show="form.mode === 'edit' && !form.deletable.ok" x-cloak>
+              <span x-html="ABM.icon('warning')"></span>
+              <div class="min-w-0">This supplier cannot be deleted: <span x-text="form.deletable.reasons.join(' · ')"></span>. Switch them to inactive instead.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <template x-if="form.mode === 'edit' && canDelete">
+              <button type="button" class="btn btn-danger-soft mr-auto" :disabled="form.busy" @click="destroy()"><span x-html="ABM.icon('trash')"></span><span x-text="form.deletable.ok ? 'Delete' : 'Deactivate'"></span></button>
+            </template>
+            <button type="button" class="btn btn-secondary" @click="closeForm()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="form.busy"><span x-html="ABM.icon('check')"></span><span x-text="form.mode === 'create' ? 'Create supplier' : 'Save changes'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function suppliersPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const blank = () => ({ id: null, name: '', contact_person: '', phone: '', email: '', address: '', tax_id: '', opening: 0, notes: '', is_active: 1 });
+      const digits = (v) => String(v || '').replace(/\D/g, '');
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('suppliers.add'),
+        canManage: session.can('suppliers.edit'),
+        canDelete: session.can('suppliers.delete'),
+        canPay: session.can('suppliers.payments'),
+        canPurchase: session.can('purchases.add'),
+        branchName: (session.branch() || {}).name || '',
+        branches: db.all('branches').filter((b) => b.is_active),
+        tabs: [{ key: 'all', label: 'All' }, { key: 'payable', label: 'With payable' }, { key: 'settled', label: 'Settled' }, { key: 'inactive', label: 'Inactive' }],
+        range: null, rows: [], page: 1, q: '', filter: 'all', sort: 'name',
+        f: { branch: String(session.branchId() || '') },
+        k: { total: 0, active: 0, inactive: 0, payable: 0, creditors: 0, avgPayable: 0, settled: 0, purchased: 0, purchaseCount: 0, paid: 0 },
+        form: { open: false, mode: 'create', data: blank(), errors: {}, busy: false, dupPhone: '', dupName: '', balance: 0, deletable: { ok: true, reasons: [] } },
+
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const flt = utils.qs('filter', ''); if (this.tabs.some((t) => t.key === flt)) this.filter = flt;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('all', () => { this.page = 1; this.compute(); }, 'suppliers');
+          this.compute();
+          ['q', 'filter', 'sort'].forEach((k) => this.$watch(k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+          const editId = utils.qs('edit', '');
+          if (editId && this.canManage) { const row = this.rows.find((x) => String(x.id) === String(editId)); if (row) this.$nextTick(() => this.openEdit(row)); }
+          if (utils.qs('new') !== null && this.canAdd) this.$nextTick(() => this.openCreate());
+        },
+
+        /* --------------------------------------------------------- data */
+        inScope(row) { return this.f.branch === 'all' ? true : String(row.branch_id) === String(this.f.branch); },
+        compute() {
+          const r = this.range;
+          const purchases = db.all('purchases').filter((p) => p.status !== 'cancelled' && this.inScope(p) && r.contains(p.purchase_date));
+          const agg = {};
+          purchases.forEach((p) => {
+            const a = agg[p.supplier_id] = agg[p.supplier_id] || { n: 0, value: 0, paid: 0, last: '' };
+            a.n++; a.value += Number(p.total) || 0; a.paid += Number(p.paid_amount) || 0;
+            if (String(p.purchase_date) > a.last) a.last = p.purchase_date;
+          });
+          this.rows = db.all('suppliers').map((s) => {
+            const a = agg[s.id] || { n: 0, value: 0, paid: 0, last: '' };
+            return { ...s, balance: utils.round2(Number(s.balance) || 0), purchases: a.n, value: utils.round2(a.value), paid: utils.round2(a.paid), lastPurchase: a.last || null };
+          });
+          const owed = this.rows.filter((s) => s.balance > 0);
+          this.k = {
+            total: this.rows.length, active: this.rows.filter((s) => s.is_active).length, inactive: this.rows.filter((s) => !s.is_active).length,
+            payable: utils.sum(owed, 'balance'), creditors: owed.length,
+            avgPayable: owed.length ? utils.round2(utils.sum(owed, 'balance') / owed.length) : 0,
+            settled: this.rows.filter((s) => s.balance <= 0).length,
+            purchased: utils.sum(purchases, 'total'), purchaseCount: purchases.length, paid: utils.sum(purchases, 'paid_amount'),
+          };
+        },
+        matchTab(s, tab) {
+          if (tab === 'payable') return s.balance > 0;
+          if (tab === 'settled') return s.balance <= 0;
+          if (tab === 'inactive') return !s.is_active;
+          return true;
+        },
+        get counts() { const out = {}; this.tabs.forEach((t) => { out[t.key] = this.rows.filter((s) => this.matchTab(s, t.key)).length; }); return out; },
+        get hasFilters() { return !!(this.q || this.filter !== 'all'); },
+        clearFilters() { this.q = ''; this.filter = 'all'; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const qd = digits(this.q);
+          const list = this.rows.filter((s) => {
+            if (!this.matchTab(s, this.filter)) return false;
+            if (!q) return true;
+            if ([s.name, s.contact_person, s.email, s.address, s.tax_id, s.notes].some((v) => String(v || '').toLowerCase().includes(q))) return true;
+            if (qd && digits(s.phone).includes(qd)) return true;
+            return false;
+          });
+          if (this.sort === 'balance') return utils.sortBy(list, (s) => -s.balance);
+          if (this.sort === 'recent') return utils.sortBy(list, (s) => s.lastPurchase || '', 'desc');
+          if (this.sort === 'value') return utils.sortBy(list, (s) => -s.value);
+          return utils.sortBy(list, (s) => String(s.name || '').toLowerCase());
+        },
+        get filteredTotals() {
+          const f = this.filtered;
+          return { payable: utils.sum(f.filter((s) => s.balance > 0), 'balance'), purchases: f.reduce((a, s) => a + s.purchases, 0), value: utils.sum(f, 'value') };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'Name', key: 'name' }, { label: 'Contact Person', key: 'contact_person' }, { label: 'Phone', key: 'phone' }, { label: 'Email', key: 'email' },
+            { label: 'Address', key: 'address' }, { label: 'Tax ID', key: 'tax_id' },
+            { label: 'Purchases', key: 'purchases' }, { label: 'Purchase Value', key: 'value' },
+            { label: 'Last Purchase', value: (s) => (s.lastPurchase ? String(s.lastPurchase).slice(0, 10) : '') },
+            { label: 'Payable', key: 'balance' }, { label: 'Active', value: (s) => (s.is_active ? 'Yes' : 'No') }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('suppliers-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' supplier' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* -------------------------------------------------------- modal */
+        usage(id) {
+          const reasons = [];
+          const s = db.find('suppliers', id);
+          const purchases = db.all('purchases').filter((p) => String(p.supplier_id) === String(id)).length;
+          const tx = db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(id)).length;
+          const products = db.all('products').filter((p) => String(p.supplier_id) === String(id)).length;
+          if (purchases) reasons.push(purchases + ' purchase' + (purchases === 1 ? '' : 's'));
+          if (tx) reasons.push(tx + ' ledger entr' + (tx === 1 ? 'y' : 'ies'));
+          if (products) reasons.push(products + ' linked product' + (products === 1 ? '' : 's'));
+          if (s && utils.round2(s.balance) !== 0) reasons.push('a balance of ' + utils.money(Math.abs(s.balance)));
+          return { ok: reasons.length === 0, reasons };
+        },
+        openCreate() {
+          if (!this.canAdd) { ui.error('You do not have permission to add suppliers.'); return; }
+          this.form = { open: true, mode: 'create', data: blank(), errors: {}, busy: false, dupPhone: '', dupName: '', balance: 0, deletable: { ok: true, reasons: [] } };
+          this.$nextTick(() => this.$refs.nameInput && this.$refs.nameInput.focus());
+        },
+        openEdit(row) {
+          if (!this.canManage) { ui.error('You do not have permission to edit suppliers.'); return; }
+          const s = db.find('suppliers', row.id);
+          if (!s) { ui.error('Supplier not found.'); this.compute(); return; }
+          this.form = {
+            open: true, mode: 'edit',
+            data: { id: s.id, name: s.name || '', contact_person: s.contact_person || '', phone: s.phone || '', email: s.email || '', address: s.address || '', tax_id: s.tax_id || '', opening: 0, notes: s.notes || '', is_active: s.is_active ? 1 : 0 },
+            errors: {}, busy: false, dupPhone: '', dupName: '', balance: utils.round2(Number(s.balance) || 0), deletable: this.usage(s.id),
+          };
+          this.checkPhone();
+          this.$nextTick(() => this.$refs.nameInput && this.$refs.nameInput.focus());
+        },
+        closeForm() { if (this.form.open) this.form.open = false; },
+        checkPhone() {
+          const d = digits(this.form.data.phone);
+          this.form.dupPhone = '';
+          if (d.length >= 7) {
+            const hit = db.all('suppliers').find((s) => String(s.id) !== String(this.form.data.id) && digits(s.phone) === d);
+            if (hit) this.form.dupPhone = 'Heads up: ' + hit.name + ' already uses this number.';
+          }
+          const n = String(this.form.data.name || '').trim().toLowerCase();
+          this.form.dupName = '';
+          if (n.length > 2) {
+            const hitN = db.all('suppliers').find((s) => String(s.id) !== String(this.form.data.id) && String(s.name || '').trim().toLowerCase() === n);
+            if (hitN) this.form.dupName = 'A supplier with this name already exists.';
+          }
+        },
+        validate() {
+          const d = this.form.data, e = {};
+          if (String(d.name || '').trim().length < 2) e.name = 'Enter the supplier name (at least 2 characters).';
+          const phone = digits(d.phone);
+          if (!phone) e.phone = 'A phone number is required.';
+          else if (phone.length < 7 || phone.length > 15) e.phone = 'Enter a valid phone number (7–15 digits).';
+          const email = String(d.email || '').trim();
+          if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) e.email = 'Enter a valid email address.';
+          if (this.form.mode === 'create') {
+            const op = Number(d.opening);
+            if (d.opening !== '' && (isNaN(op) || op < 0)) e.opening = 'Opening balance cannot be negative.';
+          }
+          this.form.errors = e;
+          return Object.keys(e).length === 0;
+        },
+        save() {
+          this.checkPhone();
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); return; }
+          this.form.busy = true;
+          try {
+            const d = this.form.data;
+            const patch = {
+              name: String(d.name).trim(), contact_person: String(d.contact_person || '').trim(), phone: String(d.phone).trim(),
+              email: String(d.email || '').trim(), address: String(d.address || '').trim(), tax_id: String(d.tax_id || '').trim(),
+              notes: String(d.notes || '').trim(), is_active: d.is_active ? 1 : 0,
+            };
+            if (this.form.mode === 'create') {
+              const rec = db.insert('suppliers', { ...patch, balance: 0 });
+              const opening = utils.round2(Number(d.opening) || 0);
+              if (opening > 0) {
+                ABM.ledger.supplier(rec.id, session.branchId(), 'opening_balance', 0, opening, { notes: 'Opening balance (carried over)' });
+              }
+              db.audit('supplier.create', 'supplier', rec.id, `Supplier ${rec.name} created${opening > 0 ? ' with opening balance ' + utils.money(opening) : ''}`);
+              ui.success(rec.name + ' added.');
+            } else {
+              const cur = db.find('suppliers', d.id);
+              if (!cur) throw new Error('This supplier no longer exists.');
+              db.update('suppliers', d.id, patch);
+              db.audit('supplier.update', 'supplier', d.id, `Supplier ${patch.name} updated`);
+              ui.success('Changes saved.');
+            }
+            this.form.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not save the supplier.');
+          } finally {
+            this.form.busy = false;
+          }
+        },
+        /** Delete straight from the list (a role that may delete suppliers but not edit them). */
+        removeRow(r) { this.form = { ...this.form, open: false, mode: 'edit', data: { ...blank(), id: r.id }, deletable: this.usage(r.id) }; return this.destroy(); },
+        async destroy() {
+          const id = this.form.data.id;
+          const cur = db.find('suppliers', id);
+          if (!cur) { ui.error('Supplier not found.'); this.form.open = false; this.compute(); return; }
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete suppliers.'); return; }
+          const check = this.usage(id);
+          this.form.deletable = check;
+          if (!check.ok) {
+            if (!cur.is_active) { ui.toast(cur.name + ' is already inactive.', 'info'); return; }
+            const ok = await ui.confirm({ title: 'Deactivate ' + cur.name + '?', message: 'This supplier has ' + check.reasons.join(', ') + ', so the record must be kept. Deactivating hides them from new purchases.', confirmText: 'Deactivate' });
+            if (!ok) return;
+            this.form.busy = true;
+            db.update('suppliers', id, { is_active: 0 });
+            db.audit('supplier.deactivate', 'supplier', id, `Supplier ${cur.name} deactivated (has ${check.reasons.join(', ')})`);
+            ui.success(cur.name + ' is now inactive.');
+            this.form.busy = false; this.form.open = false; this.compute();
+            return;
+          }
+          const ok = await ui.confirm({ title: 'Delete ' + cur.name + '?', message: 'This supplier has no purchases, products or ledger entries and will be permanently removed.', confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          this.form.busy = true;
+          db.remove('suppliers', id);
+          db.audit('supplier.delete', 'supplier', id, `Supplier ${cur.name} deleted`);
+          ui.success(cur.name + ' deleted.');
+          this.form.busy = false; this.form.open = false; this.compute();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

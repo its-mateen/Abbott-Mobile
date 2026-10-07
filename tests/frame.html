@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Test helper: viewport frame</title>
+  <style>
+    body { margin: 0; background: #444; }
+    iframe { display: block; border: 0; background: #fff; }
+  </style>
+</head>
+<body>
+  <!-- Test-only helper: ?page=dashboard.html&w=400&h=860 renders the page in an exact-width viewport
+       (headless Chromium refuses windows narrower than ~500px, so we frame the page instead). -->
+  <iframe id="f"></iframe>
+  <script>
+    const q = new URLSearchParams(location.search);
+    const f = document.getElementById('f');
+    f.width = q.get('w') || 400;
+    f.height = q.get('h') || 860;
+    f.src = '../' + (q.get('page') || 'dashboard.html');
+  </script>
+</body>
+</html>

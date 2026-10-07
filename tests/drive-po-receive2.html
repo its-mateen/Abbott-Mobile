@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: PO receive edge cases 2</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    const L = []; let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async (o) => { log('   confirm: ' + (o && o.message)); return true; };
+      ui.toast = () => {}; ui.warn = (m) => log('   warn: ' + m); ui.error = (m) => log('   error: ' + m); ui.success = () => {};
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        if (!body) throw new Error('no ' + fnName); (0, eval)(body);
+      };
+      const mk = (factory, q) => { history.replaceState(null, '', location.pathname + (q || '')); const o = factory(); o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {}; o.init(); return o; };
+
+      await source('purchase-create.html', 'purchaseCreatePage');
+      await source('purchase-view.html', 'purchaseViewPage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(mgr);
+      const BID = session.branchId();
+      const SUP = db.all('suppliers').find((s) => s.is_active).id;
+      const PA = db.all('products').find((p) => db.isStockTracked(p) && p.is_active && !db.isSerialized(p));
+      let poSeq = 800;
+      const mkPo = (items) => {
+        const po = db.insert('purchase_orders', { po_no: 'PO-' + db.branchCode(BID) + '-' + (++poSeq), branch_id: BID, supplier_id: SUP, order_date: utils.today(), expected_date: utils.addDays(utils.today(), 7), status: 'ordered', subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, terms: '', notes: '', created_by: mgr.id, ordered_at: utils.now(), closed_at: null, cancelled_at: null });
+        items.forEach((it) => db.insert('purchase_order_items', { po_id: po.id, product_id: it.pid, quantity: it.qty, received_quantity: 0, unit_cost: db.find('products', it.pid).cost_price, total: 0, notes: '' }));
+        return po;
+      };
+      const recv = (id) => db.where('purchase_order_items', { po_id: id }).map((i) => i.received_quantity);
+
+      /* === A: bulk goods received, product later flipped to serialized, then the delivery is cancelled === */
+      log('=== A receive as bulk, flip the product to serialized, then cancel the delivery');
+      const poA = mkPo([{ pid: PA.id, qty: 6 }]);
+      const before = stock.qty(BID, PA.id);
+      let r = mk(purchaseCreatePage, '?po=' + poA.id); r.form.pay_amount = 0;
+      noNav(() => r.save());
+      const g = db.all('purchases').slice(-1)[0];
+      eq(stock.qty(BID, PA.id), before + 6, 'A 6 units received');
+      db.update('products', PA.id, { is_serialized: 1, is_imei_tracked: 1 });   // catalogue corrected afterwards
+      let pv = mk(purchaseViewPage, '?id=' + g.id);
+      log('   cancelCheck = ' + JSON.stringify(pv.cancelCheck));
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(db.find('purchases', g.id).status, 'cancelled', 'A the purchase is marked cancelled');
+      eq(stock.qty(BID, PA.id), before, 'A the 6 units must leave stock again');
+      eq(recv(poA.id)[0], 0, 'A the order line is uncredited');
+      db.update('products', PA.id, { is_serialized: 0, is_imei_tracked: 0 });
+
+      /* === B: the stale-tab pre-fill shows no over-delivery warning === */
+      log('=== B stale pre-fill vs the over-delivery warning');
+      const poB = mkPo([{ pid: PA.id, qty: 5 }]);
+      const tab1 = mk(purchaseCreatePage, '?po=' + poB.id);
+      const tab2 = mk(purchaseCreatePage, '?po=' + poB.id); tab2.form.pay_amount = 0; noNav(() => tab2.save());
+      log('   order is now ' + db.find('purchase_orders', poB.id).status + ', really outstanding = ' + (5 - recv(poB.id)[0]));
+      log('   tab 1 still shows poRemaining=' + tab1.lines[0].poRemaining + ' qty=' + tab1.lines[0].qty + ' banner outstanding=' + tab1.poRemainingUnits);
+      eq(tab1.lines[0].qty > tab1.lines[0].poRemaining, true, 'B the over-delivery hint would be shown to the operator');
+
+      /* === C: the PO holds a product that was deleted from the catalogue === */
+      log('=== C the PO line product row is deleted after delivery, then cancel');
+      const PD = db.all('products').find((p) => db.isStockTracked(p) && p.is_active && !db.isSerialized(p) && p.id !== PA.id);
+      const poC = mkPo([{ pid: PD.id, qty: 4 }]);
+      let rc = mk(purchaseCreatePage, '?po=' + poC.id); rc.form.pay_amount = 0; noNav(() => rc.save());
+      const gc = db.all('purchases').slice(-1)[0];
+      const beforeC = stock.qty(BID, PD.id);
+      db.remove('products', PD.id);
+      let pvc = mk(purchaseViewPage, '?id=' + gc.id);
+      log('   cancelCheck = ' + JSON.stringify(pvc.cancelCheck));
+      await noNavAsync(() => pvc.cancelPurchase());
+      log('   after: purchase=' + db.find('purchases', gc.id).status + ' stock=' + stock.qty(BID, PD.id) + ' (was ' + beforeC + ') recv=' + recv(poC.id)[0]);
+
+      /* === D: a delivery received, then the order cancelled, then the delivery cancelled === */
+      log('=== D cancel the order first, then cancel the delivery');
+      const poD = mkPo([{ pid: PA.id, qty: 6 }]);
+      let rd = mk(purchaseCreatePage, '?po=' + poD.id); rd.lines[0].qty = 2; rd.recalc(); rd.form.pay_amount = 0; noNav(() => rd.save());
+      const gd = db.all('purchases').slice(-1)[0];
+      let ov = mk(purchaseOrderViewPage, '?id=' + poD.id);
+      await noNavAsync(() => ov.cancelOrder());
+      eq(db.find('purchase_orders', poD.id).status, 'cancelled', 'D order cancelled with 2 of 6 delivered');
+      let pvd = mk(purchaseViewPage, '?id=' + gd.id);
+      await noNavAsync(() => pvd.cancelPurchase());
+      eq(recv(poD.id)[0], 0, 'D the cancelled delivery is uncredited');
+      eq(db.find('purchase_orders', poD.id).status, 'cancelled', 'D the order stays cancelled');
+
+      /* === E: closed short, then the only delivery is cancelled === */
+      log('=== E close short, then cancel the delivery');
+      const poE = mkPo([{ pid: PA.id, qty: 6 }]);
+      let re = mk(purchaseCreatePage, '?po=' + poE.id); re.lines[0].qty = 2; re.recalc(); re.form.pay_amount = 0; noNav(() => re.save());
+      const ge = db.all('purchases').slice(-1)[0];
+      let ove = mk(purchaseOrderViewPage, '?id=' + poE.id);
+      await noNavAsync(() => ove.closeShort());
+      eq(db.find('purchase_orders', poE.id).status, 'completed', 'E closed short');
+      let pve = mk(purchaseViewPage, '?id=' + ge.id);
+      await noNavAsync(() => pve.cancelPurchase());
+      log('   after cancelling the only delivery of a short-closed order: status=' + db.find('purchase_orders', poE.id).status + ' recv=' + recv(poE.id)[0] + ' closed_at=' + db.find('purchase_orders', poE.id).closed_at);
+
+      /* === F: partial-line re-open when a delivery covered several lines unevenly === */
+      log('=== F receipt with discount + tax posts the right amount');
+      const poF = mkPo([{ pid: PA.id, qty: 4 }]);
+      const balF = db.find('suppliers', SUP).balance;
+      let rf = mk(purchaseCreatePage, '?po=' + poF.id);
+      rf.form.discount = 50; rf.form.tax = 30; rf.form.pay_amount = 0;
+      noNav(() => rf.save());
+      const gf = db.all('purchases').slice(-1)[0];
+      eq(utils.round2(gf.subtotal - 50 + 30), gf.total, 'F stored total = subtotal - discount + tax');
+      eq(utils.round2(db.find('suppliers', SUP).balance - balF), gf.total, 'F the supplier is owed exactly the receipt total');
+      let pvf = mk(purchaseViewPage, '?id=' + gf.id);
+      await noNavAsync(() => pvf.cancelPurchase());
+      eq(utils.round2(db.find('suppliers', SUP).balance), utils.round2(balF), 'F cancel reverses exactly the receipt total');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRV2 ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

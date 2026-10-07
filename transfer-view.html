@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Transfer · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block; }
+      .no-print { display: none !important; }
+      .tnote table { border-collapse: collapse; width: 100%; }
+      .tnote th, .tnote td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; vertical-align: top; }
+      .tnote th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="transfer-view" data-title="Transfer Details" data-perm="transfers.view">
+  <main x-data="transferViewPage()" @keydown.escape.window="closeModals()">
+    <!-- Not found -->
+    <template x-if="state === 'notfound'">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('transfer','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Transfer not found</h2>
+          <p class="text-sm text-slate-600 mt-2">No stock transfer matches id <span class="mono" x-text="requestedId || '(none)'"></span>. It may have been deleted or the link is incomplete.</p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap"><a href="transfers.html" class="btn btn-primary">Back to transfers</a><a href="transfer-create.html" class="btn btn-secondary" x-show="ABM.session.can('transfers.add')">Request a transfer</a></div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Other branches -->
+    <template x-if="state === 'wrongbranch'">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center mb-4" x-html="ABM.icon('building','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Transfer belongs to other branches</h2>
+          <p class="text-sm text-slate-600 mt-2"><span class="mono" x-text="t ? t.transfer_no : ''"></span> moves stock between <b x-text="t ? ABM.db.branchName(t.from_branch_id) : ''"></b> and <b x-text="t ? ABM.db.branchName(t.to_branch_id) : ''"></b>. Only those branches (or a Super Admin) can open it.</p>
+          <div class="mt-6 flex justify-center gap-2"><a href="transfers.html" class="btn btn-primary">Back to transfers</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="state === 'ok'">
+      <div>
+        <div class="no-print">
+          <!-- Header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="transfers.html" class="hover:text-navy-700">Stock transfers</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span class="mono truncate" x-text="t.transfer_no"></span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title mono !text-xl sm:!text-2xl" x-text="t.transfer_no"></h2>
+                <span x-html="$badge(t.status)"></span>
+              </div>
+              <p class="page-subtitle"><b x-text="fromBranch.name"></b> <span x-html="ABM.icon('arrow-right','w-3 h-3 inline-block align-middle')"></span> <b x-text="toBranch.name"></b> · requested by <span x-text="ABM.db.userName(t.requested_by)"></span> · <span x-text="ABM.utils.datetime(t.requested_at)"></span></p>
+            </div>
+            <div class="page-actions">
+              <button type="button" class="btn btn-secondary" @click="ABM.ui.print()"><span x-html="ABM.icon('printer')"></span>Transfer note</button>
+              <template x-if="canApprove">
+                <button type="button" class="btn btn-primary" data-approve :disabled="busy" @click="approve()"><span x-html="ABM.icon('check')"></span>Approve</button>
+              </template>
+              <template x-if="canApprove">
+                <button type="button" class="btn btn-danger-soft" data-reject :disabled="busy" @click="openReject()"><span x-html="ABM.icon('x-circle')"></span>Reject</button>
+              </template>
+              <template x-if="canShip">
+                <button type="button" class="btn btn-primary" data-ship :disabled="busy" @click="openShip()"><span x-html="ABM.icon('truck')"></span>Ship units</button>
+              </template>
+              <template x-if="canReceive">
+                <button type="button" class="btn btn-primary" data-receive :disabled="busy" @click="openReceive()"><span x-html="ABM.icon('scan')"></span>Inspect &amp; receive</button>
+              </template>
+              <template x-if="canCancel">
+                <button type="button" class="btn btn-danger-soft" data-cancel :disabled="busy" @click="cancel()"><span x-html="ABM.icon('x')"></span>Cancel</button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Waiting banners -->
+          <div class="alert alert-warning mb-4" x-show="t.status === 'pending'">
+            <span x-html="ABM.icon('clock')"></span>
+            <div><b>Waiting for <span x-text="fromBranch.name"></span> to approve.</b> Nothing has left the source branch yet. <span x-show="canApprove">You can approve or reject this request.</span><span x-show="!canApprove">Only the source branch manager or a Super Admin can decide.</span></div>
+          </div>
+          <div class="alert alert-info mb-4" x-show="t.status === 'approved'">
+            <span x-html="ABM.icon('truck')"></span>
+            <div><b>Approved — waiting for <span x-text="fromBranch.name"></span> to ship.</b> Stock leaves the source branch when the units are picked and shipped. <span x-show="canShip">Use <b>Ship units</b> to pick them now.</span></div>
+          </div>
+          <div class="alert alert-info mb-4" x-show="t.status === 'shipped'">
+            <span x-html="ABM.icon('scan')"></span>
+            <div><b><span x-text="ABM.utils.num(totals.shipped)"></span> unit(s) in transit — waiting for <span x-text="toBranch.name"></span> to inspect and receive.</b> They are out of <span x-text="fromBranch.code"></span> stock and not yet sellable at <span x-text="toBranch.code"></span>. <span x-show="canReceive">Use <b>Inspect &amp; receive</b> to check them in.</span></div>
+          </div>
+          <div class="alert alert-success mb-4" x-show="t.status === 'received'">
+            <span x-html="ABM.icon('check-circle')"></span>
+            <div><b>Completed.</b> <span x-text="ABM.utils.num(totals.received)"></span> of <span x-text="ABM.utils.num(totals.shipped)"></span> unit(s) received at <span x-text="toBranch.name"></span> on <span x-text="ABM.utils.datetime(t.received_at)"></span><span x-show="totals.missing"> · <b class="text-rose-600"><span x-text="totals.missing"></span> missing</b> returned to <span x-text="fromBranch.code"></span></span><span x-show="totals.damaged"> · <b class="text-rose-600"><span x-text="totals.damaged"></span> damaged</b> written off</span>.</div>
+          </div>
+          <div class="alert alert-danger mb-4" x-show="t.status === 'rejected'">
+            <span x-html="ABM.icon('x-circle')"></span>
+            <div><b>Rejected by <span x-text="ABM.db.userName(t.approved_by)"></span></b><span x-show="t.approved_at"> on <span x-text="ABM.utils.datetime(t.approved_at)"></span></span>.<span x-show="t.rejection_reason"> Reason: <span x-text="t.rejection_reason"></span></span></div>
+          </div>
+          <div class="alert alert-warning mb-4" x-show="t.status === 'cancelled'">
+            <span x-html="ABM.icon('warning')"></span>
+            <div><b>This request was cancelled</b><span x-show="t.cancelled_at"> on <span x-text="ABM.utils.datetime(t.cancelled_at)"></span></span><span x-show="t.cancelled_by"> by <span x-text="ABM.db.userName(t.cancelled_by)"></span></span>. No stock was moved.</div>
+          </div>
+
+          <!-- Pipeline -->
+          <div class="card mb-4">
+            <div class="card-header">
+              <div><div class="card-title">Transfer progress</div><div class="card-subtitle" x-text="progressHint"></div></div>
+              <span class="text-xs text-slate-500 hidden sm:block"><span x-text="ABM.utils.num(totals.requested)"></span> requested · <span x-text="ABM.utils.num(totals.shipped)"></span> shipped · <span x-text="ABM.utils.num(totals.received)"></span> received</span>
+            </div>
+            <div class="card-body">
+              <div class="pipeline">
+                <template x-for="(s, i) in steps" :key="s.key">
+                  <div class="contents">
+                    <div class="pipeline-step" :class="{ done: s.done, current: s.current, failed: s.failed }">
+                      <span class="dot" x-html="s.done ? ABM.icon('check','w-3.5 h-3.5') : (s.failed ? ABM.icon('x','w-3.5 h-3.5') : String(s.n))"></span>
+                      <div class="min-w-0">
+                        <div x-text="s.label"></div>
+                        <div class="text-[11px] font-normal text-slate-400 hidden sm:block" x-text="s.at ? ABM.utils.datetime(s.at) : (s.current ? 'Pending' : '')"></div>
+                      </div>
+                    </div>
+                    <div class="pipeline-sep" :class="s.done && 'done'" x-show="i < steps.length - 1"></div>
+                  </div>
+                </template>
+              </div>
+              <div class="progress mt-4" :class="t.status === 'received' && 'progress-money'"><div :style="'width:' + progressPct + '%'"></div></div>
+            </div>
+          </div>
+
+          <!-- Route + details -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div class="card min-w-0">
+              <div class="card-header"><div><div class="card-title">From · source</div><div class="card-subtitle">Stock is taken from here</div></div><span class="badge badge-slate" x-text="fromBranch.code"></span></div>
+              <div class="card-body space-y-1.5 text-sm">
+                <div class="font-semibold text-slate-900" x-text="fromBranch.name"></div>
+                <div class="text-slate-500 flex items-start gap-2" x-show="fromBranch.address"><span class="flex-none text-slate-400" x-html="ABM.icon('map-pin','w-4 h-4')"></span><span class="min-w-0" x-text="fromBranch.address"></span></div>
+                <div class="text-slate-500 flex items-center gap-2" x-show="fromBranch.phone"><span class="flex-none text-slate-400" x-html="ABM.icon('phone-call','w-4 h-4')"></span><span x-text="fromBranch.phone"></span></div>
+                <div class="divider !my-2"></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Approved by</span><b class="text-slate-800 truncate" x-text="t.approved_by ? ABM.db.userName(t.approved_by) : '—'"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Shipped by</span><b class="text-slate-800 truncate" x-text="t.shipped_by ? ABM.db.userName(t.shipped_by) : '—'"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Shipped at</span><b class="text-slate-800 truncate" x-text="t.shipped_at ? ABM.utils.datetime(t.shipped_at) : '—'"></b></div>
+              </div>
+            </div>
+            <div class="card min-w-0">
+              <div class="card-header"><div><div class="card-title">To · destination</div><div class="card-subtitle">Stock lands here once received</div></div><span class="badge badge-green" x-text="toBranch.code"></span></div>
+              <div class="card-body space-y-1.5 text-sm">
+                <div class="font-semibold text-slate-900" x-text="toBranch.name"></div>
+                <div class="text-slate-500 flex items-start gap-2" x-show="toBranch.address"><span class="flex-none text-slate-400" x-html="ABM.icon('map-pin','w-4 h-4')"></span><span class="min-w-0" x-text="toBranch.address"></span></div>
+                <div class="text-slate-500 flex items-center gap-2" x-show="toBranch.phone"><span class="flex-none text-slate-400" x-html="ABM.icon('phone-call','w-4 h-4')"></span><span x-text="toBranch.phone"></span></div>
+                <div class="divider !my-2"></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Requested by</span><b class="text-slate-800 truncate" x-text="ABM.db.userName(t.requested_by)"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Received by</span><b class="text-slate-800 truncate" x-text="t.received_by ? ABM.db.userName(t.received_by) : '—'"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Received at</span><b class="text-slate-800 truncate" x-text="t.received_at ? ABM.utils.datetime(t.received_at) : '—'"></b></div>
+              </div>
+            </div>
+            <div class="card min-w-0">
+              <div class="card-header"><div><div class="card-title">Summary</div><div class="card-subtitle" x-text="items.length + ' line' + (items.length === 1 ? '' : 's')"></div></div></div>
+              <div class="card-body space-y-2 text-sm">
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Units requested</span><b class="tabular text-slate-800" x-text="ABM.utils.num(totals.requested)"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Units shipped</span><b class="tabular text-slate-800" x-text="ABM.utils.num(totals.shipped)"></b></div>
+                <div class="flex items-center justify-between gap-2"><span class="text-slate-500">Units received</span><b class="tabular text-emerald-700" x-text="ABM.utils.num(totals.received)"></b></div>
+                <div class="flex items-center justify-between gap-2" x-show="totals.missing"><span class="text-slate-500">Missing</span><b class="tabular text-rose-600" x-text="ABM.utils.num(totals.missing)"></b></div>
+                <div class="flex items-center justify-between gap-2" x-show="totals.damaged"><span class="text-slate-500">Damaged</span><b class="tabular text-rose-600" x-text="ABM.utils.num(totals.damaged)"></b></div>
+                <div class="divider !my-1"></div>
+                <div class="flex items-center justify-between gap-2"><span class="font-semibold text-slate-700">Value at cost</span><b class="text-base font-extrabold tabular text-slate-900 min-w-0 truncate" x-text="$money(totals.value)"></b></div>
+                <div class="pt-1" x-show="t.notes">
+                  <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Request notes</div>
+                  <p class="text-slate-600 mt-0.5" x-text="t.notes"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Items -->
+          <div class="card mt-4">
+            <div class="card-header">
+              <div><div class="card-title">Items</div><div class="card-subtitle">Requested vs shipped vs received · variance highlights shortfalls</div></div>
+              <span class="text-xs text-slate-500 hidden sm:block"><span x-text="items.length"></span> line<span x-text="items.length === 1 ? '' : 's'"></span></span>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th class="num">Requested</th>
+                    <th class="num hidden sm:table-cell">Shipped</th>
+                    <th class="num hidden sm:table-cell">Received</th>
+                    <th class="num">Variance</th>
+                    <th class="num hidden lg:table-cell">Unit cost</th>
+                    <th class="num hidden lg:table-cell">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="it in items" :key="it.id">
+                    <tr>
+                      <td>
+                        <div class="flex items-start gap-2 min-w-0">
+                          <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center" :class="it.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(it.icon,'w-4 h-4')"></span>
+                          <div class="min-w-0">
+                            <a :href="'product-view.html?id=' + it.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[11rem] sm:max-w-[18rem]" x-text="it.label"></a>
+                            <div class="text-[11px] text-slate-400 truncate"><span class="mono" x-text="it.sku"></span><span x-show="it.serialized"> · <span x-text="it.serialLabel"></span> tracked</span></div>
+                            <div class="text-[11px] text-slate-500 sm:hidden">shipped <b x-text="it.shipped"></b> · received <b x-text="it.received"></b></div>
+                            <div class="flex flex-wrap gap-1 mt-1.5" x-show="it.units.length">
+                              <template x-for="u in it.units" :key="u.id">
+                                <a :href="'report-imei-history.html?imei=' + encodeURIComponent(u.imei)" class="badge" :class="u.badge" :title="u.title"><span class="mono" x-text="u.imei"></span></a>
+                              </template>
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="num font-semibold" x-text="it.requested"></td>
+                      <td class="num hidden sm:table-cell text-slate-600" x-text="['shipped','received'].includes(t.status) ? it.shipped : '—'"></td>
+                      <td class="num hidden sm:table-cell" :class="it.received ? 'text-emerald-700 font-semibold' : 'text-slate-400'" x-text="t.status === 'received' ? it.received : '—'"></td>
+                      <td class="num">
+                        <span :class="it.variance < 0 ? 'text-rose-600 font-semibold' : it.variance > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'" x-text="t.status === 'received' ? (it.variance > 0 ? '+' + it.variance : it.variance) : '—'"></span>
+                        <div class="text-[11px] text-rose-600" x-show="it.missing || it.damaged"><span x-show="it.missing"><span x-text="it.missing"></span> missing</span><span x-show="it.missing && it.damaged"> · </span><span x-show="it.damaged"><span x-text="it.damaged"></span> damaged</span></div>
+                      </td>
+                      <td class="num hidden lg:table-cell text-slate-600" x-text="$money(it.unit_cost, {decimals:0})"></td>
+                      <td class="num hidden lg:table-cell font-semibold" x-text="$money(it.value, {decimals:0})"></td>
+                    </tr>
+                  </template>
+                  <template x-if="!items.length">
+                    <tr><td colspan="7"><div class="empty"><span x-html="ABM.icon('cube')"></span><div class="empty-title">This transfer has no lines</div></div></td></tr>
+                  </template>
+                </tbody>
+                <tfoot x-show="items.length">
+                  <tr>
+                    <td>Totals</td>
+                    <td class="num" x-text="ABM.utils.num(totals.requested)"></td>
+                    <td class="num hidden sm:table-cell" x-text="ABM.utils.num(totals.shipped)"></td>
+                    <td class="num hidden sm:table-cell text-emerald-700" x-text="ABM.utils.num(totals.received)"></td>
+                    <td class="num" :class="totals.variance < 0 ? 'text-rose-600' : ''" x-text="t.status === 'received' ? totals.variance : '—'"></td>
+                    <td class="hidden lg:table-cell"></td>
+                    <td class="num hidden lg:table-cell" x-text="$money(totals.value, {decimals:0})"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Activity -->
+          <div class="card mt-4">
+            <div class="card-header"><div><div class="card-title">Activity</div><div class="card-subtitle">Every step of this transfer</div></div></div>
+            <div class="card-body">
+              <div class="timeline">
+                <template x-for="e in timeline" :key="e.key">
+                  <div class="timeline-item" :class="e.done && 'done'">
+                    <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span class="text-sm font-semibold text-slate-800" x-text="e.title"></span>
+                      <span class="text-xs text-slate-400" x-text="e.at ? ABM.utils.datetime(e.at) : ''"></span>
+                      <span class="text-xs text-slate-400" x-show="e.at">· <span x-text="ABM.utils.timeAgo(e.at)"></span></span>
+                    </div>
+                    <div class="text-sm text-slate-600 mt-0.5" x-text="e.text"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ===================== PRINT: Transfer note ===================== -->
+        <div class="print-only print-area tnote text-slate-900">
+          <div class="flex justify-between items-start gap-6 border-b-2 border-slate-900 pb-3">
+            <div class="min-w-0">
+              <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[16mm] w-auto" onerror="ABM.brand.onError(this)">
+              <div class="text-2xl font-extrabold" x-text="settings.company_name || 'Abbott Mobile'"></div>
+              <div class="text-xs" x-text="settings.company_tagline || ''"></div>
+            </div>
+            <div class="text-right flex-none">
+              <div class="text-lg font-extrabold uppercase tracking-wide">Stock Transfer Note</div>
+              <div class="mono text-base font-semibold" x-text="t.transfer_no"></div>
+              <div class="text-xs">Requested: <b x-text="$date(t.requested_at)"></b></div>
+              <div class="text-xs uppercase font-bold mt-1" x-text="ABM.ui.statusLabel(t.status)"></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 print:grid-cols-3 gap-6 mt-4 text-xs">
+            <div>
+              <div class="font-bold uppercase text-[10px] tracking-wider text-slate-500 mb-1">From (source)</div>
+              <div class="font-semibold text-sm" x-text="fromBranch.name"></div>
+              <div x-text="fromBranch.address || ''"></div>
+              <div x-text="fromBranch.phone || ''"></div>
+              <div x-show="fromBranch.tax_id" x-text="fromBranch.tax_id || ''"></div>
+            </div>
+            <div>
+              <div class="font-bold uppercase text-[10px] tracking-wider text-slate-500 mb-1">To (destination)</div>
+              <div class="font-semibold text-sm" x-text="toBranch.name"></div>
+              <div x-text="toBranch.address || ''"></div>
+              <div x-text="toBranch.phone || ''"></div>
+              <div x-show="toBranch.tax_id" x-text="toBranch.tax_id || ''"></div>
+            </div>
+            <div>
+              <div class="font-bold uppercase text-[10px] tracking-wider text-slate-500 mb-1">Workflow</div>
+              <table class="w-full !border-0"><tbody>
+                <tr><td class="!border-0 !p-0 !py-0.5 text-slate-500 w-20">Requested</td><td class="!border-0 !p-0 !py-0.5" x-text="ABM.db.userName(t.requested_by) + ' · ' + ABM.utils.datetime(t.requested_at)"></td></tr>
+                <tr><td class="!border-0 !p-0 !py-0.5 text-slate-500">Approved</td><td class="!border-0 !p-0 !py-0.5" x-text="t.approved_at ? ABM.db.userName(t.approved_by) + ' · ' + ABM.utils.datetime(t.approved_at) : '—'"></td></tr>
+                <tr><td class="!border-0 !p-0 !py-0.5 text-slate-500">Shipped</td><td class="!border-0 !p-0 !py-0.5" x-text="t.shipped_at ? ABM.db.userName(t.shipped_by) + ' · ' + ABM.utils.datetime(t.shipped_at) : '—'"></td></tr>
+                <tr><td class="!border-0 !p-0 !py-0.5 text-slate-500">Received</td><td class="!border-0 !p-0 !py-0.5" x-text="t.received_at ? ABM.db.userName(t.received_by) + ' · ' + ABM.utils.datetime(t.received_at) : '—'"></td></tr>
+              </tbody></table>
+            </div>
+          </div>
+          <table class="mt-4">
+            <thead><tr><th style="width:4%">#</th><th>Product</th><th style="width:30%">Units (IMEI / serial)</th><th class="!text-right" style="width:9%">Req.</th><th class="!text-right" style="width:9%">Shipped</th><th class="!text-right" style="width:9%">Recv.</th></tr></thead>
+            <tbody>
+              <template x-for="(it, i) in items" :key="'p' + it.id">
+                <tr>
+                  <td x-text="i + 1"></td>
+                  <td><div class="font-semibold" x-text="it.label"></div><div class="text-[10px] text-slate-500"><span class="mono" x-text="it.sku"></span> · <span x-text="ABM.db.productTypeLabel(it.product_type)"></span></div></td>
+                  <td class="mono text-[10px] leading-4" x-text="it.units.length ? it.units.map(u => u.imei).join(', ') : '—'"></td>
+                  <td class="!text-right" x-text="it.requested"></td>
+                  <td class="!text-right" x-text="it.shipped"></td>
+                  <td class="!text-right" x-text="it.received"></td>
+                </tr>
+              </template>
+            </tbody>
+            <tfoot>
+              <tr><td colspan="3" class="!text-right font-bold">Totals</td><td class="!text-right font-bold" x-text="totals.requested"></td><td class="!text-right font-bold" x-text="totals.shipped"></td><td class="!text-right font-bold" x-text="totals.received"></td></tr>
+            </tfoot>
+          </table>
+          <div class="text-xs mt-3" x-show="t.notes"><b>Notes:</b> <span x-text="t.notes"></span></div>
+          <div class="text-xs mt-1" x-show="t.rejection_reason"><b>Rejection reason:</b> <span x-text="t.rejection_reason"></span></div>
+          <div class="grid grid-cols-1 print:grid-cols-3 gap-8 mt-12 text-xs">
+            <div class="border-t border-slate-900 pt-1">Packed / issued by (<span x-text="fromBranch.code"></span>)</div>
+            <div class="border-t border-slate-900 pt-1">Carrier / rider</div>
+            <div class="border-t border-slate-900 pt-1">Received &amp; checked by (<span x-text="toBranch.code"></span>)</div>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-6">Printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="ABM.session.user() ? ABM.session.user().name : ''"></span> · <span x-text="settings.company_name || 'Abbott Mobile'"></span></div>
+        </div>
+
+        <!-- ============================ Reject modal ============================ -->
+        <div x-show="reject.open" x-cloak class="modal-backdrop no-print" @click.self="reject.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="rejectTitle">
+            <form @submit.prevent="doReject()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="rejectTitle">Reject transfer request</div>
+                  <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="t.transfer_no"></span> · <span x-text="fromBranch.code + ' → ' + toBranch.code"></span></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="reject.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="alert alert-warning"><span x-html="ABM.icon('warning')"></span><div>The requesting branch will see this reason on the transfer. No stock is moved.</div></div>
+                <div>
+                  <label class="label" for="rj-reason">Reason <span class="req">*</span></label>
+                  <textarea id="rj-reason" x-ref="rejectReason" class="textarea" x-model="reject.reason" maxlength="300" :class="reject.error && 'is-invalid'" placeholder="e.g. Units already committed to a corporate order at this branch"></textarea>
+                  <p class="field-error" x-show="reject.error" x-text="reject.error"></p>
+                  <p class="help"><span x-text="300 - (reject.reason || '').length"></span> characters left.</p>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="reject.open = false">Cancel</button>
+                <button type="submit" class="btn btn-danger" :disabled="reject.busy"><span x-html="ABM.icon('x-circle')"></span>Reject request</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- ============================= Ship modal ============================= -->
+        <div x-show="ship.open" x-cloak class="modal-backdrop no-print" @click.self="ship.open = false">
+          <div class="modal-panel modal-xl" role="dialog" aria-modal="true" aria-labelledby="shipTitle">
+            <div class="modal-header">
+              <div class="min-w-0">
+                <div class="modal-title" id="shipTitle">Pick &amp; ship units</div>
+                <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="t.transfer_no"></span> · leaving <span x-text="fromBranch.name"></span></div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon" @click="ship.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+            </div>
+            <div class="modal-body space-y-4">
+              <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><div>Picked units leave <b x-text="fromBranch.code"></b> stock immediately and are marked <b>in transit</b> until <b x-text="toBranch.code"></b> receives them.</div></div>
+
+              <template x-for="line in ship.lines" :key="'s' + line.item_id">
+                <div class="rounded-xl border p-3 min-w-0" :class="shipLineError(line) ? 'border-rose-300' : 'border-slate-200'">
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-slate-800 truncate" x-text="line.label"></div>
+                      <div class="text-xs text-slate-500">requested <b x-text="line.requested"></b> · sellable at <span x-text="fromBranch.code"></span> <b :class="line.available < line.requested ? 'text-rose-600' : 'text-emerald-700'" x-text="line.available"></b></div>
+                    </div>
+                    <span class="badge flex-none" :class="shipLineCount(line) === line.required && line.required > 0 ? 'badge-green' : 'badge-amber'" x-text="shipLineCount(line) + ' / ' + line.required + (line.serialized ? ' units' : ' qty')"></span>
+                  </div>
+
+                  <template x-if="line.serialized">
+                    <div class="mt-3">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <div class="input-icon flex-1 min-w-[10rem]">
+                          <span x-html="ABM.icon('scan')"></span>
+                          <input type="text" class="input input-sm mono" :placeholder="'Scan ' + line.serialLabel + ' to tick'" x-model="line.scan" @keydown.enter.prevent="shipScan(line)" autocomplete="off" :aria-label="'Scan ' + line.serialLabel">
+                        </div>
+                        <button type="button" class="btn btn-secondary btn-sm" @click="shipAutoPick(line)">Auto-pick <span x-text="line.required"></span></button>
+                        <button type="button" class="btn btn-ghost btn-sm" @click="line.units.forEach(u => u.picked = false)">Clear</button>
+                      </div>
+                      <div class="mt-2 rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                        <template x-for="u in line.units" :key="u.id">
+                          <label class="flex items-center gap-2 px-3 py-2 cursor-pointer min-w-0" :class="u.picked && 'bg-navy-50'">
+                            <input type="checkbox" class="checkbox flex-none" :checked="u.picked" @change="toggleShipUnit(line, u)" :aria-label="'Ship ' + u.imei">
+                            <span class="mono text-sm font-medium text-slate-800 truncate flex-1 min-w-0" x-text="u.imei"></span>
+                            <span class="flex-none" x-html="$badge(u.status)"></span>
+                            <span class="flex-none text-xs text-slate-500 tabular hidden sm:block" x-text="$money(u.cost_price, {decimals:0})"></span>
+                          </label>
+                        </template>
+                        <template x-if="!line.units.length"><div class="px-3 py-4 text-sm text-slate-500 text-center">No sellable units at <span x-text="fromBranch.code"></span> — this line ships 0.</div></template>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template x-if="!line.serialized">
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div class="min-w-0">
+                        <label class="label">Quantity to ship</label>
+                        <div class="input-group"><input type="number" min="0" step="1" :max="line.required" class="input input-sm" x-model.number="line.qty" :aria-label="'Quantity for ' + line.label"><span class="addon" x-text="'of ' + line.required"></span></div>
+                      </div>
+                      <div class="min-w-0 flex items-end">
+                        <p class="help !mt-0">Stock at <span x-text="fromBranch.code"></span> drops by this quantity when you confirm.</p>
+                      </div>
+                    </div>
+                  </template>
+                  <p class="field-error mt-2" x-show="shipLineError(line)" x-text="shipLineError(line)"></p>
+                </div>
+              </template>
+
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span class="text-slate-600">Shipping <b class="text-slate-900" x-text="ABM.utils.num(shipTotals.units)"></b> unit(s) in <b class="text-slate-900" x-text="shipTotals.lines"></b> line(s)</span>
+                <span class="badge" :class="shipTotals.ok ? 'badge-green' : 'badge-amber'" x-text="shipTotals.ok ? 'Ready to ship' : 'Selection incomplete'"></span>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="ship.open = false">Cancel</button>
+              <button type="button" class="btn btn-primary" :disabled="ship.busy || !shipTotals.ok" @click="doShip()"><span x-html="ABM.icon('truck')"></span><span x-text="'Ship ' + ABM.utils.num(shipTotals.units) + ' unit' + (shipTotals.units === 1 ? '' : 's')"></span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- =========================== Receive modal =========================== -->
+        <div x-show="recv.open" x-cloak class="modal-backdrop no-print" @click.self="recv.open = false">
+          <div class="modal-panel modal-xl" role="dialog" aria-modal="true" aria-labelledby="recvTitle">
+            <div class="modal-header">
+              <div class="min-w-0">
+                <div class="modal-title" id="recvTitle">Inspect &amp; receive</div>
+                <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="t.transfer_no"></span> · arriving at <span x-text="toBranch.name"></span></div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon" @click="recv.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+            </div>
+            <div class="modal-body space-y-4">
+              <div class="input-icon">
+                <span x-html="ABM.icon('scan')"></span>
+                <input x-ref="recvScan" type="text" class="input mono" placeholder="Scan any IMEI / serial to tick it off" x-model="recv.scan" @keydown.enter.prevent="recvScanTick()" autocomplete="off" aria-label="Scan a unit">
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-xs">
+                <span class="badge badge-green"><span x-text="recvTotals.ok"></span> OK</span>
+                <span class="badge badge-amber"><span x-text="recvTotals.missing"></span> missing</span>
+                <span class="badge badge-red"><span x-text="recvTotals.damaged"></span> damaged</span>
+                <span class="text-slate-500"><b x-text="recvTotals.scanned"></b> of <span x-text="recvTotals.units"></span> serialized unit(s) scanned</span>
+              </div>
+
+              <template x-for="line in recv.lines" :key="'r' + line.item_id">
+                <div class="rounded-xl border p-3 min-w-0" :class="recvLineError(line) ? 'border-rose-300' : 'border-slate-200'">
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="font-semibold text-slate-800 truncate" x-text="line.label"></div>
+                      <div class="text-xs text-slate-500">shipped <b x-text="line.shipped"></b><span x-show="line.serialized"> · <span x-text="line.serialLabel"></span> tracked</span></div>
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-none" x-show="line.serialized">
+                      <button type="button" class="btn btn-secondary btn-sm" @click="line.units.forEach(u => { if (u.ready) u.condition = 'ok' })">All OK</button>
+                    </div>
+                  </div>
+
+                  <template x-if="line.serialized">
+                    <div class="mt-2 rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                      <template x-for="u in line.units" :key="u.id">
+                        <div class="px-3 py-2 min-w-0" :class="u.scanned && 'bg-emerald-50'">
+                          <div class="flex flex-wrap items-center justify-between gap-2 min-w-0">
+                            <div class="flex items-center gap-2 min-w-0">
+                              <span class="flex-none" :class="u.condition === 'ok' ? 'text-emerald-600' : u.condition === 'damaged' ? 'text-rose-600' : 'text-amber-600'" x-html="ABM.icon(u.condition === 'ok' ? 'check-circle' : u.condition === 'damaged' ? 'warning' : 'x-circle','w-4 h-4')"></span>
+                              <span class="mono text-sm font-medium text-slate-800 truncate min-w-0" x-text="u.imei"></span>
+                            </div>
+                            <div class="btn-group flex-none" x-show="u.ready">
+                              <button type="button" class="btn btn-sm" :class="u.condition === 'ok' && 'active'" @click="u.condition = 'ok'">OK</button>
+                              <button type="button" class="btn btn-sm" :class="u.condition === 'missing' && 'active'" @click="u.condition = 'missing'">Missing</button>
+                              <button type="button" class="btn btn-sm" :class="u.condition === 'damaged' && 'active'" @click="u.condition = 'damaged'">Damaged</button>
+                            </div>
+                            <span class="badge badge-slate flex-none" x-show="!u.ready">Already <span x-text="ABM.ui.statusLabel(u.status)"></span></span>
+                          </div>
+                        </div>
+                      </template>
+                      <template x-if="!line.units.length"><div class="px-3 py-4 text-sm text-slate-500 text-center">No serialized units were shipped on this line.</div></template>
+                    </div>
+                  </template>
+
+                  <template x-if="!line.serialized">
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div class="min-w-0">
+                        <label class="label">Quantity received</label>
+                        <div class="input-group"><input type="number" min="0" step="1" :max="line.shipped" class="input input-sm" x-model.number="line.qty" :aria-label="'Received quantity for ' + line.label"><span class="addon" x-text="'of ' + line.shipped"></span></div>
+                      </div>
+                      <div class="min-w-0 flex items-end">
+                        <p class="help !mt-0" x-show="line.shipped - (Number(line.qty) || 0) > 0"><b class="text-amber-700"><span x-text="line.shipped - (Number(line.qty) || 0)"></span> short</b> — returned to <span x-text="fromBranch.code"></span> stock.</p>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div class="mt-3">
+                    <label class="label">Inspection note</label>
+                    <input type="text" class="input input-sm" x-model="line.note" maxlength="200" placeholder="Optional — box damaged, seal broken, short delivery…" :aria-label="'Note for ' + line.label">
+                  </div>
+                  <p class="field-error mt-2" x-show="recvLineError(line)" x-text="recvLineError(line)"></p>
+                </div>
+              </template>
+
+              <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><div><b>OK</b> units become sellable at <b x-text="toBranch.code"></b>. <b>Missing</b> units go back to <b x-text="fromBranch.code"></b> stock. <b>Damaged</b> units are received and immediately written off as defective.</div></div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="recv.open = false">Cancel</button>
+              <button type="button" class="btn btn-money" :disabled="recv.busy || !recvTotals.valid || !recv.lines.length" @click="doReceive()"><span x-html="ABM.icon('check-circle')"></span><span x-text="'Receive ' + ABM.utils.num(recvTotals.received) + ' unit' + (recvTotals.received === 1 ? '' : 's')"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function transferViewPage() {
+      const { db, utils, ui, session, stock } = ABM;
+      return {
+        requestedId: utils.qs('id', ''),
+        state: 'notfound',
+        t: null, items: [], settings: db.settings(),
+        me: session.user() || { id: null, name: '' },
+        myBranch: session.branchId(),
+        isSuperAdmin: session.isSuperAdmin(),
+        isManager: session.isManager(),
+        busy: false,
+        reject: { open: false, reason: '', error: '', busy: false },
+        ship: { open: false, busy: false, lines: [] },
+        recv: { open: false, busy: false, lines: [], scan: '' },
+
+        init() {
+          this.load();
+          if (this.state !== 'ok') return;
+          // deep links from the list page: transfer-view.html?id=5&action=ship|receive|reject
+          const action = utils.qs('action', '');
+          if (action === 'ship' && this.canShip) this.openShip();
+          else if (action === 'receive' && this.canReceive) this.openReceive();
+          else if (action === 'reject' && this.canApprove) this.openReject();
+          else if (action === 'approve' && this.canApprove) this.approve();
+          else if (action === 'cancel' && this.canCancel) this.cancel();
+        },
+
+        load() {
+          const t = this.requestedId ? db.find('stock_transfers', this.requestedId) : null;
+          this.t = t;
+          if (!t) { this.state = 'notfound'; return; }
+          if (!this.isSuperAdmin && String(this.myBranch) !== String(t.from_branch_id) && String(this.myBranch) !== String(t.to_branch_id)) { this.state = 'wrongbranch'; return; }
+          this.state = 'ok';
+          this.buildItems();
+        },
+
+        /* ------------------------------------------------------------- data */
+        get fromBranch() { return (this.t && db.find('branches', this.t.from_branch_id)) || { code: '—', name: '—', address: '', phone: '', tax_id: '' }; },
+        get toBranch() { return (this.t && db.find('branches', this.t.to_branch_id)) || { code: '—', name: '—', address: '', phone: '', tax_id: '' }; },
+        shippedQty(item) {
+          if (item.shipped_quantity !== undefined && item.shipped_quantity !== null) return Number(item.shipped_quantity) || 0;
+          if (!this.t || !['shipped', 'received'].includes(this.t.status)) return 0;
+          const ids = Array.isArray(item.imei_ids) ? item.imei_ids : [];
+          return ids.length ? ids.length : (Number(item.quantity) || 0);
+        },
+        unitView(id) {
+          const u = db.find('product_imeis', id);
+          if (!u) return { id, imei: '#' + id, status: 'unknown', badge: 'badge-slate', title: 'Unit record not found' };
+          const atDest = this.t && String(u.branch_id) === String(this.t.to_branch_id);
+          const badge = u.status === 'in_transit' ? 'badge-amber' : u.status === 'defective' ? 'badge-red' : atDest ? 'badge-green' : 'badge-slate';
+          const where = db.branchCode(u.branch_id);
+          return { id: u.id, imei: u.imei, status: u.status, badge, title: ui.statusLabel(u.status) + ' · ' + where + (u.notes ? ' · ' + u.notes : '') };
+        },
+        buildItems() {
+          const t = this.t;
+          this.items = db.where('transfer_items', (i) => String(i.transfer_id) === String(t.id)).map((i) => {
+            const p = db.find('products', i.product_id) || {};
+            const serialized = db.isSerialized(p);
+            const ids = Array.isArray(i.imei_ids) ? i.imei_ids : [];
+            const requested = Number(i.quantity) || 0;
+            const shipped = this.shippedQty(i);
+            const received = Number(i.received_quantity) || 0;
+            const unitCost = Number(i.unit_cost) || 0;
+            return {
+              ...i, requested, shipped, received,
+              missing: Number(i.missing_quantity) || 0, damaged: Number(i.damaged_quantity) || 0,
+              variance: t.status === 'received' ? received - shipped : 0,
+              label: db.productLabel(i.product_id), sku: p.sku || '', product_type: db.productType(p),
+              serialized, serialLabel: db.serialLabel(p),
+              icon: ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : serialized ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube',
+              units: ids.map((id) => this.unitView(id)),
+              unit_cost: unitCost, value: utils.round2(unitCost * (t.status === 'received' ? received : (shipped || requested))),
+            };
+          });
+        },
+        get totals() {
+          const it = this.items;
+          return {
+            requested: it.reduce((a, x) => a + x.requested, 0),
+            shipped: it.reduce((a, x) => a + x.shipped, 0),
+            received: it.reduce((a, x) => a + x.received, 0),
+            missing: it.reduce((a, x) => a + x.missing, 0),
+            damaged: it.reduce((a, x) => a + x.damaged, 0),
+            variance: it.reduce((a, x) => a + x.variance, 0),
+            value: utils.sum(it, 'value'),
+          };
+        },
+
+        /* ------------------------------------------------------- permissions */
+        get canApprove() { return !!this.t && this.t.status === 'pending' && session.can('transfers.approve') && (this.isSuperAdmin || String(this.myBranch) === String(this.t.from_branch_id)); },
+        get canShip() { return !!this.t && this.t.status === 'approved' && session.can('transfers.ship') && (this.isSuperAdmin || String(this.myBranch) === String(this.t.from_branch_id)); },
+        get canReceive() { return !!this.t && this.t.status === 'shipped' && session.can('transfers.receive') && (this.isSuperAdmin || String(this.myBranch) === String(this.t.to_branch_id)); },
+        get canCancel() { return !!this.t && ['pending', 'approved'].includes(this.t.status) && session.can('transfers.delete') && (this.isSuperAdmin || String(this.t.requested_by) === String(this.me.id) || String(this.myBranch) === String(this.t.to_branch_id)); },
+
+        /* ---------------------------------------------------------- pipeline */
+        get steps() {
+          const t = this.t; if (!t) return [];
+          const rejected = t.status === 'rejected', cancelled = t.status === 'cancelled';
+          const order = { pending: 0, approved: 1, shipped: 2, received: 3 };
+          const idx = cancelled ? (t.shipped_at ? 2 : t.approved_at ? 1 : 0) : (rejected ? 0 : order[t.status]);
+          const alive = !rejected && !cancelled;
+          return [
+            { key: 'req', n: 1, label: 'Requested', at: t.requested_at, done: true, current: false, failed: false },
+            { key: 'app', n: 2, label: rejected ? 'Rejected' : 'Approved', at: t.approved_at, done: !rejected && idx >= 1, current: alive && t.status === 'pending', failed: rejected },
+            { key: 'shp', n: 3, label: 'Shipped', at: t.shipped_at, done: idx >= 2, current: alive && t.status === 'approved', failed: false },
+            { key: 'rcv', n: 4, label: 'Received', at: t.received_at, done: idx >= 3, current: alive && t.status === 'shipped', failed: false },
+          ];
+        },
+        get progressPct() {
+          const t = this.t; if (!t) return 0;
+          return ({ pending: 25, approved: 50, shipped: 75, received: 100, rejected: 25, cancelled: 25 })[t.status] || 0;
+        },
+        get progressHint() {
+          const t = this.t; if (!t) return '';
+          if (t.status === 'pending') return 'Awaiting approval from ' + this.fromBranch.name;
+          if (t.status === 'approved') return 'Approved — ' + this.fromBranch.name + ' picks and ships the units next';
+          if (t.status === 'shipped') return 'In transit to ' + this.toBranch.name;
+          if (t.status === 'received') return 'Completed on ' + utils.date(t.received_at);
+          if (t.status === 'rejected') return 'Rejected — no stock was moved';
+          return 'Cancelled — no stock was moved';
+        },
+        get timeline() {
+          const t = this.t; if (!t) return [];
+          const out = [{ key: 'req', title: 'Requested by ' + db.userName(t.requested_by), at: t.requested_at, done: true, text: `${this.totals.requested} unit(s) in ${this.items.length} line(s) from ${this.fromBranch.name} to ${this.toBranch.name}${t.notes ? ' · ' + t.notes : ''}` }];
+          if (t.status === 'rejected') out.push({ key: 'rej', title: 'Rejected by ' + db.userName(t.approved_by), at: t.approved_at, done: false, text: t.rejection_reason || 'No reason given.' });
+          else if (t.approved_at) out.push({ key: 'app', title: 'Approved by ' + db.userName(t.approved_by), at: t.approved_at, done: true, text: 'Cleared for shipping from ' + this.fromBranch.name + '.' });
+          if (t.shipped_at) out.push({ key: 'shp', title: 'Shipped by ' + db.userName(t.shipped_by), at: t.shipped_at, done: true, text: `${this.totals.shipped} unit(s) left ${this.fromBranch.code} stock and were marked in transit.` });
+          if (t.received_at) out.push({ key: 'rcv', title: 'Received by ' + db.userName(t.received_by), at: t.received_at, done: true, text: `${this.totals.received} unit(s) added to ${this.toBranch.code} stock` + (this.totals.missing ? ` · ${this.totals.missing} missing returned to ${this.fromBranch.code}` : '') + (this.totals.damaged ? ` · ${this.totals.damaged} damaged written off` : '') + '.' });
+          if (t.status === 'cancelled') out.push({ key: 'can', title: 'Cancelled' + (t.cancelled_by ? ' by ' + db.userName(t.cancelled_by) : ''), at: t.cancelled_at || t.updated_at, done: false, text: 'The request was withdrawn before any stock moved.' });
+          if (t.status === 'pending') out.push({ key: 'wait', title: 'Waiting for approval', at: null, done: false, text: this.fromBranch.name + ' must approve or reject this request.' });
+          else if (t.status === 'approved') out.push({ key: 'wait2', title: 'Waiting to be shipped', at: null, done: false, text: this.fromBranch.name + ' picks the units and ships them.' });
+          else if (t.status === 'shipped') out.push({ key: 'wait3', title: 'Waiting to be received', at: null, done: false, text: this.toBranch.name + ' inspects the units and checks them in.' });
+          return out;
+        },
+
+        /* ----------------------------------------------------------- actions */
+        closeModals() { this.reject.open = false; this.ship.open = false; this.recv.open = false; },
+        refresh() { this.load(); },
+
+        async approve() {
+          if (!this.canApprove) { ui.error('You cannot approve this transfer.'); return; }
+          const ok = await ui.confirm({ title: 'Approve ' + this.t.transfer_no + '?', message: `${this.totals.requested} unit(s) in ${this.items.length} line(s) are cleared for shipping from ${this.fromBranch.name}. Stock moves only when the units are shipped.`, confirmText: 'Approve' });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const t = db.find('stock_transfers', this.t.id);
+            if (!t || t.status !== 'pending') throw new Error('This request is no longer pending.');
+            db.update('stock_transfers', t.id, { status: 'approved', approved_by: this.me.id, approved_at: utils.now() });
+            db.audit('transfer.approve', 'stock_transfer', t.id, `${t.transfer_no} approved (${this.fromBranch.code} → ${this.toBranch.code})`);
+            ui.success(t.transfer_no + ' approved — ready to ship.');
+            this.load();
+          } catch (e) { ui.error(e.message || 'Could not approve the transfer.'); }
+          finally { this.busy = false; }
+        },
+
+        openReject() {
+          if (!this.canApprove) { ui.error('You cannot reject this transfer.'); return; }
+          this.reject = { open: true, reason: '', error: '', busy: false };
+          this.$nextTick(() => { if (this.$refs.rejectReason) this.$refs.rejectReason.focus(); });
+        },
+        doReject() {
+          const reason = String(this.reject.reason || '').trim();
+          if (reason.length < 5) { this.reject.error = 'Give the requesting branch a reason (at least 5 characters).'; return; }
+          this.reject.error = ''; this.reject.busy = true;
+          try {
+            const t = db.find('stock_transfers', this.t.id);
+            if (!t || t.status !== 'pending') throw new Error('This request is no longer pending.');
+            db.update('stock_transfers', t.id, { status: 'rejected', rejection_reason: reason, approved_by: this.me.id, approved_at: utils.now() });
+            db.audit('transfer.reject', 'stock_transfer', t.id, `${t.transfer_no} rejected: ${reason}`);
+            ui.warn(t.transfer_no + ' rejected.');
+            this.reject.open = false;
+            this.load();
+          } catch (e) { ui.error(e.message || 'Could not reject the transfer.'); }
+          finally { this.reject.busy = false; }
+        },
+
+        async cancel() {
+          if (!this.canCancel) { ui.error('You cannot cancel this transfer.'); return; }
+          const ok = await ui.confirm({ title: 'Cancel ' + this.t.transfer_no + '?', message: 'The request is withdrawn. No stock has moved, so nothing is reversed.', confirmText: 'Cancel request', danger: true });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const t = db.find('stock_transfers', this.t.id);
+            if (!t || !['pending', 'approved'].includes(t.status)) throw new Error('This request can no longer be cancelled.');
+            db.update('stock_transfers', t.id, { status: 'cancelled', cancelled_by: this.me.id, cancelled_at: utils.now() });
+            db.audit('transfer.cancel', 'stock_transfer', t.id, `${t.transfer_no} cancelled by ${this.me.name}`);
+            ui.toast(t.transfer_no + ' cancelled.', 'warning');
+            this.load();
+          } catch (e) { ui.error(e.message || 'Could not cancel the transfer.'); }
+          finally { this.busy = false; }
+        },
+
+        /* -------------------------------------------------------------- ship */
+        openShip() {
+          if (!this.canShip) { ui.error('You cannot ship this transfer.'); return; }
+          const t = this.t;
+          this.ship.lines = this.items.map((it) => {
+            const pre = (Array.isArray(it.imei_ids) ? it.imei_ids : []).map(String);
+            const units = it.serialized
+              ? utils.sortBy(db.all('product_imeis').filter((u) => String(u.product_id) === String(it.product_id) && String(u.branch_id) === String(t.from_branch_id) && stock.SELLABLE.includes(u.status)), 'imei')
+                .map((u) => ({ id: u.id, imei: u.imei, status: u.status, cost_price: Number(u.cost_price) || 0, picked: false }))
+              : [];
+            const available = it.serialized ? units.length : stock.qty(t.from_branch_id, it.product_id);
+            const required = Math.max(0, Math.min(it.requested, available));
+            if (it.serialized) {
+              // pre-tick the units the requester asked for, then top up to the required count
+              units.forEach((u) => { if (pre.includes(String(u.id))) u.picked = true; });
+              let picked = units.filter((u) => u.picked).length;
+              units.forEach((u) => { if (picked > required && u.picked) { u.picked = false; picked--; } });
+              units.forEach((u) => { if (picked < required && !u.picked) { u.picked = true; picked++; } });
+            }
+            return { item_id: it.id, product_id: it.product_id, label: it.label, serialized: it.serialized, serialLabel: it.serialLabel, requested: it.requested, available, required, units, qty: it.serialized ? 0 : required, scan: '' };
+          });
+          this.ship.open = true;
+        },
+        shipLineCount(line) { return line.serialized ? line.units.filter((u) => u.picked).length : Math.max(0, Math.floor(Number(line.qty) || 0)); },
+        shipLineError(line) {
+          const n = this.shipLineCount(line);
+          if (line.serialized) {
+            if (line.required === 0) return line.requested > 0 ? 'No sellable unit is left at ' + this.fromBranch.code + ' — this line will ship 0.' : '';
+            if (n !== line.required) return `Pick exactly ${line.required} unit(s) (${n} selected).`;
+            return '';
+          }
+          if (n > line.available) return `Only ${line.available} unit(s) are in stock at ${this.fromBranch.code}.`;
+          if (n > line.requested) return `Cannot ship more than the requested ${line.requested}.`;
+          return '';
+        },
+        get shipTotals() {
+          let units = 0, lines = 0, ok = true;
+          this.ship.lines.forEach((l) => {
+            const n = this.shipLineCount(l);
+            units += n; if (n > 0) lines++;
+            if (this.shipLineError(l) && !(l.serialized && l.required === 0)) ok = false;
+          });
+          return { units, lines, ok: ok && units > 0 };
+        },
+        toggleShipUnit(line, u) {
+          if (u.picked) { u.picked = false; return; }
+          if (this.shipLineCount(line) >= line.required) { ui.warn('This line needs exactly ' + line.required + ' unit(s). Untick one first.'); return; }
+          u.picked = true;
+        },
+        shipAutoPick(line) {
+          let n = 0;
+          line.units.forEach((u) => { u.picked = n < line.required; if (u.picked) n++; });
+        },
+        shipScan(line) {
+          const v = String(line.scan || '').trim().toUpperCase();
+          if (!v) return;
+          const u = line.units.find((x) => String(x.imei).toUpperCase() === v);
+          if (!u) { ui.error('No sellable ' + line.serialLabel + ' "' + v + '" for this product at ' + this.fromBranch.code + '.'); return; }
+          if (!u.picked) this.toggleShipUnit(line, u); else ui.toast('Already picked.', 'info');
+          line.scan = '';
+        },
+        doShip() {
+          if (this.ship.busy || !this.ship.lines.length) return;
+          const totals = this.shipTotals;
+          if (!totals.ok) { ui.error('Complete the unit selection on every line first.'); return; }
+          const t = db.find('stock_transfers', this.t.id);
+          if (!t || t.status !== 'approved') { ui.error('This transfer can no longer be shipped.'); return; }
+          try {
+            this.ship.lines.forEach((l) => {
+              if (l.serialized) {
+                l.units.filter((u) => u.picked).forEach((u) => {
+                  const row = db.find('product_imeis', u.id);
+                  if (!row || String(row.branch_id) !== String(t.from_branch_id) || !stock.SELLABLE.includes(row.status)) throw new Error(u.imei + ' is no longer available at ' + this.fromBranch.code + '.');
+                });
+              } else {
+                const q = this.shipLineCount(l);
+                const have = stock.qty(t.from_branch_id, l.product_id);
+                if (q > have) throw new Error('Only ' + have + ' unit(s) of ' + l.label + ' are in stock at ' + this.fromBranch.code + '.');
+              }
+            });
+          } catch (e) { ui.error(e.message); return; }
+          this.ship.busy = true;
+          try {
+            this.ship.lines.forEach((l) => {
+              const patch = {};
+              if (l.serialized) {
+                const picked = l.units.filter((u) => u.picked);
+                picked.forEach((u) => stock.shipImei(u.id, t.from_branch_id, t.id));
+                patch.imei_ids = picked.map((u) => Number(u.id));
+                patch.shipped_quantity = picked.length;
+                if (picked.length) patch.unit_cost = utils.round2(picked.reduce((a, u) => a + (Number(u.cost_price) || 0), 0) / picked.length);
+              } else {
+                const q = this.shipLineCount(l);
+                patch.imei_ids = [];
+                patch.shipped_quantity = q;
+                if (q > 0) {
+                  const cost = stock.remove(t.from_branch_id, l.product_id, q, 'transfer_out', { type: 'transfer', id: t.id }, { notes: `${t.transfer_no} to ${this.toBranch.code}` });
+                  patch.unit_cost = utils.round2(cost);
+                }
+              }
+              db.update('transfer_items', l.item_id, patch);
+            });
+            db.update('stock_transfers', t.id, { status: 'shipped', shipped_by: this.me.id, shipped_at: utils.now() });
+            db.audit('transfer.ship', 'stock_transfer', t.id, `${t.transfer_no} shipped: ${totals.units} unit(s) left ${this.fromBranch.name} for ${this.toBranch.name}`);
+            ui.success(totals.units + ' unit(s) shipped — now in transit.');
+            this.ship.open = false;
+            this.load();
+          } catch (e) {
+            ui.error(e.message || 'Could not ship the transfer.');
+            this.load();
+          } finally { this.ship.busy = false; }
+        },
+
+        /* ----------------------------------------------------------- receive */
+        openReceive() {
+          if (!this.canReceive) { ui.error('You cannot receive this transfer.'); return; }
+          this.recv.scan = '';
+          this.recv.lines = this.items.map((it) => ({
+            item_id: it.id, product_id: it.product_id, label: it.label, serialized: it.serialized, serialLabel: it.serialLabel,
+            shipped: it.shipped, unit_cost: it.unit_cost, qty: it.shipped, note: '',
+            units: it.units.map((u) => { const row = db.find('product_imeis', u.id); const ready = !!row && row.status === 'in_transit'; return { id: u.id, imei: u.imei, status: row ? row.status : 'unknown', ready, condition: 'ok', scanned: false }; }),
+          }));
+          this.recv.open = true;
+          this.$nextTick(() => { if (this.$refs.recvScan) this.$refs.recvScan.focus(); });
+        },
+        recvScanTick() {
+          const v = String(this.recv.scan || '').trim().toUpperCase();
+          if (!v) return;
+          let hit = null;
+          this.recv.lines.forEach((l) => l.units.forEach((u) => { if (!hit && String(u.imei).toUpperCase() === v) hit = u; }));
+          if (!hit) { ui.error('"' + v + '" is not on this transfer.'); return; }
+          hit.condition = 'ok'; hit.scanned = true;
+          this.recv.scan = '';
+          ui.success(hit.imei + ' checked in.');
+        },
+        recvLineError(line) {
+          if (line.serialized) return '';
+          const q = Math.floor(Number(line.qty) || 0);
+          if (isNaN(q) || q < 0) return 'Enter a quantity of 0 or more.';
+          if (q > line.shipped) return `Cannot receive more than the ${line.shipped} unit(s) shipped.`;
+          return '';
+        },
+        get recvTotals() {
+          let ok = 0, missing = 0, damaged = 0, scanned = 0, units = 0, received = 0, valid = true;
+          this.recv.lines.forEach((l) => {
+            if (l.serialized) {
+              l.units.forEach((u) => {
+                if (!u.ready) return;
+                units++; if (u.scanned) scanned++;
+                if (u.condition === 'missing') missing++; else if (u.condition === 'damaged') { damaged++; received++; } else { ok++; received++; }
+              });
+            } else {
+              const q = Math.max(0, Math.floor(Number(l.qty) || 0));
+              received += q; ok += q; missing += Math.max(0, l.shipped - q);
+              if (this.recvLineError(l)) valid = false;
+            }
+          });
+          return { ok, missing, damaged, scanned, units, received, valid };
+        },
+        doReceive() {
+          if (this.recv.busy || !this.recv.lines.length) return;
+          if (!this.recvTotals.valid) { ui.error('Fix the highlighted quantities first.'); return; }
+          const t = db.find('stock_transfers', this.t.id);
+          if (!t || t.status !== 'shipped') { ui.error('This transfer can no longer be received.'); return; }
+          this.recv.busy = true;
+          try {
+            this.recv.lines.forEach((l) => {
+              const note = String(l.note || '').trim();
+              if (l.serialized) {
+                let ok = 0, dmg = 0, miss = 0;
+                l.units.forEach((u) => {
+                  if (!u.ready) return;
+                  if (u.condition === 'missing') {
+                    stock.revertImeiTransit(u.id, t.from_branch_id, t.id, `Missing on receipt of ${t.transfer_no} at ${this.toBranch.code}${note ? ' · ' + note : ''}`);
+                    miss++;
+                  } else {
+                    stock.receiveImei(u.id, t.to_branch_id, t.id);
+                    if (u.condition === 'damaged') { stock.markDefective(u.id, `Damaged in transit · ${t.transfer_no}${note ? ' · ' + note : ''}`); dmg++; }
+                    else ok++;
+                  }
+                });
+                db.update('transfer_items', l.item_id, { received_quantity: ok + dmg, missing_quantity: miss, damaged_quantity: dmg, receive_notes: note });
+              } else {
+                const q = Math.max(0, Math.min(Math.floor(Number(l.qty) || 0), l.shipped));
+                const short = Math.max(0, l.shipped - q);
+                if (q > 0) stock.add(t.to_branch_id, l.product_id, q, l.unit_cost, 'transfer_in', { type: 'transfer', id: t.id }, null, `Received from ${this.fromBranch.code} · ${t.transfer_no}${note ? ' · ' + note : ''}`);
+                if (short > 0) stock.add(t.from_branch_id, l.product_id, short, l.unit_cost, 'transfer_return', { type: 'transfer', id: t.id }, null, `Short by ${short} on ${t.transfer_no} — returned to ${this.fromBranch.code}`);
+                db.update('transfer_items', l.item_id, { received_quantity: q, missing_quantity: short, damaged_quantity: 0, receive_notes: note });
+              }
+            });
+            const totals = this.recvTotals;
+            db.update('stock_transfers', t.id, { status: 'received', received_by: this.me.id, received_at: utils.now() });
+            db.audit('transfer.receive', 'stock_transfer', t.id, `${t.transfer_no} received at ${this.toBranch.name}: ${totals.received} unit(s) in` + (totals.missing ? `, ${totals.missing} missing` : '') + (totals.damaged ? `, ${totals.damaged} damaged` : ''));
+            ui.success(totals.received + ' unit(s) received at ' + this.toBranch.name + '.');
+            this.recv.open = false;
+            this.load();
+          } catch (e) {
+            ui.error(e.message || 'Could not receive the transfer.');
+            this.load();
+          } finally { this.recv.busy = false; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Your Cart · Abbott Mobiles</title>
+  <meta name="description" content="Review the items in your Abbott Mobile cart and checkout with cash on delivery, bank transfer, JazzCash or EasyPaisa.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-cart">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopCart()">
+
+    <div class="shop-container pt-5 pb-3">
+      <nav class="shop-crumbs" aria-label="Breadcrumb">
+        <a href="index.html">Home</a>
+        <span x-html="SHOP.icon('chevron-right','')"></span>
+        <a href="products.html">Shop</a>
+        <span x-html="SHOP.icon('chevron-right','')"></span>
+        <span class="font-semibold text-slate-700">Cart</span>
+      </nav>
+      <div class="flex flex-wrap items-end justify-between gap-3 mt-3">
+        <div class="min-w-0">
+          <h1 class="shop-h2">Your cart</h1>
+          <p class="text-sm text-slate-500 mt-1">
+            <span x-show="count > 0" x-cloak><span x-text="count"></span> item<span x-show="count !== 1">s</span> · ready to ship from <span x-text="branchName"></span></span>
+            <span x-show="count === 0">Nothing here yet — let's fix that.</span>
+          </p>
+        </div>
+        <button type="button" class="shop-btn shop-btn-ghost shop-btn-sm" x-show="lines.length" x-cloak @click="clearCart()">
+          <span x-html="SHOP.icon('trash','')"></span>Clear cart
+        </button>
+      </div>
+    </div>
+
+    <!-- ===================================================== EMPTY CART -->
+    <div class="shop-container pb-10" x-show="!lines.length" x-cloak>
+      <div class="shop-card max-w-xl mx-auto">
+        <div class="shop-empty">
+          <span x-html="SHOP.icon('bag','')"></span>
+          <div class="shop-empty-title">Your cart is empty</div>
+          <p class="text-sm mt-2 max-w-sm mx-auto">
+            Browse genuine phones, laptops, accessories and spare parts — or ask us on WhatsApp and we will help you pick.
+          </p>
+          <div class="flex flex-col sm:flex-row justify-center gap-2 mt-5">
+            <a href="products.html" class="shop-btn"><span x-html="SHOP.icon('bag','')"></span>Start shopping</a>
+            <a href="repair.html" class="shop-btn shop-btn-outline"><span x-html="SHOP.icon('wrench','')"></span>Book a repair</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ========================================================== CART -->
+    <div class="shop-container pb-10" x-show="lines.length" x-cloak>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6">
+
+        <!-- ------------------------------------------------- line items -->
+        <div class="lg:col-span-2 min-w-0 space-y-4">
+
+          <div class="shop-card overflow-hidden">
+            <ul class="divide-y divide-slate-200/70">
+              <template x-for="l in lines" :key="l.product_id">
+                <li class="p-3 sm:p-4">
+                  <div class="flex gap-3 sm:gap-4 min-w-0">
+                    <a :href="'product.html?id=' + l.product_id"
+                       class="shop-media w-[4.5rem] h-[4.5rem] sm:w-24 sm:h-24 rounded-xl overflow-hidden flex-none"
+                       :aria-label="l.name" x-html="SHOP.image(l.product)"></a>
+
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-start gap-2">
+                        <div class="min-w-0 flex-1">
+                          <div class="shop-product-brand truncate" x-text="l.brand"></div>
+                          <a :href="'product.html?id=' + l.product_id" class="block font-bold text-sm text-slate-900 leading-snug shop-clamp-2 hover:underline" x-text="l.name"></a>
+                          <div class="text-xs text-slate-500 mt-0.5 truncate" x-text="SHOP.subtitle(l.product)" x-show="SHOP.subtitle(l.product)"></div>
+                        </div>
+                        <button type="button" class="shop-icon-btn !w-8 !h-8 flex-none text-slate-400 hover:text-rose-600"
+                                @click="removeLine(l)" :aria-label="'Remove ' + l.name" title="Remove">
+                          <span x-html="SHOP.icon('trash','')"></span>
+                        </button>
+                      </div>
+
+                      <div class="flex flex-wrap items-center gap-1.5 mt-2">
+                        <span class="shop-badge" x-show="l.is_service" x-cloak>Service · booked as a job</span>
+                        <span class="shop-badge shop-badge-primary" x-show="!l.is_service && ABM.db.isSerialized(l.product)" x-cloak
+                              x-text="ABM.db.serialLabel(l.product) + ' recorded on your invoice'"></span>
+                        <span class="shop-badge shop-badge-warn" x-show="!l.is_service && commerce.show_stock && l.in_stock && l.available > 0 && l.available <= 3" x-cloak
+                              x-text="'Only ' + l.available + ' left'"></span>
+                        <span class="shop-badge shop-badge-danger" x-show="!l.in_stock" x-cloak>Out of stock</span>
+                      </div>
+
+                      <div class="flex flex-wrap items-end justify-between gap-3 mt-3">
+                        <div class="min-w-0">
+                          <div class="shop-qty">
+                            <button type="button" @click="setQty(l, l.qty - 1)" :disabled="l.qty <= 1 || busy" aria-label="Decrease quantity">
+                              <span x-html="SHOP.icon('minus','')"></span>
+                            </button>
+                            <input type="number" min="1" :max="l.max || 1" :value="l.qty" @change="setQty(l, $event.target.value)"
+                                   :aria-label="'Quantity for ' + l.name">
+                            <button type="button" @click="setQty(l, l.qty + 1)" :disabled="busy || !l.max || l.qty >= l.max" aria-label="Increase quantity">
+                              <span x-html="SHOP.icon('plus','')"></span>
+                            </button>
+                          </div>
+                          <div class="text-[11px] text-slate-500 mt-1" x-show="l.max === 1 && !l.is_service" x-cloak>
+                            Sold per unit — one per order
+                          </div>
+                          <div class="text-[11px] text-slate-500 mt-1" x-show="l.max > 1" x-cloak x-text="'Up to ' + l.max + ' per order'"></div>
+                        </div>
+                        <div class="text-right min-w-0" x-show="commerce.show_prices">
+                          <div class="shop-price truncate" x-text="$money(l.total, {decimals:0})"></div>
+                          <div class="text-[11px] text-slate-500 truncate" x-show="l.qty > 1"
+                               x-text="$money(l.unit_price, {decimals:0}) + ' each'"></div>
+                        </div>
+                      </div>
+
+                      <p class="shop-error" x-show="!l.in_stock" x-cloak>
+                        This item just went out of stock at <span x-text="branchName"></span>. Remove it to continue, or order it on WhatsApp.
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              </template>
+            </ul>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <a href="products.html" class="shop-btn shop-btn-outline">
+              <span x-html="SHOP.icon('arrow-left','')"></span>Continue shopping
+            </a>
+            <a :href="SHOP.waLink(waText)" target="_blank" rel="noopener" class="shop-btn shop-btn-accent"
+               x-show="commerce.whatsapp_orders && SHOP.waNumber()" x-cloak>
+              <span x-html="SHOP.socialIcon('whatsapp','')"></span>Order on WhatsApp
+            </a>
+          </div>
+
+          <div class="shop-card shop-card-pad">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <template x-for="t in trust" :key="t.text">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-emerald-600 flex-none" x-html="SHOP.icon(t.icon,'w-4 h-4')"></span>
+                  <span class="text-[11px] text-slate-600 leading-tight min-w-0" x-text="t.text"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- ---------------------------------------------------- summary -->
+        <div class="min-w-0">
+          <div class="shop-card shop-card-pad lg:sticky lg:top-24">
+            <h2 class="shop-h3">Order summary</h2>
+
+            <dl class="mt-4 space-y-2.5 text-sm">
+              <div class="flex items-center justify-between gap-3">
+                <dt class="text-slate-500 min-w-0">Subtotal (<span x-text="count"></span> item<span x-show="count !== 1">s</span>)</dt>
+                <dd class="font-bold text-slate-900 shop-nowrap" x-text="$money(subtotal, {decimals:0})"></dd>
+              </div>
+              <div class="flex items-center justify-between gap-3">
+                <dt class="text-slate-500 min-w-0">Delivery</dt>
+                <dd class="font-bold shop-nowrap" :class="fee ? 'text-slate-900' : 'text-emerald-600'"
+                    x-text="fee ? $money(fee, {decimals:0}) : 'Free'"></dd>
+              </div>
+              <div class="shop-divider !my-3"></div>
+              <div class="flex items-center justify-between gap-3">
+                <dt class="font-extrabold text-slate-900">Total</dt>
+                <dd class="shop-price shop-nowrap" x-text="$money(total, {decimals:0})"></dd>
+              </div>
+            </dl>
+
+            <!-- free delivery progress -->
+            <div class="mt-4" x-show="freeAbove > 0" x-cloak>
+              <div class="flex items-center justify-between gap-2 text-[11px] font-semibold mb-1.5">
+                <span class="min-w-0 truncate" :class="freeRemaining > 0 ? 'text-slate-600' : 'text-emerald-600'"
+                      x-text="freeRemaining > 0 ? 'Add ' + $money(freeRemaining, {decimals:0}) + ' for free delivery' : 'You qualify for free delivery'"></span>
+                <span class="text-slate-400 shop-nowrap" x-text="$money(freeAbove, {decimals:0})"></span>
+              </div>
+              <div class="h-1.5 rounded-full bg-slate-900/10 overflow-hidden">
+                <div class="h-full rounded-full transition-all" :class="freeRemaining > 0 ? 'bg-slate-400' : 'bg-emerald-500'"
+                     :style="'width:' + freeProgress + '%'"></div>
+              </div>
+            </div>
+
+            <!-- notices -->
+            <div class="alert alert-warning mt-4 text-xs" x-show="belowMinimum" x-cloak>
+              <span x-html="SHOP.icon('warning','w-4 h-4')"></span>
+              <span class="min-w-0">
+                Minimum order value is <b x-text="$money(minOrder, {decimals:0})"></b>.
+                Add <b x-text="$money(minRemaining, {decimals:0})"></b> more to check out.
+              </span>
+            </div>
+            <div class="alert alert-danger mt-4 text-xs" x-show="hasOutOfStock" x-cloak>
+              <span x-html="SHOP.icon('x-circle','w-4 h-4')"></span>
+              <span class="min-w-0">Remove the out-of-stock item(s) above before checking out.</span>
+            </div>
+            <div class="alert alert-info mt-4 text-xs" x-show="!commerce.allow_orders" x-cloak>
+              <span x-html="SHOP.icon('info','w-4 h-4')"></span>
+              <span class="min-w-0">Online checkout is paused right now. Send us this list on WhatsApp or call the shop and we will reserve your items.</span>
+            </div>
+
+            <a href="checkout.html" class="shop-btn shop-btn-lg shop-btn-block mt-4"
+               x-show="commerce.allow_orders" :class="!canCheckout && 'pointer-events-none opacity-55'"
+               :aria-disabled="!canCheckout" :tabindex="canCheckout ? 0 : -1">
+              <span x-html="SHOP.icon('shield-check','')"></span>Proceed to checkout
+            </a>
+            <a :href="SHOP.waLink(waText)" target="_blank" rel="noopener" class="shop-btn shop-btn-accent shop-btn-block mt-2"
+               x-show="!commerce.allow_orders && SHOP.waNumber()" x-cloak>
+              <span x-html="SHOP.socialIcon('whatsapp','')"></span>Send this list on WhatsApp
+            </a>
+            <a href="products.html" class="shop-btn shop-btn-outline shop-btn-block mt-2">Continue shopping</a>
+
+            <p class="text-[11px] text-slate-500 mt-3 leading-relaxed">
+              Pay by <span x-text="paymentNote"></span>. Prices include tax where applicable.
+              See our <a href="page.html?slug=return-policy" class="shop-link">return policy</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================= RECENTLY VIEWED / RECOMMENDED -->
+    <div class="shop-section-alt" x-show="recommended.length" x-cloak>
+      <div class="shop-container py-10">
+        <div class="shop-section-head">
+          <div>
+            <span class="shop-eyebrow" x-text="recommendedEyebrow"></span>
+            <h2 class="shop-h2 mt-1" x-text="recommendedTitle"></h2>
+          </div>
+          <a href="products.html" class="shop-btn shop-btn-outline shop-btn-sm">
+            View all<span x-html="SHOP.icon('arrow-right','')"></span>
+          </a>
+        </div>
+        <div class="shop-grid-products">
+          <template x-for="p in recommended" :key="p.id">
+            <div class="shop-card shop-card-hover shop-product">
+              <a :href="'product.html?id=' + p.id" class="relative block">
+                <div class="shop-media" x-html="SHOP.image(p)"></div>
+                <div class="shop-media-tags">
+                  <template x-if="commerce.show_stock && !SHOP.inStock(p)">
+                    <span class="shop-tag shop-tag-danger">Out of stock</span>
+                  </template>
+                </div>
+              </a>
+              <div class="shop-product-body">
+                <div class="shop-product-brand truncate" x-text="ABM.db.brandName(p.brand_id)"></div>
+                <a :href="'product.html?id=' + p.id" class="shop-product-title hover:underline" x-text="SHOP.title(p)"></a>
+                <div class="mt-auto pt-2 flex items-end justify-between gap-2 min-w-0">
+                  <div class="shop-price truncate min-w-0" x-show="commerce.show_prices" x-text="$money(p.retail_price, {decimals:0})"></div>
+                  <button type="button" class="shop-icon-btn !w-8 !h-8 flex-none bg-slate-900/5"
+                          :disabled="busy || !SHOP.maxQty(p)" @click="quickAdd(p)"
+                          :aria-label="'Add ' + SHOP.title(p) + ' to cart'" :title="SHOP.maxQty(p) ? 'Add to cart' : 'Out of stock'">
+                    <span x-html="SHOP.icon('plus','')"></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------ mobile sticky checkout bar -->
+    <div class="shop-sticky-bar lg:hidden" x-show="lines.length && commerce.allow_orders" x-cloak>
+      <div class="min-w-0 flex-1">
+        <div class="text-[11px] text-slate-500 truncate"><span x-text="count"></span> item<span x-show="count !== 1">s</span> · incl. delivery</div>
+        <div class="font-extrabold text-slate-900 truncate" x-text="$money(total, {decimals:0})"></div>
+      </div>
+      <a href="checkout.html" class="shop-btn flex-none" :class="!canCheckout && 'pointer-events-none opacity-55'"
+         :aria-disabled="!canCheckout" :tabindex="canCheckout ? 0 : -1">
+        <span x-html="SHOP.icon('shield-check','')"></span>Checkout
+      </a>
+    </div>
+
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopCart() {
+      const { db, utils } = ABM;
+      return {
+        lines: [], commerce: {}, branchName: '', busy: false, syncing: false,
+        subtotal: 0, fee: 0, total: 0, count: 0,
+        minOrder: 0, freeAbove: 0, paymentNote: '', trust: [],
+        recommended: [], recommendedTitle: 'You may also like', recommendedEyebrow: 'Handpicked',
+
+        init() {
+          this.commerce = SHOP.commerce();
+          this.branchName = (SHOP.branch() || {}).name || 'our store';
+          this.minOrder = Number(this.commerce.min_order) || 0;
+          this.freeAbove = Number(this.commerce.free_delivery_above) || 0;
+          this.paymentNote = SHOP.paymentMethods().map((m) => m.label.replace('Cash on Delivery', 'cash on delivery')).join(', ') || 'cash in store';
+          this.trust = [
+            { icon: 'shield-check', text: 'Genuine products with a written warranty' },
+            { icon: 'truck', text: this.freeAbove ? 'Free delivery above ' + utils.money(this.freeAbove, { decimals: 0 }) : 'Fast delivery across Pakistan' },
+            { icon: 'refresh', text: '7-day exchange on manufacturing faults' },
+          ];
+
+          this.applyQuickOrder();
+          this.normalise();
+          this.refresh();
+          this._sync = () => { if (!this.syncing) this.refresh(); };
+          window.addEventListener('shop:cart', this._sync);
+          window.addEventListener('storage', this._sync);
+          this.buildRecommended();
+        },
+
+        /**
+         * Quick-order link: cart.html?add=5,23:2 drops those products straight into the cart
+         * (used by our WhatsApp / SMS campaigns and by "reorder" links). The parameter is removed
+         * from the URL afterwards so a refresh never adds the items twice.
+         */
+        applyQuickOrder() {
+          const raw = utils.qs('add');
+          if (!raw) return;
+          let added = 0;
+          String(raw).split(',').forEach((part) => {
+            const bits = String(part).split(':');
+            const id = Number(bits[0]);
+            const qty = Math.max(1, Number(bits[1]) || 1);
+            if (!id) return;
+            try { SHOP.cart.add(id, qty); added += 1; } catch (e) { SHOP.toast(e.message, 'warning'); }
+          });
+          try {
+            const keep = new URLSearchParams(location.search);
+            keep.delete('add');
+            const q = keep.toString();
+            history.replaceState(null, '', 'cart.html' + (q ? '?' + q : ''));
+          } catch (e) { /* ignore */ }
+          if (added) SHOP.toast(added + ' item' + (added === 1 ? '' : 's') + ' added to your cart.', 'success');
+        },
+
+        /** Write clamped quantities (stock changed since the item was added) back to the cart. */
+        normalise() {
+          this.syncing = true;
+          try {
+            SHOP.cart.get().forEach((raw) => {
+              const p = SHOP.product(raw.product_id);
+              if (!p) { SHOP.cart.remove(raw.product_id); return; }
+              const max = SHOP.maxQty(p);
+              if (max && raw.qty > max) SHOP.cart.setQty(p.id, max);
+            });
+          } catch (e) { /* ignore */ } finally { this.syncing = false; }
+        },
+
+        refresh() {
+          this.lines = SHOP.cart.lines();
+          this.count = this.lines.reduce((s, l) => s + l.qty, 0);
+          this.subtotal = utils.round2(this.lines.reduce((s, l) => s + l.total, 0));
+          this.fee = SHOP.deliveryFee(this.subtotal);
+          this.total = utils.round2(this.subtotal + this.fee);
+          document.title = (this.count ? 'Cart (' + this.count + ')' : 'Your Cart') + ' · ' + (SHOP.site().name || 'Abbott Mobile');
+        },
+
+        get hasOutOfStock() { return this.lines.some((l) => !l.in_stock); },
+        get belowMinimum() { return this.minOrder > 0 && this.subtotal > 0 && this.subtotal < this.minOrder; },
+        get minRemaining() { return Math.max(0, utils.round2(this.minOrder - this.subtotal)); },
+        get freeRemaining() { return this.freeAbove > 0 ? Math.max(0, utils.round2(this.freeAbove - this.subtotal)) : 0; },
+        get freeProgress() { return this.freeAbove > 0 ? Math.min(100, Math.round((this.subtotal / this.freeAbove) * 100)) : 100; },
+        get canCheckout() {
+          return !!(this.lines.length && this.commerce.allow_orders && !this.hasOutOfStock && !this.belowMinimum);
+        },
+        get waText() {
+          const items = this.lines.map((l) => '• ' + l.name + ' x' + l.qty).join('\n');
+          return 'Hello! I would like to order:\n' + items
+            + (this.commerce.show_prices ? '\nTotal: ' + utils.money(this.total, { decimals: 0 }) : '');
+        },
+
+        setQty(line, qty) {
+          if (this.busy) return;
+          qty = Number(qty) || 0;
+          const max = line.max || 0;
+          if (qty > 0 && max && qty > max) {
+            qty = max;
+            SHOP.toast('Only ' + max + ' available for this item.', 'warning');
+          }
+          this.busy = true;
+          try {
+            if (qty <= 0) { SHOP.cart.remove(line.product_id); SHOP.toast(line.name + ' removed.', 'info'); }
+            else SHOP.cart.setQty(line.product_id, qty);
+          } catch (e) {
+            SHOP.toast(e.message, 'error');
+          } finally {
+            this.busy = false;
+            this.refresh();
+          }
+        },
+
+        async removeLine(line) {
+          if (this.busy) return;
+          const ok = await SHOP.confirm({
+            title: 'Remove item?', message: 'Remove ' + line.name + ' from your cart?',
+            confirmText: 'Remove', danger: true,
+          });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            SHOP.cart.remove(line.product_id);
+            SHOP.toast(line.name + ' removed from your cart.', 'info');
+          } finally { this.busy = false; this.refresh(); this.buildRecommended(); }
+        },
+
+        async clearCart() {
+          if (this.busy) return;
+          const ok = await SHOP.confirm({
+            title: 'Clear your cart?', message: 'This removes all ' + this.count + ' item(s) from your cart.',
+            confirmText: 'Clear cart', danger: true,
+          });
+          if (!ok) return;
+          this.busy = true;
+          try { SHOP.cart.clear(); SHOP.toast('Cart cleared.', 'info'); }
+          finally { this.busy = false; this.refresh(); this.buildRecommended(); }
+        },
+
+        quickAdd(p) {
+          if (this.busy) return;
+          this.busy = true;
+          try {
+            SHOP.cart.add(p.id, 1);
+            SHOP.toast(SHOP.title(p) + ' added to your cart.', 'success');
+          } catch (e) {
+            SHOP.toast(e.message, 'error');
+          } finally { this.busy = false; this.refresh(); this.buildRecommended(); }
+        },
+
+        /* ---------------------------------- recently viewed / recommended */
+        readRecent() {
+          try {
+            const a = JSON.parse(localStorage.getItem('abm.shop.recent') || '[]');
+            return Array.isArray(a) ? a.slice(0, 12) : [];
+          } catch (e) { return []; }
+        },
+        buildRecommended() {
+          const inCart = (p) => SHOP.cart.has(p.id);
+          let list = this.readRecent().map((id) => SHOP.product(id)).filter(Boolean).filter((p) => !inCart(p));
+          const viewed = list.length > 0;
+          this.recommendedEyebrow = viewed ? 'Pick up where you left off' : 'Handpicked';
+          this.recommendedTitle = viewed ? 'Recently viewed' : 'You may also like';
+          if (list.length < 4) {
+            const cats = this.lines.map((l) => l.product.category_id);
+            const pool = SHOP.products().filter((p) => db.productType(p) !== 'service' && !inCart(p) && !list.includes(p));
+            const same = pool.filter((p) => cats.includes(p.category_id) && SHOP.inStock(p));
+            const rest = utils.sortBy(pool.filter((p) => !same.includes(p) && SHOP.inStock(p)), 'created_at', 'desc');
+            list = list.concat(same, rest);
+          }
+          this.recommended = list.slice(0, 4);
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Test helper: table probe</title>
+<style>body{margin:0;background:#444}iframe{display:block;border:0;background:#fff}</style></head>
+<body>
+<iframe id="f"></iframe>
+<script>
+  const q = new URLSearchParams(location.search);
+  const f = document.getElementById('f');
+  f.width = q.get('w') || 400;
+  f.height = q.get('h') || 860;
+  f.src = '../' + (q.get('page') || 'dashboard.html');
+  const vis = (el) => el.offsetParent !== null || el.getClientRects().length > 0;
+  setTimeout(() => {
+    try {
+      const d = f.contentDocument;
+      const tables = d.querySelectorAll('table');
+      console.log('VZ_PROBE tables=' + tables.length + ' w=' + f.width);
+      tables.forEach((t, ti) => {
+        const heads = [...t.querySelectorAll('thead tr:first-child > th')].filter(vis);
+        const headSpan = heads.reduce((a, c) => a + (c.colSpan || 1), 0);
+        const body = t.querySelector('tbody tr');
+        const bodySpan = body ? [...body.children].filter(vis).reduce((a, c) => a + (c.colSpan || 1), 0) : -1;
+        const foot = t.querySelector('tfoot tr');
+        const footSpan = foot ? [...foot.children].filter(vis).reduce((a, c) => a + (c.colSpan || 1), 0) : -1;
+        const wrap = t.closest('.table-wrap');
+        console.log('VZ_TABLE#' + ti + ' head=' + headSpan + ' body=' + bodySpan + ' foot=' + footSpan
+          + ' tableScrollW=' + t.scrollWidth + ' wrapClientW=' + (wrap ? wrap.clientWidth : -1)
+          + ' overflowPx=' + (wrap ? (t.scrollWidth - wrap.clientWidth) : 0));
+        if (foot) console.log('VZ_FOOT#' + ti + ' cells=' + [...foot.children].filter(vis).map((c) => (c.colSpan || 1) + ':' + JSON.stringify((c.textContent || '').trim().slice(0, 22))).join(' | '));
+        if (wrap) {
+          const wr = wrap.getBoundingClientRect();
+          const hs = [...t.querySelectorAll('thead tr:first-child > th')].filter(vis);
+          console.log('VZ_COLS#' + ti + ' ' + hs.map((c) => { const r = c.getBoundingClientRect(); return JSON.stringify((c.textContent || '').trim().slice(0, 12)) + '@' + Math.round(r.left - wr.left) + '..' + Math.round(r.right - wr.left) + (r.right > wr.right + 1 ? '(CUT)' : ''); }).join(' '));
+        }
+      });
+    } catch (e) { console.log('VZ_PROBE_ERR ' + e.message); }
+  }, 9000);
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Diag</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js"></script>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+  <script defer src="../assets/js/shop.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body data-public>
+  <div data-shop-header></div>
+  <pre id="out">…</pre>
+  <div data-shop-footer></div>
+  <script>
+    window.addEventListener('error', (e) => console.log('DIAG ERROR ' + e.message + ' @ ' + e.filename + ':' + e.lineno));
+    setTimeout(() => {
+      const L = [];
+      const has = (x) => (x === undefined ? 'UNDEFINED' : (x === null ? 'null' : 'ok'));
+      L.push('ABM_SEED=' + typeof window.ABM_SEED);
+      L.push('ABM=' + typeof window.ABM);
+      L.push('SHOP=' + typeof window.SHOP);
+      try {
+        L.push('db.version=' + (ABM.db.raw().__version || '?'));
+        L.push('products=' + ABM.db.all('products').length);
+        L.push('branches=' + ABM.db.all('branches').length);
+        L.push('cms.site.name=' + JSON.stringify((ABM.db.cms().site || {}).name));
+        L.push('cms.menu=' + (ABM.db.cms().menu || []).length);
+      } catch (e) { L.push('DB ERROR ' + e.message); }
+      try {
+        L.push('SHOP.icon=' + has(SHOP && SHOP.icon));
+        L.push('SHOP.icon(bag)=' + (SHOP && SHOP.icon ? String(SHOP.icon('bag', '')).slice(0, 24) : 'n/a'));
+        L.push('SHOP.products=' + (SHOP && SHOP.products ? SHOP.products().length : 'n/a'));
+        L.push('SHOP.branches=' + (SHOP && SHOP.branches ? SHOP.branches().length : 'n/a'));
+        L.push('SHOP.site.name=' + JSON.stringify(SHOP && SHOP.site ? SHOP.site().name : 'n/a'));
+      } catch (e) { L.push('SHOP ERROR ' + e.message); }
+      document.getElementById('out').textContent = L.join('\n');
+      console.log('DIAG ' + L.join(' | '));
+    }, 2000);
+  </script>
+</body>
+</html>

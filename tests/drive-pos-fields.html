@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Probe: POS money field widths</title>
+<style>html,body{margin:0}iframe{border:0}</style>
+</head>
+<body data-public>
+<pre id="out">…</pre>
+<iframe id="f" src="../pos.html?__cart=1,20" width="1200" height="900"></iframe>
+<script>
+setTimeout(function () {
+  const L = [];
+  const log = (m) => { L.push(m); console.log('PROBE ' + m); };
+  let bad = 0;
+  try {
+    const d = document.getElementById('f').contentDocument;
+    d.querySelectorAll('input[aria-label="Unit price"], input[aria-label="Line discount"], input[aria-label="Quantity"]').forEach((el, i) => {
+      const clipped = el.scrollWidth > el.clientWidth + 1;
+      if (clipped) bad++;
+      log((clipped ? 'CLIPPED ' : 'fits    ') + el.getAttribute('aria-label') + ' #' + i + ' value="' + el.value + '" client=' + el.clientWidth + ' scroll=' + el.scrollWidth + ' box=' + Math.round(el.getBoundingClientRect().width));
+    });
+    // also the checkout amount + totals
+    const tot = d.querySelectorAll('.pos-line .tabular');
+    tot.forEach((el) => { if (el.scrollWidth > el.clientWidth + 1) { bad++; log('CLIPPED line total "' + el.textContent.trim() + '" client=' + el.clientWidth + ' scroll=' + el.scrollWidth); } });
+  } catch (e) { bad++; log('EXCEPTION ' + e.message); }
+  const v = 'RESULT: ' + (bad ? 'FAIL (' + bad + ' clipped)' : 'PASS');
+  console.log('PROBE ' + v); console.log(v);
+  document.getElementById('out').textContent = L.join('\n') + '\n' + v;
+}, 2500);
+</script>
+</body>
+</html>

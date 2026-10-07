@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Inbox · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="inbox" data-title="Inbox" data-perm="messages.view">
+  <main x-data="inboxPage()">
+
+    <!-- ------------------------------------------------------- page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Inbox</h2>
+        <p class="page-subtitle">Everything the website sends you: customer messages, newsletter sign-ups and the emails we issued.</p>
+      </div>
+      <div class="page-actions">
+        <a href="shop/contact.html" target="_blank" rel="noopener" class="btn btn-secondary"><span x-html="ABM.icon('globe')"></span>Contact page</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+      </div>
+    </div>
+
+    <!-- --------------------------------------------------------- date range -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ------------------------------------------------------------- tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <button type="button" class="stat stat-danger text-left" @click="tab='messages'; filter='new'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Unread messages</div><div class="stat-value" x-text="counts.new"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('mail')"></span>
+        </div>
+        <div class="stat-meta" x-text="counts.new ? 'Waiting for a reply' : 'All caught up'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <button type="button" class="stat text-left" @click="tab='messages'; filter='all'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Messages · <span x-text="periodShort"></span></div><div class="stat-value" x-text="counts.inRange"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('chat')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="counts.replied"></span> replied · <span x-text="counts.archived"></span> archived</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <button type="button" class="stat stat-money text-left" @click="tab='subscribers'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Newsletter</div><div class="stat-value" x-text="counts.subscribers"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('users')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="counts.unsubscribed"></span> unsubscribed</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+      <button type="button" class="stat stat-accent text-left" @click="tab='emails'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Emails sent · <span x-text="periodShort"></span></div><div class="stat-value" x-text="counts.emails"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta">Invoices and confirmations</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </button>
+    </div>
+
+    <!-- -------------------------------------------------------------- tabs -->
+    <div class="card mt-4">
+      <div class="card-header !pb-0 !border-b-0">
+        <div class="tabs w-full">
+          <button type="button" class="tab" :class="tab==='messages' && 'active'" @click="tab='messages'">
+            Messages <span class="count" x-text="messagesAll.length"></span>
+          </button>
+          <button type="button" class="tab" :class="tab==='subscribers' && 'active'" @click="tab='subscribers'">
+            Newsletter <span class="count" x-text="subscribersAll.length"></span>
+          </button>
+          <button type="button" class="tab" :class="tab==='emails' && 'active'" @click="tab='emails'">
+            Email log <span class="count" x-text="emailsAll.length"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ===================================================== MESSAGES ==== -->
+      <template x-if="tab === 'messages'">
+        <div>
+          <div class="card-body !pt-4 flex flex-wrap items-center gap-2">
+            <div class="input-icon flex-1 min-w-[12rem]">
+              <span x-html="ABM.icon('search')"></span>
+              <input type="search" class="input" x-model="q" placeholder="Search name, phone, email, subject…">
+            </div>
+            <select class="select !w-auto" x-model="filter" x-sync="filter">
+              <option value="all">All statuses</option>
+              <option value="new">Unread</option>
+              <option value="read">Read</option>
+              <option value="replied">Replied</option>
+              <option value="archived">Archived</option>
+            </select>
+            <span class="text-sm text-slate-500" x-text="pager.total + ' message' + (pager.total === 1 ? '' : 's')"></span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>From</th>
+                  <th class="hidden md:table-cell">Subject</th>
+                  <th class="hidden lg:table-cell">Received</th>
+                  <th>Status</th>
+                  <th class="actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="m in pager.items" :key="m.id">
+                  <tr :class="m.status === 'new' && 'font-semibold'">
+                    <td>
+                      <button type="button" class="text-left" @click="open(m)">
+                        <span class="block text-slate-900 hover:text-navy-700" x-text="m.name"></span>
+                        <span class="block text-xs text-slate-500 font-normal" x-text="m.phone + (m.email ? ' · ' + m.email : '')"></span>
+                      </button>
+                    </td>
+                    <td class="hidden md:table-cell max-w-[22rem]">
+                      <button type="button" class="text-left w-full" @click="open(m)">
+                        <span class="block truncate" x-text="m.subject || '(no subject)'"></span>
+                        <span class="block text-xs text-slate-500 font-normal truncate" x-text="m.message"></span>
+                      </button>
+                    </td>
+                    <td class="hidden lg:table-cell text-slate-500 font-normal" x-text="ABM.utils.timeAgo(m.created_at)"></td>
+                    <td><span x-html="$badge(m.status, statusLabel(m.status))"></span></td>
+                    <td class="actions">
+                      <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="open(m)" title="Open"><span x-html="ABM.icon('eye','w-4 h-4')"></span></button>
+                      <a :href="waLink(m)" target="_blank" rel="noopener" class="btn btn-ghost btn-icon btn-sm" title="Reply on WhatsApp" x-show="m.phone"><span x-html="ABM.icon('chat','w-4 h-4')"></span></a>
+                      <button type="button" class="btn btn-ghost btn-icon btn-sm text-rose-600" @click="remove(m)" title="Delete" x-show="canDelete"><span x-html="ABM.icon('trash','w-4 h-4')"></span></button>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="!pager.items.length">
+                  <tr><td colspan="5">
+                    <div class="empty">
+                      <span x-html="ABM.icon('mail')"></span>
+                      <div class="empty-title">No messages here</div>
+                      <p class="text-sm">Messages sent from the website contact form land in this list.</p>
+                    </div>
+                  </td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pagination" x-show="pager.pages > 1" x-cloak>
+            <span x-text="'Showing ' + pager.from + '–' + pager.to + ' of ' + pager.total"></span>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="pager.page <= 1" @click="page--">Previous</button>
+              <span class="text-xs px-2" x-text="pager.page + ' / ' + pager.pages"></span>
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="pager.page >= pager.pages" @click="page++">Next</button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- ================================================== SUBSCRIBERS ==== -->
+      <template x-if="tab === 'subscribers'">
+        <div>
+          <div class="card-body !pt-4 flex flex-wrap items-center gap-2">
+            <div class="input-icon flex-1 min-w-[12rem]">
+              <span x-html="ABM.icon('search')"></span>
+              <input type="search" class="input" x-model="subQ" placeholder="Search an email address…">
+            </div>
+            <label class="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" class="checkbox" x-model="showInactive"> Include unsubscribed
+            </label>
+            <button type="button" class="btn btn-primary btn-sm" @click="addSub.open = true" x-show="canManage">
+              <span x-html="ABM.icon('plus','w-4 h-4')"></span>Add subscriber
+            </button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Email</th><th class="hidden sm:table-cell">Source</th><th class="hidden md:table-cell">Subscribed</th><th>Status</th><th class="actions">Actions</th></tr></thead>
+              <tbody>
+                <template x-for="s in subscribers" :key="s.id">
+                  <tr>
+                    <td class="mono" x-text="s.email"></td>
+                    <td class="hidden sm:table-cell text-slate-500" x-text="ABM.utils.titleCase(s.source || 'website')"></td>
+                    <td class="hidden md:table-cell text-slate-500" x-text="$date(s.created_at)"></td>
+                    <td><span x-html="$badge(s.is_active ? 'active' : 'inactive', s.is_active ? 'Subscribed' : 'Unsubscribed')"></span></td>
+                    <td class="actions">
+                      <a :href="'mailto:' + s.email" class="btn btn-ghost btn-icon btn-sm" title="Email"><span x-html="ABM.icon('mail','w-4 h-4')"></span></a>
+                      <button type="button" class="btn btn-ghost btn-sm" @click="toggleSub(s)" x-show="canManage" x-text="s.is_active ? 'Unsubscribe' : 'Resubscribe'"></button>
+                      <button type="button" class="btn btn-ghost btn-icon btn-sm text-rose-600" @click="removeSub(s)" title="Delete" x-show="canDelete"><span x-html="ABM.icon('trash','w-4 h-4')"></span></button>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="!subscribers.length">
+                  <tr><td colspan="5"><div class="empty"><span x-html="ABM.icon('users')"></span><div class="empty-title">No subscribers yet</div><p class="text-sm">Sign-ups from the storefront newsletter box appear here.</p></div></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+
+      <!-- ====================================================== EMAIL LOG == -->
+      <template x-if="tab === 'emails'">
+        <div>
+          <div class="card-body !pt-4 flex flex-wrap items-center gap-2">
+            <div class="input-icon flex-1 min-w-[12rem]">
+              <span x-html="ABM.icon('search')"></span>
+              <input type="search" class="input" x-model="mailQ" placeholder="Search recipient or subject…">
+            </div>
+            <select class="select !w-auto" x-model="mailTemplate" x-sync="mailTemplate">
+              <option value="all">All types</option>
+              <template x-for="t in mailTemplates" :key="t"><option :value="t" x-text="ABM.utils.titleCase(t)"></option></template>
+            </select>
+            <span class="text-sm text-slate-500" x-text="emails.length + ' email' + (emails.length === 1 ? '' : 's')"></span>
+          </div>
+
+          <div class="alert alert-info mx-5 mb-3">
+            <span x-html="ABM.icon('info')"></span>
+            <span>This prototype has no mail server, so messages are recorded here instead of being delivered. Connecting a mail service in the backend phase makes this a true sent-items log.</span>
+          </div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>To</th><th class="hidden md:table-cell">Subject</th><th class="hidden sm:table-cell">Type</th><th class="hidden lg:table-cell">Sent</th><th class="actions">Actions</th></tr></thead>
+              <tbody>
+                <template x-for="e in emails" :key="e.id">
+                  <tr>
+                    <td class="mono" x-text="e.to"></td>
+                    <td class="hidden md:table-cell max-w-[24rem]"><span class="block truncate" x-text="e.subject"></span></td>
+                    <td class="hidden sm:table-cell"><span class="badge badge-slate" x-text="ABM.utils.titleCase(e.template || 'generic')"></span></td>
+                    <td class="hidden lg:table-cell text-slate-500" x-text="ABM.utils.datetime(e.created_at)"></td>
+                    <td class="actions">
+                      <button type="button" class="btn btn-ghost btn-icon btn-sm" @click="preview(e)" title="Preview" x-show="e.body_html"><span x-html="ABM.icon('eye','w-4 h-4')"></span></button>
+                      <a :href="'mailto:' + e.to + '?subject=' + encodeURIComponent(e.subject)" class="btn btn-ghost btn-icon btn-sm" title="Email again"><span x-html="ABM.icon('mail','w-4 h-4')"></span></a>
+                    </td>
+                  </tr>
+                </template>
+                <template x-if="!emails.length">
+                  <tr><td colspan="5"><div class="empty"><span x-html="ABM.icon('receipt')"></span><div class="empty-title">No emails in this period</div></div></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- ============================================== MESSAGE DETAIL MODAL -->
+    <div x-show="sel" x-cloak class="modal-backdrop" @click.self="sel = null" @keydown.escape.window="sel = null">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" x-show="sel">
+        <template x-if="sel">
+          <div>
+            <div class="modal-header">
+              <div class="min-w-0">
+                <div class="modal-title" x-text="sel.subject || '(no subject)'"></div>
+                <div class="text-xs text-slate-500 mt-0.5">
+                  <span class="mono" x-text="sel.message_no || ('#' + sel.id)"></span> ·
+                  <span x-text="ABM.utils.datetime(sel.created_at)"></span>
+                </div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon" @click="sel = null" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+            </div>
+
+            <div class="modal-body space-y-4">
+              <!-- sender -->
+              <div class="flex flex-wrap items-center gap-3">
+                <span class="avatar w-10 h-10 text-sm" x-text="ABM.utils.initials(sel.name)"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="font-bold text-slate-900" x-text="sel.name"></div>
+                  <div class="text-sm text-slate-500">
+                    <span x-text="sel.phone"></span><span x-show="sel.email" x-cloak> · <span x-text="sel.email"></span></span>
+                  </div>
+                </div>
+                <span x-html="$badge(sel.status, statusLabel(sel.status))"></span>
+              </div>
+
+              <!-- known customer? -->
+              <div class="alert alert-info" x-show="matchedCustomer" x-cloak>
+                <span x-html="ABM.icon('user')"></span>
+                <span>Existing customer —
+                  <a :href="'customer-view.html?id=' + (matchedCustomer ? matchedCustomer.id : '')" class="font-semibold underline" x-text="matchedCustomer ? matchedCustomer.name : ''"></a>.
+                </span>
+              </div>
+
+              <!-- message -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed whitespace-pre-line text-slate-700" x-text="sel.message"></div>
+
+              <!-- internal note -->
+              <div>
+                <label class="label" for="msg-note">Internal note</label>
+                <textarea id="msg-note" class="textarea !min-h-[4.5rem]" x-model="noteDraft"
+                          placeholder="What did you tell the customer? Only staff can see this."></textarea>
+              </div>
+
+              <!-- reply -->
+              <div class="flex flex-wrap gap-2">
+                <a :href="waLink(sel)" target="_blank" rel="noopener" class="btn btn-money btn-sm" x-show="sel.phone">
+                  <span x-html="ABM.icon('chat','w-4 h-4')"></span>Reply on WhatsApp
+                </a>
+                <a :href="'tel:' + ABM.utils.escape(sel.phone)" class="btn btn-secondary btn-sm" x-show="sel.phone">
+                  <span x-html="ABM.icon('phone-call','w-4 h-4')"></span>Call
+                </a>
+                <a :href="mailLink(sel)" class="btn btn-secondary btn-sm" x-show="sel.email">
+                  <span x-html="ABM.icon('mail','w-4 h-4')"></span>Reply by email
+                </a>
+                <a :href="'repair-create.html?name=' + encodeURIComponent(sel.name) + '&phone=' + encodeURIComponent(sel.phone)"
+                   class="btn btn-secondary btn-sm" x-show="ABM.session.can('repairs.add')">
+                  <span x-html="ABM.icon('wrench','w-4 h-4')"></span>Create job card
+                </a>
+              </div>
+            </div>
+
+            <div class="modal-footer flex-wrap gap-2">
+              <button type="button" class="btn btn-danger-soft btn-sm mr-auto" @click="remove(sel)" x-show="canDelete">
+                <span x-html="ABM.icon('trash','w-4 h-4')"></span>Delete
+              </button>
+              <button type="button" class="btn btn-secondary" @click="setStatus(sel, 'archived')" x-show="canManage && sel.status !== 'archived'">Archive</button>
+              <button type="button" class="btn btn-secondary" @click="setStatus(sel, 'new')" x-show="canManage && sel.status !== 'new'">Mark unread</button>
+              <button type="button" class="btn btn-primary" @click="setStatus(sel, 'replied')" x-show="canManage">
+                <span x-html="ABM.icon('check')"></span>Mark replied
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- =============================================== EMAIL PREVIEW MODAL -->
+    <div x-show="mailSel" x-cloak class="modal-backdrop" @click.self="mailSel = null" @keydown.escape.window="mailSel = null">
+      <div class="modal-panel modal-xl" role="dialog" aria-modal="true" x-show="mailSel">
+        <template x-if="mailSel">
+          <div>
+            <div class="modal-header">
+              <div class="min-w-0">
+                <div class="modal-title truncate" x-text="mailSel.subject"></div>
+                <div class="text-xs text-slate-500 mt-0.5">To <span class="mono" x-text="mailSel.to"></span> · <span x-text="ABM.utils.datetime(mailSel.created_at)"></span></div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon" @click="mailSel = null" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+            </div>
+            <div class="modal-body">
+              <iframe x-ref="mailFrame" class="w-full rounded-xl border border-slate-200 bg-white" style="height:60vh" title="Email preview"></iframe>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="mailSel = null">Close</button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ============================================== ADD SUBSCRIBER MODAL -->
+    <div x-show="addSub.open" x-cloak class="modal-backdrop" @click.self="addSub.open = false" @keydown.escape.window="addSub.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" x-show="addSub.open">
+        <form @submit.prevent="saveSub()">
+          <div class="modal-header">
+            <div class="modal-title">Add a subscriber</div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="addSub.open = false" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+          </div>
+          <div class="modal-body">
+            <label class="label" for="sub-email">Email address <span class="req">*</span></label>
+            <input id="sub-email" type="email" class="input" x-model.trim="addSub.email" placeholder="customer@example.com" required>
+            <p class="field-error" x-show="addSub.error" x-cloak x-text="addSub.error"></p>
+            <p class="help">Use this for people who signed up in the shop rather than on the website.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="addSub.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary"><span x-html="ABM.icon('check')"></span>Add</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function inboxPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        range: null, tab: 'messages', q: '', filter: 'all', page: 1,
+        subQ: '', showInactive: false,
+        mailQ: '', mailTemplate: 'all',
+        sel: null, noteDraft: '', mailSel: null,
+        addSub: { open: false, email: '', error: '' },
+        tick: 0,
+        canManage: session.can('messages.edit'),
+        canDelete: session.can('messages.delete'),
+
+        init() {
+          this.range = ABM.range('this_month', () => { this.page = 1; }, 'inbox');
+          if (utils.qs('tab')) this.tab = utils.qs('tab');
+          if (utils.qs('status')) { this.tab = 'messages'; this.filter = utils.qs('status'); }
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('filter', () => { this.page = 1; });
+          this.$watch('tab', () => { this.page = 1; });
+        },
+
+        get periodShort() {
+          const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset);
+          return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : '');
+        },
+
+        /* ------------------------------------------------------- messages -- */
+        get messagesAll() { this.tick; return utils.sortBy(db.all('contact_messages'), 'created_at', 'desc'); },
+        get messagesInRange() { return this.messagesAll.filter((m) => this.range.contains(m.created_at)); },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.messagesInRange.filter((m) => {
+            if (this.filter !== 'all' && m.status !== this.filter) return false;
+            if (!q) return true;
+            return [m.name, m.phone, m.email, m.subject, m.message, m.message_no].join(' ').toLowerCase().includes(q);
+          });
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get counts() {
+          const all = this.messagesAll, inRange = this.messagesInRange;
+          return {
+            new: all.filter((m) => m.status === 'new').length,
+            inRange: inRange.length,
+            replied: inRange.filter((m) => m.status === 'replied').length,
+            archived: inRange.filter((m) => m.status === 'archived').length,
+            subscribers: db.all('newsletter_subscribers').filter((s) => s.is_active).length,
+            unsubscribed: db.all('newsletter_subscribers').filter((s) => !s.is_active).length,
+            emails: db.all('email_outbox').filter((e) => this.range.contains(e.created_at)).length,
+          };
+        },
+        statusLabel(s) { return ({ new: 'Unread', read: 'Read', replied: 'Replied', archived: 'Archived' })[s] || utils.titleCase(s); },
+        get matchedCustomer() {
+          if (!this.sel) return null;
+          const phone = utils.escape(this.sel.phone || '').replace(/\D/g, '').slice(-10);
+          const email = String(this.sel.email || '').toLowerCase();
+          if (!phone && !email) return null;
+          return db.all('customers').find((c) => !c.is_walkin && (
+            (phone && String(c.phone || '').replace(/\D/g, '').slice(-10) === phone) ||
+            (email && String(c.email || '').toLowerCase() === email)
+          )) || null;
+        },
+        open(m) {
+          this.sel = m;
+          this.noteDraft = m.notes || '';
+          if (m.status === 'new' && this.canManage) {
+            db.update('contact_messages', m.id, { status: 'read' });
+            db.audit('message.read', 'contact_message', m.id, 'Website message from ' + m.name + ' opened');
+            this.tick++;
+          }
+        },
+        saveNote(m) {
+          if (!this.canManage) return;
+          if ((m.notes || '') === this.noteDraft) return;
+          db.update('contact_messages', m.id, { notes: this.noteDraft });
+          this.tick++;
+        },
+        setStatus(m, status) {
+          if (!this.canManage) return;
+          this.saveNote(m);
+          const patch = { status };
+          if (status === 'replied') patch.replied_at = utils.now();
+          db.update('contact_messages', m.id, patch);
+          db.audit('message.' + status, 'contact_message', m.id, 'Message from ' + m.name + ' marked ' + status);
+          this.tick++;
+          ui.success('Marked ' + this.statusLabel(status).toLowerCase() + '.');
+          this.sel = null;
+        },
+        async remove(m) {
+          if (!this.canDelete) return;
+          const yes = await ui.confirm({ title: 'Delete this message?', message: 'The message from ' + m.name + ' will be removed permanently.', confirmText: 'Delete', danger: true });
+          if (!yes) return;
+          db.remove('contact_messages', m.id);
+          db.audit('message.delete', 'contact_message', m.id, 'Message from ' + m.name + ' deleted');
+          this.tick++;
+          this.sel = null;
+          ui.success('Message deleted.');
+        },
+        waLink(m) {
+          const digits = String(m.phone || '').replace(/\D/g, '');
+          const no = digits.startsWith('0') ? '92' + digits.slice(1) : digits;
+          const text = 'Assalam o alaikum ' + m.name + ', thank you for contacting ' + (db.setting('company_name') || 'us') + '.';
+          return 'https://wa.me/' + no + '?text=' + encodeURIComponent(text);
+        },
+        mailLink(m) {
+          const subject = 'Re: ' + (m.subject || 'Your message');
+          const body = 'Dear ' + m.name + ',\n\nThank you for contacting ' + (db.setting('company_name') || 'us') + '.\n\n\n---\nYour message:\n' + (m.message || '');
+          return 'mailto:' + encodeURIComponent(m.email || '') + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+        },
+
+        /* ---------------------------------------------------- subscribers -- */
+        get subscribersAll() { this.tick; return utils.sortBy(db.all('newsletter_subscribers'), 'created_at', 'desc'); },
+        get subscribers() {
+          const q = this.subQ.trim().toLowerCase();
+          return this.subscribersAll.filter((s) => (this.showInactive || s.is_active) && (!q || String(s.email).toLowerCase().includes(q)));
+        },
+        toggleSub(s) {
+          if (!this.canManage) return;
+          db.update('newsletter_subscribers', s.id, { is_active: s.is_active ? 0 : 1 });
+          this.tick++;
+          ui.success(s.is_active ? 'Unsubscribed.' : 'Resubscribed.');
+        },
+        async removeSub(s) {
+          if (!this.canDelete) return;
+          const yes = await ui.confirm({ title: 'Delete subscriber?', message: s.email + ' will be removed from the list.', confirmText: 'Delete', danger: true });
+          if (!yes) return;
+          db.remove('newsletter_subscribers', s.id);
+          this.tick++;
+          ui.success('Subscriber removed.');
+        },
+        saveSub() {
+          const email = String(this.addSub.email || '').trim().toLowerCase();
+          this.addSub.error = '';
+          if (!/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) { this.addSub.error = 'Enter a valid email address.'; return; }
+          if (db.all('newsletter_subscribers').some((s) => String(s.email).toLowerCase() === email)) { this.addSub.error = 'That address is already on the list.'; return; }
+          db.insert('newsletter_subscribers', { email, source: 'in-store', is_active: 1 });
+          db.audit('newsletter.add', 'newsletter_subscriber', null, 'Subscriber ' + email + ' added in store');
+          this.tick++;
+          this.addSub = { open: false, email: '', error: '' };
+          ui.success('Subscriber added.');
+        },
+
+        /* ------------------------------------------------------- email log -- */
+        get emailsAll() { this.tick; return utils.sortBy(db.all('email_outbox'), 'created_at', 'desc'); },
+        get mailTemplates() { return [...new Set(this.emailsAll.map((e) => e.template || 'generic'))]; },
+        get emails() {
+          const q = this.mailQ.trim().toLowerCase();
+          return this.emailsAll.filter((e) => {
+            if (!this.range.contains(e.created_at)) return false;
+            if (this.mailTemplate !== 'all' && (e.template || 'generic') !== this.mailTemplate) return false;
+            if (!q) return true;
+            return [e.to, e.subject].join(' ').toLowerCase().includes(q);
+          });
+        },
+        preview(e) {
+          this.mailSel = e;
+          this.$nextTick(() => {
+            const frame = this.$refs.mailFrame;
+            if (!frame) return;
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            doc.open(); doc.write(e.body_html || '<p style="font:14px system-ui;padding:24px">This email has no stored body.</p>'); doc.close();
+          });
+        },
+
+        /* ----------------------------------------------------------- export -- */
+        exportCsv() {
+          let rows, cols, name;
+          if (this.tab === 'subscribers') {
+            rows = this.subscribers;
+            cols = [{ key: 'email', label: 'Email' }, { key: 'source', label: 'Source' },
+              { label: 'Subscribed', value: (r) => utils.date(r.created_at) },
+              { label: 'Status', value: (r) => (r.is_active ? 'Subscribed' : 'Unsubscribed') }];
+            name = 'newsletter-subscribers';
+          } else if (this.tab === 'emails') {
+            rows = this.emails;
+            cols = [{ key: 'to', label: 'To' }, { key: 'subject', label: 'Subject' }, { key: 'template', label: 'Type' },
+              { label: 'Sent', value: (r) => utils.datetime(r.created_at) }];
+            name = 'email-log';
+          } else {
+            rows = this.filtered;
+            cols = [{ key: 'message_no', label: 'Reference' }, { key: 'name', label: 'Name' }, { key: 'phone', label: 'Phone' },
+              { key: 'email', label: 'Email' }, { key: 'subject', label: 'Subject' }, { key: 'message', label: 'Message' },
+              { label: 'Status', value: (r) => this.statusLabel(r.status) },
+              { label: 'Received', value: (r) => utils.datetime(r.created_at) },
+              { key: 'notes', label: 'Internal note' }];
+            name = 'website-messages';
+          }
+          if (!rows.length) { ui.warn('Nothing to export in this view.'); return; }
+          if (!utils.download(name + '-' + utils.today() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

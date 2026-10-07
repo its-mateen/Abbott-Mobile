@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Dashboard · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="dashboard" data-title="Dashboard" data-perm="dashboard.view">
+  <main x-data="dashboardPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Good <span x-text="greeting"></span>, <span x-text="user.name.split(' ')[0]"></span> 👋</h2>
+        <p class="page-subtitle"><span x-text="ABM.utils.date(new Date(),'long')"></span> · Showing <b x-text="scope==='all' ? 'all branches' : branch.name"></b></p>
+      </div>
+      <div class="page-actions">
+        <template x-if="isSuperAdmin">
+          <div class="inline-flex rounded-xl border border-slate-300 bg-white p-0.5 text-sm font-semibold">
+            <button type="button" class="px-3 py-1.5 rounded-lg" :class="scope==='branch' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setScope('branch')">This branch</button>
+            <button type="button" class="px-3 py-1.5 rounded-lg" :class="scope==='all' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setScope('all')">All branches</button>
+          </div>
+        </template>
+        <a href="pos.html" class="btn btn-money"><span x-html="ABM.icon('cart')"></span>New Sale</a>
+        <a href="repair-create.html" class="btn btn-secondary" x-show="ABM.session.can('repairs.add')"><span x-html="ABM.icon('wrench')"></span>New Repair</a>
+        <a href="day-end.html" class="btn btn-secondary"><span x-html="ABM.icon('lock')"></span>Day-End</a>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'sales.html?' + range.query" class="stat stat-money" title="Open sales for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Sales · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.sales, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta flex items-center gap-1.5 flex-wrap">
+          <span class="badge" :class="k.salesDelta >= 0 ? 'badge-green' : 'badge-red'" x-show="k.prevSales > 0"><span x-html="ABM.icon(k.salesDelta >= 0 ? 'trend-up' : 'trend-down','w-3 h-3')"></span><span x-text="(k.salesDelta>=0?'+':'') + k.salesDelta + '%'"></span></span>
+          <span x-text="k.invoices + ' invoice' + (k.invoices===1?'':'s') + (k.prevSales > 0 ? ' · vs previous period' : '')"></span>
+        </div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-profit-loss.html?' + range.query" class="stat stat-accent" title="Open profit & loss for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Gross profit · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.profit, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('chart')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.margin + '% margin'"></span> · expenses <b class="text-rose-600" x-text="$money(k.expenses, {decimals:0})"></b> · net <b :class="k.net >= 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="$money(k.net, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-receivables.html" class="stat stat-warning" title="Open receivables aging">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Receivables (Khata)</div><div class="stat-value" x-text="$money(k.receivables, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('users')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.debtors"></span> customers owe · payables <b class="text-rose-600" x-text="$money(k.payables, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-stock-valuation.html" class="stat" title="Open stock valuation">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Stock value (cost)</div><div class="stat-value" x-text="$money(k.stockValue, {decimals:0})"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.units"></span> units · <span class="font-semibold" :class="k.lowStock ? 'text-rose-600' : 'text-slate-500'" x-text="k.lowStock + ' low stock'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Quick stats strip (clickable) -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+      <a :href="'purchases.html?' + range.query" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+        <span class="chip chip-slate !w-9 !h-9" x-html="ABM.icon('truck','w-4 h-4')"></span>
+        <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Purchases</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.purchases,{decimals:0})"></div></div>
+      </a>
+      <a :href="'expenses.html?' + range.query" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+        <span class="chip chip-danger !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+        <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Expenses</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.expenses,{decimals:0})"></div></div>
+      </a>
+      <a :href="'returns.html?' + range.query" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+        <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('return','w-4 h-4')"></span>
+        <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Returns</div><div class="text-sm font-bold text-slate-900 truncate" x-text="k.returns + ' · ' + $money(k.returnsAmount,{decimals:0})"></div></div>
+      </a>
+      <a href="report-payables.html" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+        <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('store','w-4 h-4')"></span>
+        <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Payables</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.payables,{decimals:0})"></div></div>
+      </a>
+    </div>
+
+    <!-- REPAIRS ROW: added by the repairs module (open jobs / ready for pickup / overdue / repair revenue for range) — use range.contains(job.received_at) -->
+
+    <!-- Charts row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+      <div class="card lg:col-span-2">
+        <div class="card-header">
+          <div><div class="card-title">Sales trend</div><div class="card-subtitle" x-text="chartSubtitle"></div></div>
+          <a :href="'report-sales.html?' + range.query" class="text-xs font-semibold text-navy-700 hover:underline">Sales report</a>
+        </div>
+        <div class="card-body"><div class="h-64 sm:h-72"><canvas id="salesChart"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div><div class="card-title">Payment mix</div><div class="card-subtitle" x-text="range.label"></div></div></div>
+        <div class="card-body">
+          <div class="h-44"><canvas id="payChart"></canvas></div>
+          <ul class="mt-4 space-y-2 text-sm">
+            <template x-for="p in payMix" :key="p.method">
+              <li class="flex items-center gap-2">
+                <span class="w-2.5 h-2.5 rounded-full flex-none" :style="'background:'+p.color"></span>
+                <span class="flex-1 text-slate-600 truncate" x-text="ABM.ui.statusLabel(p.method)"></span>
+                <span class="font-semibold tabular" x-text="$money(p.amount,{decimals:0})"></span>
+                <span class="text-xs text-slate-400 w-10 text-right" x-text="p.pct+'%'"></span>
+              </li>
+            </template>
+            <template x-if="!payMix.length"><li class="empty py-6 text-sm">No payments in this period.</li></template>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tables row -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+      <div class="card lg:col-span-2">
+        <div class="card-header">
+          <div class="card-title">Recent sales</div>
+          <a :href="'sales.html?' + range.query" class="btn btn-ghost btn-sm">View all <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Invoice</th><th>Customer</th><th class="hidden md:table-cell">Branch</th><th class="hidden sm:table-cell">Time</th><th>Payment</th><th class="num">Total</th></tr></thead>
+            <tbody>
+              <template x-for="s in recentSales" :key="s.id">
+                <tr>
+                  <td><a :href="'sale-view.html?id='+s.id" class="font-semibold text-navy-700 hover:underline mono" x-text="s.invoice_no"></a></td>
+                  <td><div class="font-medium text-slate-800" x-text="ABM.db.customerName(s.customer_id)"></div><div class="text-xs text-slate-400" x-text="s.items + ' item' + (s.items>1?'s':'')"></div></td>
+                  <td class="hidden md:table-cell"><span class="badge badge-slate" x-text="ABM.db.branchCode(s.branch_id)"></span></td>
+                  <td class="hidden sm:table-cell text-slate-500" x-text="ABM.utils.timeAgo(s.sale_date)"></td>
+                  <td><span x-html="s.due_amount > 0 ? $badge('credit','Khata') : $badge(s.method)"></span></td>
+                  <td class="num font-semibold" x-text="$money(s.total)"></td>
+                </tr>
+              </template>
+              <template x-if="!recentSales.length"><tr><td colspan="6" class="empty">No sales in this period.</td></tr></template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <div class="card">
+          <div class="card-header"><div class="card-title">Low stock alerts</div><a href="stock.html?filter=low" class="text-xs font-semibold text-navy-700 hover:underline">See all</a></div>
+          <ul class="divide-y divide-slate-100">
+            <template x-for="p in lowStock" :key="p.id">
+              <li><a :href="'product-view.html?id='+p.pid" class="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50">
+                <span class="w-8 h-8 rounded-lg flex items-center justify-center flex-none" :class="p.qty===0 ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-700'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                <div class="min-w-0 flex-1"><div class="text-sm font-medium text-slate-800 truncate" x-text="p.label"></div><div class="text-xs text-slate-500">Min <span x-text="p.min_stock"></span></div></div>
+                <span class="badge" :class="p.qty===0 ? 'badge-red' : 'badge-amber'" x-text="p.qty + ' left'"></span>
+              </a></li>
+            </template>
+            <template x-if="!lowStock.length"><li class="empty py-8 text-sm">All products above minimum stock.</li></template>
+          </ul>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Transfers needing action</div><a href="transfers.html" class="text-xs font-semibold text-navy-700 hover:underline">Open</a></div>
+          <ul class="divide-y divide-slate-100">
+            <template x-for="t in transfers" :key="t.id">
+              <li class="px-5 py-2.5">
+                <a :href="'transfer-view.html?id='+t.id" class="flex items-center gap-3">
+                  <div class="min-w-0 flex-1"><div class="text-sm font-semibold text-navy-700 mono" x-text="t.transfer_no"></div><div class="text-xs text-slate-500" x-text="ABM.db.branchCode(t.from_branch_id)+' → '+ABM.db.branchCode(t.to_branch_id)+' · '+t.items+' lines'"></div></div>
+                  <span x-html="$badge(t.status)"></span>
+                </a>
+              </li>
+            </template>
+            <template x-if="!transfers.length"><li class="empty py-8 text-sm">No transfers pending.</li></template>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top products -->
+    <div class="card mt-4">
+      <div class="card-header"><div><div class="card-title">Top selling products</div><div class="card-subtitle">By revenue · <span x-text="range.label"></span></div></div><a :href="'report-sales.html?' + range.query + '#products'" class="text-xs font-semibold text-navy-700 hover:underline">Full report</a></div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr><th>#</th><th>Product</th><th class="hidden sm:table-cell">Type</th><th class="num">Qty</th><th class="num">Revenue</th><th class="num hidden md:table-cell">Gross profit</th><th class="hidden lg:table-cell w-40">Share</th></tr></thead>
+          <tbody>
+            <template x-for="(p, i) in topProducts" :key="p.id">
+              <tr>
+                <td class="text-slate-400" x-text="i+1"></td>
+                <td><a :href="'product-view.html?id='+p.id" class="font-medium text-slate-800 hover:text-navy-700" x-text="p.label"></a></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(p.product_type)"></span></td>
+                <td class="num" x-text="p.qty"></td>
+                <td class="num font-semibold" x-text="$money(p.revenue,{decimals:0})"></td>
+                <td class="num hidden md:table-cell text-emerald-700" x-text="$money(p.profit,{decimals:0})"></td>
+                <td class="hidden lg:table-cell"><div class="progress"><div :style="'width:'+p.share+'%'"></div></div></td>
+              </tr>
+            </template>
+            <template x-if="!topProducts.length"><tr><td colspan="7" class="empty">No sales in this period.</td></tr></template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function dashboardPage() {
+      const { db, utils, session } = ABM;
+      return {
+        user: session.user() || { name: 'User' },
+        branch: session.branch() || { name: '' },
+        isSuperAdmin: session.isSuperAdmin(),
+        scope: session.isSuperAdmin() ? (localStorage.getItem('abm.dash.scope') || 'branch') : 'branch',
+        greeting: (() => { const h = new Date().getHours(); return h < 12 ? 'morning' : h < 17 ? 'afternoon' : 'evening'; })(),
+        range: null, k: {}, payMix: [], recentSales: [], lowStock: [], transfers: [], topProducts: [], charts: {}, chartSubtitle: '',
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        setScope(s) { this.scope = s; localStorage.setItem('abm.dash.scope', s); this.refresh(); },
+        inScope(row) { return this.scope === 'all' || row.branch_id === session.branchId(); },
+        init() {
+          this.range = ABM.range('today', () => this.refresh(), 'dashboard');
+          this.refresh();
+          ABM.theme.onChange(() => this.drawCharts());
+        },
+        refresh() { this.compute(); this.$nextTick(() => this.drawCharts()); },
+        compute() {
+          const r = this.range;
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && this.inScope(s));
+          const items = db.all('sale_items');
+          const payments = db.all('sale_payments');
+          const inRange = sales.filter((s) => r.contains(s.sale_date));
+          const prev = r.previous;
+          const inPrev = sales.filter((s) => utils.inRange(s.sale_date, prev));
+          const ids = new Set(inRange.map((s) => s.id));
+          const rItems = items.filter((i) => ids.has(i.sale_id));
+          const revenue = utils.sum(rItems, (i) => (i.total / (i.quantity || 1)) * (i.quantity - (i.returned_quantity || 0)));
+          const cost = utils.sum(rItems, (i) => (Number(i.unit_cost) || 0) * (i.quantity - (i.returned_quantity || 0)));
+          const profit = utils.round2(revenue - cost);
+          const total = utils.sum(inRange, 'total'), prevTotal = utils.sum(inPrev, 'total');
+          const expenses = utils.sum(db.all('expenses').filter((e) => this.inScope(e) && r.contains(e.expense_date)), 'amount');
+          const purchases = utils.sum(db.all('purchases').filter((p) => p.status !== 'cancelled' && this.inScope(p) && r.contains(p.purchase_date)), 'total');
+          const returns = db.all('sale_returns').filter((x) => this.inScope(x) && r.contains(x.return_date));
+          const customers = db.all('customers');
+          const stock = db.all('branch_stock').filter((s) => this.inScope(s));
+          const products = db.all('products');
+          this.k = {
+            sales: total, invoices: inRange.length, prevSales: prevTotal, salesDelta: prevTotal ? Math.round((total - prevTotal) / prevTotal * 100) : (total ? 100 : 0),
+            profit, margin: revenue ? Math.round(profit / revenue * 100) : 0, expenses, net: utils.round2(profit - expenses), purchases,
+            returns: returns.length, returnsAmount: utils.sum(returns, 'refund_amount'),
+            receivables: utils.sum(customers.filter((c) => c.balance > 0), 'balance'), debtors: customers.filter((c) => c.balance > 0).length,
+            payables: utils.sum(db.all('suppliers').filter((s) => s.balance > 0), 'balance'),
+            stockValue: utils.sum(stock, (s) => s.quantity * s.avg_cost), units: stock.reduce((a, s) => a + s.quantity, 0), lowStock: 0,
+          };
+          // payment mix
+          const colors = { cash: '#059669', card: '#0369a1', jazzcash: '#e11d48', easypaisa: '#16a34a', bank_transfer: '#1a336a', store_credit: '#7c3aed', credit: '#d97706' };
+          const mix = {};
+          payments.filter((p) => ids.has(p.sale_id)).forEach((p) => { mix[p.method] = (mix[p.method] || 0) + p.amount; });
+          const due = utils.sum(inRange, 'due_amount'); if (due > 0) mix.credit = due;
+          const mixTotal = Object.values(mix).reduce((a, b) => a + b, 0) || 1;
+          this.payMix = Object.entries(mix).map(([method, amount]) => ({ method, amount, pct: Math.round(amount / mixTotal * 100), color: colors[method] || '#94a3b8' })).sort((a, b) => b.amount - a.amount);
+          // recent sales
+          this.recentSales = utils.sortBy(inRange, 'sale_date', 'desc').slice(0, 8).map((s) => { const pays = payments.filter((p) => p.sale_id === s.id); return { ...s, items: items.filter((i) => i.sale_id === s.id).length, method: pays.length > 1 ? 'split' : (pays[0] ? pays[0].method : 'credit') }; });
+          // low stock
+          const branchIds = this.scope === 'all' ? db.all('branches').filter((b) => b.is_active).map((b) => b.id) : [session.branchId()];
+          const low = [];
+          products.filter((p) => p.is_active && db.isStockTracked(p)).forEach((p) => branchIds.forEach((bid) => { const qty = db.stockQty(bid, p.id); if (qty <= p.min_stock) low.push({ id: p.id + '-' + bid, pid: p.id, label: db.productLabel(p.id) + (this.scope === 'all' ? ' (' + db.branchCode(bid) + ')' : ''), qty, min_stock: p.min_stock, icon: p.device_type === 'laptop' || p.device_type === 'desktop' ? 'laptop' : db.isSerialized(p) ? 'phone' : 'cube' }); }));
+          this.k.lowStock = low.length;
+          this.lowStock = utils.sortBy(low, 'qty').slice(0, 6);
+          // transfers
+          this.transfers = db.all('stock_transfers').filter((t) => ['pending', 'approved', 'shipped'].includes(t.status) && (this.scope === 'all' || t.from_branch_id === session.branchId() || t.to_branch_id === session.branchId())).slice(0, 5).map((t) => ({ ...t, items: db.all('transfer_items').filter((i) => i.transfer_id === t.id).length }));
+          // top products
+          const agg = {};
+          rItems.forEach((i) => { const a = agg[i.product_id] = agg[i.product_id] || { id: i.product_id, qty: 0, revenue: 0, cost: 0 }; const q = i.quantity - (i.returned_quantity || 0); a.qty += q; a.revenue += i.total / (i.quantity || 1) * q; a.cost += (Number(i.unit_cost) || 0) * q; });
+          const top = Object.values(agg).sort((a, b) => b.revenue - a.revenue).slice(0, 8);
+          const maxRev = top[0] ? top[0].revenue : 1;
+          this.topProducts = top.map((a) => { const p = db.product(a.id) || {}; return { ...a, label: db.productLabel(a.id), product_type: db.productType(p), profit: utils.round2(a.revenue - a.cost), share: Math.round(a.revenue / maxRev * 100) }; });
+        },
+        drawCharts() {
+          if (!window.Chart || !document.getElementById('salesChart') || !document.getElementById('payChart')) return;
+          const { db, utils } = ABM;
+          const tc = ABM.theme.chart();
+          const r = this.range;
+          let days = r.days();
+          // group by month when the range is long
+          const byMonth = days.length > 62;
+          const buckets = byMonth ? [...new Set(days.map((d) => d.slice(0, 7)))] : days;
+          const keyOf = (d) => byMonth ? d.slice(0, 7) : d.slice(0, 10);
+          const label = (b) => byMonth ? utils.parseDate(b + '-01').toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }) : utils.date(b, 'short');
+          if (r.preset === 'today' || r.preset === 'yesterday') { // single day: show last 14 days for context
+            days = Array.from({ length: 14 }, (_, i) => utils.isoDate(utils.addDays(utils.parseDate(r.value.to || utils.today()), i - 13)));
+            this.chartSubtitle = 'Last 14 days ending ' + utils.date(r.value.to);
+          } else { this.chartSubtitle = (byMonth ? 'By month · ' : 'By day · ') + r.label; }
+          const labels = (r.preset === 'today' || r.preset === 'yesterday') ? days : buckets;
+          const branches = this.scope === 'all' ? db.all('branches').filter((b) => b.is_active) : [ABM.session.branch()];
+          const sales = db.all('sales').filter((s) => s.status !== 'void');
+          const datasets = branches.map((b, i) => ({ label: b.name, data: labels.map((k) => utils.sum(sales.filter((s) => s.branch_id === b.id && keyOf(s.sale_date) === k), 'total')), backgroundColor: tc.series[i % tc.series.length], borderRadius: 4, stack: 'sales' }));
+          Object.values(this.charts).forEach((c) => c.destroy());
+          Chart.defaults.color = tc.tick;
+          Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+          this.charts.sales = new Chart(document.getElementById('salesChart'), {
+            type: 'bar', data: { labels: labels.map(label), datasets },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: tc.tick } }, tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + utils.money(c.raw, { decimals: 0 }) } } }, scales: { x: { stacked: true, grid: { display: false }, ticks: { color: tc.tick, maxTicksLimit: 14 } }, y: { stacked: true, ticks: { color: tc.tick, callback: (v) => (v >= 1000 ? Math.round(v / 1000) + 'k' : v) }, grid: { color: tc.grid } } } },
+          });
+          this.charts.pay = new Chart(document.getElementById('payChart'), {
+            type: 'doughnut', data: { labels: this.payMix.map((p) => ABM.ui.statusLabel(p.method)), datasets: [{ data: this.payMix.map((p) => p.amount), backgroundColor: this.payMix.map((p) => p.color), borderWidth: 2 }] },
+            options: { responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ' ' + utils.money(c.raw, { decimals: 0 }) } } } },
+          });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

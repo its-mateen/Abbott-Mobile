@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Stock Valuation · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="report-stock-valuation" data-title="Stock Valuation" data-perm="reports.view">
+  <main x-data="stockValuationPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Stock Valuation</h2>
+        <p class="page-subtitle">What the stock on the shelf is worth · <b x-text="methodLabel"></b> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>Reports</a>
+        <a href="report-inventory.html" class="btn btn-secondary"><span x-html="ABM.icon('archive')"></span>Inventory</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!rows.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" @click="ABM.ui.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+      </div>
+    </div>
+
+    <!-- Toolbar: valuation method + branch + filters -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-3">
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
+          <div class="tabs-pill" role="tablist" aria-label="Valuation method">
+            <template x-for="m in methods" :key="m.key">
+              <button type="button" class="tab" :id="'method-' + m.key" :class="method === m.key && 'active'" @click="method = m.key" x-text="m.label"></button>
+            </template>
+          </div>
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg" x-text="branch.code + ' · ' + branch.name"></span>
+          </template>
+          <span class="text-xs text-slate-500 ml-auto whitespace-nowrap">As of <b x-text="$date(asOf)"></b></span>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+          <div class="relative sm:col-span-2">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input input-sm pl-9" placeholder="Search product, SKU, model…" x-model.debounce.200ms="f.q" aria-label="Search products">
+          </div>
+          <select class="select input-sm" x-model="f.category" aria-label="Category">
+            <option value="">All categories</option>
+            <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+          </select>
+          <select class="select input-sm" x-model="f.type" aria-label="Product type">
+            <option value="">All product types</option>
+            <option value="device">Device</option>
+            <option value="accessory">Accessory</option>
+            <option value="part">Spare Part</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Method explanation -->
+    <div class="alert no-print mb-4" :class="method === 'weighted' ? 'alert-info' : 'alert-warning'">
+      <span x-html="ABM.icon('info')"></span>
+      <div class="min-w-0">
+        <div class="font-semibold" x-text="methodLabel + ' method'"></div>
+        <div x-text="methodHelp"></div>
+        <template x-if="method !== 'weighted'">
+          <div class="mt-1">
+            Difference vs weighted average:
+            <b :class="diff > 0 ? 'text-emerald-700' : diff < 0 ? 'text-rose-600' : ''" x-text="(diff >= 0 ? '+' : '') + $money(diff, {decimals:0})"></b>
+            <span x-show="waTotal > 0" x-text="'(' + (diff >= 0 ? '+' : '') + diffPct + '% · weighted average = ' + $money(waTotal, {decimals:0}) + ')'"></span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Print header -->
+    <div class="hidden print:block mb-4">
+      <div class="text-lg font-bold" x-text="company"></div>
+      <div class="text-sm">Stock Valuation Report · <span x-text="methodLabel"></span> · <span x-text="scopeLabel"></span></div>
+      <div class="text-xs">Valued as of <span x-text="ABM.utils.datetime(new Date())"></span></div>
+    </div>
+
+    <div class="print-area">
+      <!-- KPI tiles -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <a href="products.html" class="stat stat-accent" title="Open the product catalog">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">SKUs in stock</div><div class="stat-value" x-text="ABM.utils.num(totals.skus)"></div></div>
+            <span class="chip chip-navy" x-html="ABM.icon('cube')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="totals.lines"></span> branch stock line<span x-text="totals.lines === 1 ? '' : 's'"></span> · services excluded</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="stock.html" class="stat" title="Open branch stock">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Units on hand</div><div class="stat-value" x-text="ABM.utils.num(totals.units)"></div></div>
+            <span class="chip chip-info" x-html="ABM.icon('archive')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="totals.serialized"></span> serialized · <span x-text="ABM.utils.num(totals.units - totals.serialized)"></span> loose units</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="report-balance-sheet.html" class="stat stat-money" title="See inventory on the balance sheet">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Stock value (cost)</div><div class="stat-value" x-text="$money(totals.cost, {decimals:0})"></div></div>
+            <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+          </div>
+          <div class="stat-meta">avg <span x-text="$money(totals.units ? totals.cost / totals.units : 0, {decimals:0})"></span> per unit</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="report-profit-loss.html" class="stat stat-warning" title="Open profit &amp; loss">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Retail value</div><div class="stat-value" x-text="$money(totals.retail, {decimals:0})"></div></div>
+            <span class="chip chip-warning" x-html="ABM.icon('tag')"></span>
+          </div>
+          <div class="stat-meta">potential margin <b class="text-emerald-700" x-text="$money(totals.retail - totals.cost, {decimals:0})"></b> · <span x-text="totals.marginPct + '%'"></span></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </div>
+
+      <!-- Value by category -->
+      <div class="card mt-4" x-show="groups.length">
+        <div class="card-header"><div><div class="card-title">Where the value sits</div><div class="card-subtitle">Stock value at cost by category</div></div></div>
+        <div class="card-body space-y-2.5">
+          <template x-for="g in groups" :key="'bar-' + g.id">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 text-sm">
+                <span class="flex-1 min-w-0 truncate text-slate-700" x-text="g.name"></span>
+                <span class="font-semibold tabular whitespace-nowrap" x-text="$money(g.cost, {decimals:0})"></span>
+                <span class="text-xs text-slate-400 w-12 text-right" x-text="g.share + '%'"></span>
+              </div>
+              <div class="progress mt-1"><div :style="'width:' + Math.max(2, g.share) + '%'"></div></div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- Valuation table -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Valuation detail</div><div class="card-subtitle">Grouped by category · click a category row to collapse it</div></div>
+          <div class="flex items-center gap-2 no-print">
+            <button type="button" class="btn btn-ghost btn-sm" @click="toggleAll()" x-text="allCollapsed ? 'Expand all' : 'Collapse all'"></button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th class="hidden 2xl:table-cell">Category</th>
+                <th class="hidden sm:table-cell">Type</th>
+                <th class="hidden md:table-cell" x-show="showBranch">Branch</th>
+                <th class="num">Qty</th>
+                <th class="num hidden sm:table-cell">Unit cost</th>
+                <th class="num">Stock value</th>
+                <th class="num hidden md:table-cell">Retail value</th>
+                <th class="num hidden lg:table-cell">Margin %</th>
+              </tr>
+            </thead>
+            <template x-for="g in groups" :key="g.id">
+              <tbody>
+                <tr class="cursor-pointer bg-slate-50" @click="toggle(g.id)">
+                  <td :colspan="showBranch ? 4 : 3">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-slate-400 flex-none" x-html="ABM.icon(collapsed[g.id] ? 'chevron-right' : 'chevron-down','w-4 h-4')"></span>
+                      <span class="font-bold text-slate-800 truncate" x-text="g.name"></span>
+                      <span class="badge badge-slate flex-none" x-text="g.rows.length"></span>
+                    </div>
+                  </td>
+                  <td class="num font-semibold text-slate-700" x-text="ABM.utils.num(g.units)"></td>
+                  <td class="num hidden sm:table-cell"></td>
+                  <td class="num font-bold text-slate-900 whitespace-nowrap" x-text="$money(g.cost, {decimals:0})"></td>
+                  <td class="num hidden md:table-cell font-semibold whitespace-nowrap" x-text="$money(g.retail, {decimals:0})"></td>
+                  <td class="num hidden lg:table-cell text-emerald-700 font-semibold" x-text="g.marginPct + '%'"></td>
+                </tr>
+                <template x-for="r in (collapsed[g.id] ? [] : g.rows)" :key="r.key">
+                  <tr>
+                    <td>
+                      <a :href="'product-view.html?id=' + r.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[11rem] sm:max-w-[16rem] xl:max-w-[22rem]" x-text="r.label"></a>
+                      <div class="text-[11px] text-slate-400 mono truncate" x-text="r.sku"></div>
+                      <div class="text-[11px] text-slate-400 md:hidden" x-show="showBranch" x-text="r.branchCode"></div>
+                    </td>
+                    <td class="hidden 2xl:table-cell text-slate-500 truncate max-w-[10rem]" x-text="r.category"></td>
+                    <td class="hidden sm:table-cell"><span x-html="$badge(r.type)"></span></td>
+                    <td class="hidden md:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                    <td class="num font-semibold" x-text="ABM.utils.num(r.qty)"></td>
+                    <td class="num hidden sm:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.unitCost, {decimals:0})"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(r.value, {decimals:0})"></td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.retailValue, {decimals:0})"></td>
+                    <td class="num hidden lg:table-cell" :class="r.marginPct < 10 ? 'text-rose-600' : 'text-emerald-700'" x-text="r.marginPct + '%'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </template>
+            <tbody>
+              <template x-if="!groups.length">
+                <tr><td colspan="9">
+                  <div class="empty">
+                    <span x-html="ABM.icon('cube')"></span>
+                    <div class="empty-title">Nothing to value</div>
+                    <div class="text-sm mt-1">No stock-tracked products hold quantity for this selection.</div>
+                    <div class="mt-4 flex justify-center gap-2 flex-wrap no-print">
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                      <a href="purchase-create.html" class="btn btn-primary btn-sm">Receive stock</a>
+                    </div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+            <tfoot x-show="groups.length">
+              <tr>
+                <td :colspan="showBranch ? 4 : 3">Grand total · <span x-text="methodLabel"></span></td>
+                <td class="num" x-text="ABM.utils.num(totals.units)"></td>
+                <td class="num hidden sm:table-cell"></td>
+                <td class="num whitespace-nowrap" x-text="$money(totals.cost, {decimals:0})"></td>
+                <td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(totals.retail, {decimals:0})"></td>
+                <td class="num hidden lg:table-cell text-emerald-700" x-text="totals.marginPct + '%'"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-footer text-xs text-slate-500">
+          Valuation reflects stock on hand right now — it is not a historical snapshot. Services and non-stock items are excluded.
+          <span x-show="method === 'actual'">Non-serialized items fall back to weighted average cost because they have no per-unit cost.</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function stockValuationPage() {
+      const { db, utils, ui, session } = ABM;
+      const METHODS = [
+        { key: 'weighted', label: 'Weighted Average', help: 'Every unit is valued at the running average cost held on the branch stock record (branch_stock.avg_cost x quantity). This is the value used by the balance sheet and profit & loss.' },
+        { key: 'fifo', label: 'FIFO', help: 'Inbound stock movements build cost layers per branch and product in date order; outbound movements consume the oldest layers first. The units still on hand are valued at the cost of the layers that remain.' },
+        { key: 'actual', label: 'Actual (per unit)', help: 'Serialized units (IMEI / serial numbers) are valued at the exact cost recorded when each unit was received — only units with status available or returned are counted.' },
+      ];
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branch: session.branch() || { code: '', name: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories').filter((c) => c.product_type !== 'service'), 'name'),
+        company: db.setting('company_name', 'Abbott Mobile'),
+        methods: METHODS,
+        method: 'weighted',
+        asOf: utils.today(),
+        f: { branch: String(session.branchId() || ''), q: '', category: '', type: '' },
+        rows: [], groups: [], collapsed: {},
+        totals: { skus: 0, lines: 0, units: 0, serialized: 0, cost: 0, retail: 0, marginPct: 0 },
+        waTotal: 0,
+
+        get methodLabel() { const m = METHODS.find((x) => x.key === this.method); return m ? m.label : ''; },
+        get methodHelp() { const m = METHODS.find((x) => x.key === this.method); return m ? m.help : ''; },
+        get scopeLabel() { return this.f.branch === 'all' ? 'All branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.f.branch === 'all'; },
+        get hasFilters() { return !!(this.f.q || this.f.category || this.f.type); },
+        get diff() { return utils.round2(this.totals.cost - this.waTotal); },
+        get diffPct() { return this.waTotal ? Math.round((this.totals.cost - this.waTotal) / this.waTotal * 1000) / 10 : 0; },
+        get allCollapsed() { return this.groups.length > 0 && this.groups.every((g) => !!this.collapsed[g.id]); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); this.f.branch = (b === 'all' || this.branches.some((x) => String(x.id) === b)) ? b : 'all'; }
+          const m = utils.qs('method'); if (METHODS.some((x) => x.key === m)) this.method = m;
+          const c = utils.qs('category'); if (c && db.find('categories', c)) this.f.category = String(c);
+          this.compute();
+          ['branch', 'q', 'category', 'type'].forEach((k) => this.$watch('f.' + k, () => this.compute()));
+          this.$watch('method', () => this.compute());
+        },
+
+        clearFilters() { this.f.q = ''; this.f.category = ''; this.f.type = ''; },
+        toggle(id) { this.collapsed[id] = !this.collapsed[id]; },
+        toggleAll() { const collapse = !this.allCollapsed; const next = {}; this.groups.forEach((g) => { next[g.id] = collapse; }); this.collapsed = next; },
+
+        /* ---- FIFO layers: replay every stock movement in date order ---- */
+        fifoMap() {
+          const map = {};
+          const movs = utils.sortBy(db.all('stock_movements'), (m) => String(m.created_at || '') + '|' + String(m.id).padStart(8, '0'));
+          movs.forEach((m) => {
+            const key = m.branch_id + '|' + m.product_id;
+            const layers = map[key] || (map[key] = []);
+            const q = Number(m.quantity) || 0;
+            if (q > 0) layers.push({ qty: q, cost: Number(m.unit_cost) || 0 });
+            else if (q < 0) {
+              let need = -q;
+              while (need > 0.0000001 && layers.length) {
+                const l = layers[0];
+                const take = Math.min(l.qty, need);
+                l.qty -= take; need -= take;
+                if (l.qty <= 0.0000001) layers.shift();
+              }
+            }
+          });
+          return map;
+        },
+        fifoValue(layers, qty, avgCost) {
+          const copy = (layers || []).map((l) => ({ qty: l.qty, cost: l.cost }));
+          let have = copy.reduce((a, l) => a + l.qty, 0);
+          // more layers than units on hand: drop the oldest layers first
+          while (have - qty > 0.0000001 && copy.length) {
+            const l = copy[0];
+            const drop = Math.min(l.qty, have - qty);
+            l.qty -= drop; have -= drop;
+            if (l.qty <= 0.0000001) copy.shift();
+          }
+          let value = copy.reduce((a, l) => a + l.qty * l.cost, 0);
+          if (qty - have > 0.0000001) value += (qty - have) * (Number(avgCost) || 0); // movements missing: fall back to average
+          return utils.round2(value);
+        },
+
+        compute() {
+          const branchIds = this.f.branch === 'all' ? this.branches.map((b) => b.id) : [Number(this.f.branch)];
+          const q = String(this.f.q || '').trim().toLowerCase();
+          const fifo = this.method === 'fifo' ? this.fifoMap() : null;
+          const units = this.method === 'actual' ? db.all('product_imeis').filter((i) => ABM.stock.SELLABLE.includes(i.status)) : [];
+          const unitCostMap = {};
+          units.forEach((u) => { const k = u.branch_id + '|' + u.product_id; unitCostMap[k] = (unitCostMap[k] || 0) + (Number(u.cost_price) || 0); });
+
+          const rows = [];
+          let waTotal = 0;
+          db.all('branch_stock').forEach((s) => {
+            const qty = Number(s.quantity) || 0;
+            if (qty <= 0 || !branchIds.includes(s.branch_id)) return;
+            const p = db.find('products', s.product_id);
+            if (!p || !db.isStockTracked(p)) return;
+            const type = db.productType(p);
+            if (this.f.type && type !== this.f.type) return;
+            if (this.f.category && String(p.category_id) !== String(this.f.category)) return;
+            const label = db.productLabel(p.id);
+            if (q && ![label, p.sku, p.model, p.barcode, db.brandName(p.brand_id)].some((v) => String(v || '').toLowerCase().includes(q))) return;
+            const avg = Number(s.avg_cost) || 0;
+            const wa = utils.round2(qty * avg);
+            let value = wa;
+            if (this.method === 'fifo') value = this.fifoValue(fifo[s.branch_id + '|' + s.product_id], qty, avg);
+            else if (this.method === 'actual') value = db.isSerialized(p) ? utils.round2(unitCostMap[s.branch_id + '|' + s.product_id] || 0) : wa;
+            const retailValue = utils.round2(qty * (Number(p.retail_price) || 0));
+            waTotal += wa;
+            rows.push({
+              key: s.branch_id + '-' + s.product_id, product_id: p.id, label, sku: p.sku || '—',
+              category: db.categoryName(p.category_id), categoryId: p.category_id, type,
+              branchId: s.branch_id, branchCode: db.branchCode(s.branch_id),
+              qty, unitCost: qty ? utils.round2(value / qty) : 0, value, retailValue,
+              marginPct: retailValue > 0 ? Math.round((retailValue - value) / retailValue * 1000) / 10 : 0,
+              serialized: db.isSerialized(p) ? qty : 0,
+            });
+          });
+
+          this.rows = utils.sortBy(rows, 'value', 'desc');
+          this.waTotal = utils.round2(waTotal);
+
+          const byCat = utils.groupBy(this.rows, 'categoryId');
+          const groups = Object.keys(byCat).map((id) => {
+            const list = utils.sortBy(byCat[id], 'value', 'desc');
+            const cost = utils.sum(list, 'value');
+            const retail = utils.sum(list, 'retailValue');
+            return { id: String(id), name: db.categoryName(id), rows: list, units: list.reduce((a, r) => a + r.qty, 0), cost, retail, marginPct: retail > 0 ? Math.round((retail - cost) / retail * 1000) / 10 : 0, share: 0 };
+          }).sort((a, b) => b.cost - a.cost);
+          const grand = utils.sum(groups, 'cost');
+          groups.forEach((g) => { g.share = grand ? Math.round(g.cost / grand * 100) : 0; });
+          this.groups = groups;
+
+          const retail = utils.sum(this.rows, 'retailValue');
+          this.totals = {
+            skus: new Set(this.rows.map((r) => r.product_id)).size,
+            lines: this.rows.length,
+            units: this.rows.reduce((a, r) => a + r.qty, 0),
+            serialized: this.rows.reduce((a, r) => a + r.serialized, 0),
+            cost: grand, retail,
+            marginPct: retail > 0 ? Math.round((retail - grand) / retail * 1000) / 10 : 0,
+          };
+        },
+
+        exportCsv() {
+          const cols = [
+            { label: 'Branch', key: 'branchCode' }, { label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' },
+            { label: 'Category', key: 'category' }, { label: 'Type', value: (r) => ui.statusLabel(r.type) },
+            { label: 'Quantity', key: 'qty' }, { label: 'Unit cost', key: 'unitCost' },
+            { label: 'Stock value (' + this.methodLabel + ')', key: 'value' },
+            { label: 'Retail value', key: 'retailValue' }, { label: 'Potential margin %', key: 'marginPct' },
+          ];
+          if (!utils.download('stock-valuation-' + this.method + '-' + utils.today() + '.csv', utils.toCsv(this.rows, cols))) return;
+          ui.success('Exported ' + this.rows.length + ' stock line' + (this.rows.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Product · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="product-view" data-title="Product Details" data-perm="products.view">
+  <main x-data="productViewPage()">
+    <!-- Not found -->
+    <template x-if="!p">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('cube','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Product not found</h2>
+          <p class="text-sm text-slate-600 mt-2">No product matches id <span class="mono" x-text="requestedId || '(none)'"></span>. It may have been deleted.</p>
+          <div class="mt-6 flex justify-center gap-2"><a href="products.html" class="btn btn-primary">Back to products</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="p">
+      <div>
+        <!-- Breadcrumb + actions -->
+        <div class="page-header">
+          <div class="min-w-0">
+            <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="products.html" class="hover:text-navy-700">Products</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span class="mono" x-text="p.sku"></span></div>
+            <h2 class="page-title truncate" x-text="p.name"></h2>
+            <p class="page-subtitle" x-text="[p.variant, p.color, p.model].filter(Boolean).join(' · ')"></p>
+          </div>
+          <div class="page-actions">
+            <template x-if="isSuperAdmin">
+              <select class="select !w-auto pr-8" x-model="scope" title="Scope: stock, units, sales and movements shown below" aria-label="Scope">
+                <option value="all">All branches</option>
+                <template x-for="b in allBranches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+              </select>
+            </template>
+            <template x-if="p.is_imei_tracked && canImei"><a :href="'imeis.html?product=' + p.id" class="btn btn-secondary"><span x-html="ABM.icon('qr')"></span><span x-text="serialLabel + ' units'"></span></a></template>
+            <template x-if="canPurchase && p.is_active"><a :href="'purchase-create.html?product=' + p.id" class="btn btn-money"><span x-html="ABM.icon('truck')"></span>Add Stock</a></template>
+            <a :href="'labels.html?product=' + p.id" class="btn btn-secondary"><span x-html="ABM.icon('barcode')"></span>Label</a>
+          <template x-if="canManage"><a :href="'products.html?edit=' + p.id" class="btn btn-primary"><span x-html="ABM.icon('edit')"></span>Edit</a></template>
+          </div>
+        </div>
+
+        <!-- Header card -->
+        <div class="card">
+          <div class="card-body">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div class="lg:col-span-2 min-w-0">
+                <div class="flex items-start gap-4">
+                  <span class="w-14 h-14 rounded-2xl flex-none flex items-center justify-center" :class="p.is_imei_tracked ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(icon,'w-7 h-7')"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                      <span x-html="$badge(productType)"></span>
+                      <span class="badge badge-slate" x-show="p.device_type" x-text="ABM.db.deviceTypeLabel(p.device_type)"></span>
+                      <span class="badge" :class="serialType === 'serial' ? 'badge-blue' : 'badge-navy'" x-show="p.is_imei_tracked" x-text="serialType === 'serial' ? 'Serial-number tracked' : 'IMEI-tracked'"></span>
+                      <span class="badge badge-slate" x-show="!p.is_imei_tracked && stockTracked">Standard</span>
+                      <span x-html="$badge(p.condition || 'new')"></span>
+                      <template x-if="p.pta_status && p.pta_status !== 'not_applicable'"><span x-html="$badge(p.pta_status === 'unknown' ? 'pending' : p.pta_status, p.pta_status === 'approved' ? 'PTA approved' : p.pta_status === 'non_pta' ? 'Non-PTA' : 'PTA unknown')"></span></template>
+                      <span x-html="$badge(p.is_active ? 'active' : 'inactive')"></span>
+                      <span class="badge badge-slate" x-text="categoryName"></span>
+                      <span class="badge badge-slate" x-text="brandName"></span>
+                      <span class="badge badge-amber" x-show="p.tax_rate > 0" x-text="'Tax ' + p.tax_rate + '%'"></span>
+                      <span class="badge badge-green" x-show="p.warranty_months > 0" x-text="p.warranty_months + ' mo warranty'"></span>
+                    </div>
+                    <dl class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Model</dt><dd class="font-medium text-slate-800 text-right" x-text="p.model || '—'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Variant</dt><dd class="font-medium text-slate-800 text-right" x-text="p.variant || '—'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Color</dt><dd class="font-medium text-slate-800 text-right" x-text="p.color || '—'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Stock levels / branch</dt><dd class="font-medium text-slate-800 text-right" x-text="stockTracked ? ('min ' + p.min_stock + (p.max_stock ? ' · max ' + p.max_stock : '') + (p.reorder_qty ? ' · reorder ' + p.reorder_qty : '')) : 'Not stocked'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5 min-w-0"><dt class="text-slate-500 flex-none">SKU / barcode</dt><dd class="mono text-slate-800 text-right truncate" x-text="p.sku + (p.barcode ? ' · ' + p.barcode : '')"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Unit</dt><dd class="font-medium text-slate-800 text-right" x-text="p.unit || 'pcs'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5 min-w-0"><dt class="text-slate-500 flex-none">Default supplier</dt><dd class="font-medium text-slate-800 text-right truncate" x-text="p.supplier_id ? ABM.db.supplierName(p.supplier_id) : '—'"></dd></div>
+                      <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5"><dt class="text-slate-500">Added</dt><dd class="font-medium text-slate-800 text-right" x-text="$date(p.created_at)"></dd></div>
+                    </dl>
+                    <div class="mt-3 flex flex-wrap gap-1.5" x-show="tags.length">
+                      <template x-for="t in tags" :key="t"><span class="badge badge-navy" x-text="t"></span></template>
+                    </div>
+                    <p class="mt-3 text-sm text-slate-600" x-show="p.description" x-text="p.description"></p>
+                    <div class="mt-4" x-show="specRows.length">
+                      <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Specifications</div>
+                      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                        <template x-for="s in specRows" :key="s.key">
+                          <div class="flex justify-between gap-3 border-b border-slate-100 pb-1.5 min-w-0"><dt class="text-slate-500 truncate" x-text="s.label"></dt><dd class="font-medium text-slate-800 text-right truncate" x-text="s.value"></dd></div>
+                        </template>
+                      </dl>
+                    </div>
+                  </div>
+                </div>
+                <!-- Prices -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-5">
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cost</div><div class="text-base font-bold text-slate-800 mt-0.5 tabular" x-text="$money(p.cost_price)"></div><div class="text-[11px] text-slate-500" x-show="p.min_sale_price" x-text="'floor ' + $money(p.min_sale_price, {decimals:0})"></div></div>
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-100 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Retail</div><div class="text-base font-bold text-emerald-800 mt-0.5 tabular" x-text="$money(p.retail_price)"></div></div>
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Wholesale</div><div class="text-base font-bold text-slate-800 mt-0.5 tabular" x-text="$money(p.wholesale_price)"></div></div>
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Margin</div><div class="text-base font-bold mt-0.5 tabular" :class="margin < 0 ? 'text-rose-600' : 'text-navy-700'" x-text="margin + '%'"></div><div class="text-[11px] text-slate-500" x-text="$money(p.retail_price - p.cost_price) + ' / unit'"></div></div>
+                </div>
+              </div>
+              <!-- Barcode -->
+              <div class="rounded-xl border border-dashed border-slate-300 bg-white p-4 flex flex-col items-center justify-center text-center min-w-0">
+                <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-3">Barcode</div>
+                <template x-if="p.barcode">
+                  <div class="w-full min-w-0">
+                    <div class="flex items-end justify-center h-14 overflow-hidden" aria-hidden="true">
+                      <span class="bg-slate-900 h-full" style="width:2px;margin-right:2px"></span>
+                      <template x-for="(b, i) in bars" :key="i"><span class="bg-slate-900" :class="i % 7 === 0 ? 'h-full' : 'h-[85%]'" :style="'width:' + b.w + 'px;margin-right:' + b.g + 'px'"></span></template>
+                      <span class="bg-slate-900 h-full" style="width:2px"></span>
+                    </div>
+                    <div class="mono text-sm tracking-[.25em] text-slate-800 mt-2" x-text="p.barcode"></div>
+                  </div>
+                </template>
+                <template x-if="!p.barcode">
+                  <div class="text-sm text-slate-400 py-4">No barcode assigned<template x-if="canManage"><a :href="'products.html?edit=' + p.id" class="block mt-1 text-navy-700 font-semibold hover:underline">Generate one</a></template></div>
+                </template>
+                <div class="mono text-xs text-slate-500 mt-3">SKU <span class="text-slate-800" x-text="p.sku"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stock summary tiles -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mt-4">
+          <div class="stat">
+            <div class="flex items-start justify-between gap-2">
+              <div><div class="stat-label">In stock</div><div class="stat-value" :class="totals.qty === 0 ? 'text-rose-600' : ''" x-text="ABM.utils.num(totals.qty)"></div></div>
+              <span class="w-10 h-10 rounded-xl bg-navy-100 text-navy-700 flex items-center justify-center" x-html="ABM.icon('archive')"></span>
+            </div>
+            <div class="stat-meta" x-text="stockRows.length + ' branch' + (stockRows.length === 1 ? '' : 'es') + ' · ' + totals.low + ' low'"></div>
+          </div>
+          <div class="stat">
+            <div class="flex items-start justify-between gap-2">
+              <div><div class="stat-label">Stock value</div><div class="stat-value" x-text="$money(totals.value, {decimals:0})"></div></div>
+              <span class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center" x-html="ABM.icon('banknotes')"></span>
+            </div>
+            <div class="stat-meta">at average cost</div>
+          </div>
+          <div class="stat">
+            <div class="flex items-start justify-between gap-2">
+              <div><div class="stat-label">Sold (30 days)</div><div class="stat-value" x-text="ABM.utils.num(totals.sold30)"></div></div>
+              <span class="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center" x-html="ABM.icon('receipt')"></span>
+            </div>
+            <div class="stat-meta">revenue <b class="text-slate-800" x-text="$money(totals.revenue30, {decimals:0})"></b></div>
+          </div>
+          <div class="stat">
+            <div class="flex items-start justify-between gap-2">
+              <div><div class="stat-label" x-text="p.is_imei_tracked ? 'Registered units' : 'Movements'"></div><div class="stat-value" x-text="ABM.utils.num(p.is_imei_tracked ? totals.imeis : totals.moves)"></div></div>
+              <span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center" x-html="ABM.icon(p.is_imei_tracked ? 'qr' : 'transfer')"></span>
+            </div>
+            <div class="stat-meta" x-text="p.is_imei_tracked ? (totals.imeiSellable + ' sellable · ' + totals.imeiSold + ' sold' + (totals.imeiVoided ? ' · ' + totals.imeiVoided + ' voided' : '')) : 'in scope'"></div>
+          </div>
+        </div>
+
+        <!-- Stock per branch -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <div><div class="card-title">Stock per branch</div><div class="card-subtitle">Sellable quantity, average cost and value · <span x-text="scopeLabel"></span></div></div>
+            <a href="stock.html" class="btn btn-ghost btn-sm">Branch stock <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Branch</th><th class="num">Qty</th><th class="num hidden sm:table-cell">Min</th><th class="num hidden md:table-cell">Avg cost</th><th class="num">Value</th><th>Status</th></tr></thead>
+              <tbody>
+                <template x-for="s in stockRows" :key="s.branch_id">
+                  <tr>
+                    <td><div class="flex items-center gap-2"><span class="badge badge-slate" x-text="s.code"></span><span class="font-medium text-slate-800" x-text="s.name"></span></div></td>
+                    <td class="num font-semibold" :class="s.qty === 0 ? 'text-rose-600' : s.qty <= p.min_stock ? 'text-amber-700' : 'text-slate-800'" x-text="s.qty"></td>
+                    <td class="num hidden sm:table-cell text-slate-500" x-text="p.min_stock"></td>
+                    <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(s.avg_cost)"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(s.value)"></td>
+                    <td><span x-html="$badge(s.status, s.status === 'ok' ? 'OK' : s.status === 'low' ? 'Low' : 'Out')"></span></td>
+                  </tr>
+                </template>
+                <template x-if="!stockRows.length"><tr><td colspan="6" class="empty">No branch stock rows.</td></tr></template>
+              </tbody>
+              <tfoot x-show="stockRows.length > 1">
+                <tr><td>Total</td><td class="num" x-text="totals.qty"></td><td class="hidden sm:table-cell"></td><td class="hidden md:table-cell"></td><td class="num whitespace-nowrap" x-text="$money(totals.value)"></td><td></td></tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <!-- IMEI units -->
+        <template x-if="p.is_imei_tracked">
+          <div class="card mt-4">
+            <div class="card-header flex-wrap">
+              <div class="min-w-0"><div class="card-title" x-text="serialLabel + ' units'"></div><div class="card-subtitle"><span x-text="imeiFiltered.length"></span> of <span x-text="imeis.length - totals.imeiVoided"></span> units · <span x-text="scopeLabel"></span></div></div>
+              <div class="flex flex-wrap items-center gap-2 min-w-0">
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+                  <input type="search" class="input input-sm pl-9 w-40" :placeholder="serialLabel + '…'" x-model.debounce.200ms="imeiFilter.q" :aria-label="'Search ' + serialLabel">
+                </div>
+                <select class="select input-sm !w-auto pr-8" x-model="imeiFilter.status" aria-label="Unit status">
+                  <option value="">All statuses</option>
+                  <option value="available">Available</option>
+                  <option value="returned">Returned (open box)</option>
+                  <option value="sold">Sold</option>
+                  <option value="in_transit">In transit</option>
+                  <option value="defective">Defective</option>
+                  <option value="missing">Missing</option>
+                  <option value="returned_to_supplier">With supplier</option>
+                  <option value="scrapped">Written off</option>
+                  <option value="voided">Voided</option>
+                </select>
+                <select class="select input-sm !w-auto pr-8" x-model="imeiFilter.grade" aria-label="Grade">
+                  <option value="">All grades</option>
+                  <option value="A">Grade A</option><option value="B">Grade B</option><option value="C">Grade C</option><option value="D">Grade D</option>
+                  <option value="none">Not graded</option>
+                </select>
+                <select class="select input-sm !w-auto pr-8" x-model="imeiFilter.pta" aria-label="PTA status">
+                  <option value="">All PTA</option>
+                  <option value="approved">PTA approved</option><option value="non_pta">Non-PTA</option><option value="unknown">PTA unknown</option><option value="not_applicable">Not applicable</option>
+                </select>
+                <button type="button" class="btn btn-secondary btn-sm" x-show="canExportUnits" @click="exportUnits()" :disabled="!imeiFiltered.length"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+                <template x-if="canImei"><a :href="'imeis.html?product=' + p.id" class="btn btn-secondary btn-sm"><span x-html="ABM.icon('qr','w-4 h-4')"></span>Registry</a></template>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th x-text="serialLabel"></th><th class="hidden sm:table-cell">Branch</th><th>Status</th><th class="hidden md:table-cell">Condition</th><th class="num hidden md:table-cell">Cost / price</th><th class="hidden lg:table-cell">Registered</th><th class="hidden sm:table-cell">Reference</th><th class="actions"></th></tr></thead>
+                <tbody>
+                  <template x-for="i in imeiPager.items" :key="i.id">
+                    <tr>
+                      <td>
+                        <a :href="historyHref(i)" class="mono font-semibold hover:underline whitespace-nowrap" :class="i.status === 'voided' ? 'text-slate-400 line-through' : 'text-navy-700'" x-text="i.shownImei"></a>
+                        <div class="mono text-[11px] text-slate-500 whitespace-nowrap" x-show="i.shownImei2" x-text="'IMEI 2 ' + i.shownImei2"></div>
+                        <div class="flex flex-wrap items-center gap-1 mt-0.5 md:hidden" x-show="i.grade || i.showPta">
+                          <template x-if="i.grade"><span class="badge" :class="gradeClass(i.grade)" x-text="i.grade"></span></template>
+                          <span x-html="ptaBadge(i.pta)"></span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 truncate max-w-[12rem]" x-show="i.notes" x-text="i.notes"></div>
+                      </td>
+                      <td class="hidden sm:table-cell"><span class="badge badge-slate" x-text="ABM.db.branchCode(i.branch_id)"></span></td>
+                      <td><span x-html="$badge(i.status)"></span></td>
+                      <td class="hidden md:table-cell">
+                        <div class="flex flex-wrap items-center gap-1">
+                          <template x-if="i.grade"><span class="badge" :class="gradeClass(i.grade)" x-text="'Grade ' + i.grade"></span></template>
+                          <span x-html="ptaBadge(i.pta)"></span>
+                          <span class="text-xs text-slate-400" x-show="!i.grade && !i.showPta">—</span>
+                        </div>
+                        <div class="text-[11px] text-slate-500 whitespace-nowrap" x-show="i.battery_health != null && i.battery_health !== ''" x-text="'Battery ' + i.battery_health + '%'"></div>
+                      </td>
+                      <td class="num hidden md:table-cell whitespace-nowrap"><div class="text-slate-600" x-text="$money(i.cost_price, {decimals:0})"></div><div class="text-[11px]" :class="i.customPrice ? 'font-semibold text-emerald-700' : 'text-slate-400'" :title="i.customPrice ? 'Unit selling price' : 'Product retail price'" x-text="'sells ' + $money(i.price, {decimals:0})"></div></td>
+                      <td class="hidden lg:table-cell text-slate-500 whitespace-nowrap" x-text="$date(i.created_at)"></td>
+                      <td class="hidden sm:table-cell"><template x-if="i.ref"><a :href="i.ref.href" class="mono text-navy-700 hover:underline whitespace-nowrap" x-text="i.ref.label"></a></template><span x-show="!i.ref" class="text-slate-400">—</span></td>
+                      <td class="actions"><a :href="historyHref(i)" class="btn btn-ghost btn-sm btn-icon" :title="serialLabel + ' history'" x-html="ABM.icon('clock','w-4 h-4')"></a></td>
+                    </tr>
+                  </template>
+                  <template x-if="!imeiPager.items.length"><tr><td colspan="8" class="empty">No units match.</td></tr></template>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500" x-show="imeiPager.total > 0">
+              <div>Showing <b class="text-slate-800" x-text="imeiPager.from"></b>–<b class="text-slate-800" x-text="imeiPager.to"></b> of <b class="text-slate-800" x-text="imeiPager.total"></b></div>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="imeiPager.page <= 1" @click="imeiPage = imeiPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+                <template x-for="n in pageNums(imeiPager)" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === imeiPager.page ? 'btn-primary' : 'btn-ghost'" @click="imeiPage = n" x-text="n"></button></template>
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="imeiPager.page >= imeiPager.pages" @click="imeiPage = imeiPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- History period (standard range bar) — sales, movements and price changes below -->
+        <div class="card mt-4">
+          <div class="card-body !py-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">History period</span>
+              <div class="range-bar">
+                <div class="tabs-pill">
+                  <template x-for="rp in range.presets" :key="rp.key">
+                    <button type="button" class="tab" :class="range.preset === rp.key && 'active'" @click="range.set(rp.key)" x-text="rp.label"></button>
+                  </template>
+                </div>
+                <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+                  <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+                  <span class="text-xs text-slate-500">to</span>
+                  <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+                </div>
+                <span class="range-label" x-text="range.label"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sales history -->
+        <div class="card mt-4" id="sales-history">
+          <div class="card-header flex-wrap">
+            <div class="min-w-0"><div class="card-title">Sales history</div><div class="card-subtitle"><span x-text="ABM.utils.num(sales.length)"></span> invoice line<span x-text="sales.length === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(salesTotals.units)"></span> sold · <span x-text="$money(salesTotals.revenue, {decimals:0})"></span> · <span x-text="range.label"></span> · <span x-text="scopeLabel"></span></div></div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" class="btn btn-secondary btn-sm" x-show="ABM.utils.canExportHere()" @click="exportSales()" :disabled="!sales.length"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+              <template x-if="canReports"><a :href="salesReportHref" class="btn btn-ghost btn-sm">Sales report <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a></template>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Invoice</th><th class="hidden sm:table-cell">Customer</th><th class="hidden md:table-cell" x-text="serialLabel"></th><th class="num">Qty</th><th class="num hidden lg:table-cell">Price</th><th class="num">Total</th></tr></thead>
+              <tbody>
+                <template x-for="s in salesPager.items" :key="s.id">
+                  <tr>
+                    <td><a :href="'sale-view.html?id=' + s.sale_id" class="mono font-semibold text-navy-700 hover:underline whitespace-nowrap" x-text="s.invoice_no"></a><div class="text-[11px] text-slate-400 whitespace-nowrap" x-text="$date(s.sale_date) + ' · ' + ABM.db.branchCode(s.branch_id)"></div></td>
+                    <td class="hidden sm:table-cell"><div class="font-medium text-slate-800 truncate max-w-[10rem]" x-text="s.customer"></div><div class="text-[11px]" x-show="s.returned_quantity > 0"><span x-html="$badge('returned', s.returned_quantity + ' returned')"></span></div></td>
+                    <td class="hidden md:table-cell mono text-slate-500 whitespace-nowrap" x-text="s.imei || '—'"></td>
+                    <td class="num" x-text="s.quantity"></td>
+                    <td class="num hidden lg:table-cell text-slate-600 whitespace-nowrap" x-text="$money(s.unit_price, {decimals:0})"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(s.total, {decimals:0})"></td>
+                  </tr>
+                </template>
+                <template x-if="!salesPager.items.length"><tr><td colspan="6" class="empty"><span x-text="salesAll.length ? 'No sales of this product in ' + range.label + '.' : 'No sales of this product yet.'"></span> <button type="button" class="font-semibold text-navy-700 hover:underline" x-show="salesAll.length && range.preset !== 'all'" @click="range.set('all')">Show all time</button></td></tr></template>
+              </tbody>
+            </table>
+          </div>
+          <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500" x-show="salesPager.pages > 1">
+            <div>Showing <b class="text-slate-800" x-text="salesPager.from"></b>–<b class="text-slate-800" x-text="salesPager.to"></b> of <b class="text-slate-800" x-text="salesPager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="salesPager.page <= 1" @click="salesPage = salesPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNums(salesPager)" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === salesPager.page ? 'btn-primary' : 'btn-ghost'" @click="salesPage = n" x-text="n"></button></template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="salesPager.page >= salesPager.pages" @click="salesPage = salesPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Movements + price history -->
+        <div class="grid grid-cols-1 2xl:grid-cols-2 gap-4 mt-4">
+          <div class="card min-w-0">
+            <div class="card-header flex-wrap">
+              <div class="min-w-0"><div class="card-title">Stock movements</div><div class="card-subtitle"><span x-text="ABM.utils.num(moves.length)"></span> entr<span x-text="moves.length === 1 ? 'y' : 'ies'"></span> with running balance · <span x-text="range.label"></span> · <span x-text="scopeLabel"></span></div></div>
+              <button type="button" class="btn btn-secondary btn-sm" x-show="ABM.utils.canExportHere()" @click="exportMoves()" :disabled="!moves.length"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>Date</th><th>Type</th><th class="hidden sm:table-cell" x-show="scope === 'all'">Branch</th><th class="num">Qty</th><th class="num hidden md:table-cell">Unit cost</th><th class="num">Balance</th><th class="hidden lg:table-cell">Reference</th><th class="hidden xl:table-cell">By</th></tr></thead>
+                <tbody>
+                  <template x-for="m in movesPager.items" :key="m.id">
+                    <tr>
+                      <td class="whitespace-nowrap text-slate-600"><span x-text="$date(m.created_at)"></span><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(m.created_at)"></div></td>
+                      <td><span class="badge" :class="moveClass(m.movement_type)" x-text="ABM.ui.statusLabel(m.movement_type)"></span><div class="text-[11px] text-slate-400 truncate max-w-[10rem]" x-show="m.notes || m.reason" x-text="m.notes || m.reason" :title="m.notes"></div></td>
+                      <td class="hidden sm:table-cell" x-show="scope === 'all'"><span class="badge badge-slate" x-text="ABM.db.branchCode(m.branch_id)"></span></td>
+                      <td class="num font-semibold" :class="m.quantity > 0 ? 'text-emerald-700' : m.quantity < 0 ? 'text-rose-600' : 'text-slate-500'" x-text="(m.quantity > 0 ? '+' : '') + m.quantity"></td>
+                      <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(m.unit_cost, {decimals:0})"></td>
+                      <td class="num tabular" x-text="m.balance_after"></td>
+                      <td class="hidden lg:table-cell"><template x-if="m.ref"><a :href="m.ref.href" class="mono text-navy-700 hover:underline whitespace-nowrap" x-text="m.ref.label"></a></template><span x-show="!m.ref" class="text-slate-400">—</span></td>
+                      <td class="hidden xl:table-cell text-slate-500 truncate max-w-[8rem]" x-text="ABM.db.userName(m.user_id)"></td>
+                    </tr>
+                  </template>
+                  <template x-if="!movesPager.items.length"><tr><td colspan="8" class="empty" x-text="movesAll.length ? 'No stock movements in ' + range.label + '.' : 'No stock movements recorded.'"></td></tr></template>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500" x-show="movesPager.pages > 1">
+              <div>Showing <b class="text-slate-800" x-text="movesPager.from"></b>–<b class="text-slate-800" x-text="movesPager.to"></b> of <b class="text-slate-800" x-text="movesPager.total"></b></div>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="movesPager.page <= 1" @click="movesPage = movesPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+                <template x-for="n in pageNums(movesPager)" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === movesPager.page ? 'btn-primary' : 'btn-ghost'" @click="movesPage = n" x-text="n"></button></template>
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="movesPager.page >= movesPager.pages" @click="movesPage = movesPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Price history -->
+          <div class="card min-w-0">
+            <div class="card-header flex-wrap">
+              <div class="min-w-0"><div class="card-title">Price history</div><div class="card-subtitle"><span x-text="ABM.utils.num(prices.length)"></span> change<span x-text="prices.length === 1 ? '' : 's'"></span> to cost, retail, wholesale and minimum price · <span x-text="range.label"></span></div></div>
+              <button type="button" class="btn btn-secondary btn-sm" x-show="ABM.utils.canExportHere()" @click="exportPrices()" :disabled="!prices.length"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead><tr><th>When</th><th>Price</th><th class="num">Old → new</th><th class="hidden sm:table-cell">Source</th><th class="hidden md:table-cell">By</th></tr></thead>
+                <tbody>
+                  <template x-for="h in pricesPager.items" :key="h.id">
+                    <tr>
+                      <td class="whitespace-nowrap text-slate-600"><span x-text="$date(h.created_at)"></span><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(h.created_at)"></div></td>
+                      <td><span class="font-medium text-slate-800" x-text="h.fieldLabel"></span><div class="text-[11px] text-slate-500 sm:hidden" x-text="h.sourceLabel"></div></td>
+                      <td class="num whitespace-nowrap"><span class="text-slate-500" x-text="$money(h.old_value, {decimals:0})"></span> <span class="text-slate-400">→</span> <b class="text-slate-900" x-text="$money(h.new_value, {decimals:0})"></b><div class="text-[11px] font-semibold" :class="h.delta > 0 ? 'text-amber-700' : 'text-emerald-700'" x-show="h.deltaPct !== null" x-text="(h.delta > 0 ? '+' : '') + h.deltaPct + '%'"></div></td>
+                      <td class="hidden sm:table-cell"><span class="badge badge-slate" x-text="h.sourceLabel"></span><template x-if="h.ref"><a :href="h.ref.href" class="block mono text-[11px] text-navy-700 hover:underline mt-0.5" x-text="h.ref.label"></a></template></td>
+                      <td class="hidden md:table-cell text-slate-500 truncate max-w-[8rem]" x-text="h.user_id ? ABM.db.userName(h.user_id) : 'System'"></td>
+                    </tr>
+                  </template>
+                  <template x-if="!pricesPager.items.length"><tr><td colspan="5" class="empty" x-text="pricesAll.length ? 'No price changes in ' + range.label + '.' : 'No price changes recorded yet — they appear here when a price is edited, changed in bulk, imported or updated by a purchase.'"></td></tr></template>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500" x-show="pricesPager.pages > 1">
+              <div>Showing <b class="text-slate-800" x-text="pricesPager.from"></b>–<b class="text-slate-800" x-text="pricesPager.to"></b> of <b class="text-slate-800" x-text="pricesPager.total"></b></div>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pricesPager.page <= 1" @click="pricesPage = pricesPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+                <template x-for="n in pageNums(pricesPager)" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pricesPager.page ? 'btn-primary' : 'btn-ghost'" @click="pricesPage = n" x-text="n"></button></template>
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pricesPager.page >= pricesPager.pages" @click="pricesPage = pricesPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function productViewPage() {
+      const { db, utils, session, ui } = ABM;
+      const PER_PAGE = 15;
+      const SALES_PER_PAGE = 10;
+      const requestedId = utils.qs('id');
+      const isSuperAdmin = session.isSuperAdmin();
+      const PTA_DEVICES = ['mobile', 'tablet', 'smartwatch'];
+      const PTA_LABEL = { approved: 'PTA approved', non_pta: 'Non-PTA', unknown: 'PTA unknown', not_applicable: 'Not applicable' };
+      const FIELD_LABEL = { cost_price: 'Cost', retail_price: 'Retail', wholesale_price: 'Wholesale', min_sale_price: 'Minimum sale price' };
+      const SOURCE_LABEL = { product_edit: 'Product edit', bulk_edit: 'Bulk price change', purchase: 'Purchase', import: 'CSV import' };
+      return {
+        requestedId,
+        p: null,
+        isSuperAdmin,
+        canManage: session.can('products.edit'),
+        canPurchase: session.can('purchases.add'),
+        canImei: session.can('imei.view'),
+        canReports: session.can('reports.view'),
+        allBranches: db.all('branches').filter((b) => b.is_active),
+        scope: String(session.branchId() || ''),
+        categoryName: '', brandName: '', margin: 0, bars: [],
+        stockRows: [], totals: { qty: 0, value: 0, low: 0, sold30: 0, revenue30: 0, imeis: 0, imeiSellable: 0, imeiSold: 0, imeiVoided: 0, moves: 0 },
+        imeis: [], imeiFilter: { q: '', status: '', grade: '', pta: '' }, imeiPage: 1,
+        range: null,
+        salesAll: [], sales: [], salesPage: 1,
+        movesAll: [], moves: [], movesPage: 1,
+        pricesAll: [], prices: [], pricesPage: 1,
+
+        init() {
+          this.p = db.find('products', requestedId);
+          this.range = ABM.range('all', () => { this.salesPage = 1; this.movesPage = 1; this.pricesPage = 1; this.applyRange(); }, 'product-view');
+          if (!this.p) return;
+          document.title = this.p.name + ' · Abbott Mobile';
+          this.load();
+          this.$watch('scope', () => { this.imeiPage = 1; this.salesPage = 1; this.movesPage = 1; this.load(); });
+          ['q', 'status', 'grade', 'pta'].forEach((k) => this.$watch('imeiFilter.' + k, () => { this.imeiPage = 1; }));
+        },
+        /* universal catalog helpers — never hard-code "IMEI" */
+        get serialType() { return this.p ? db.serialType(this.p) : 'imei'; },
+        get serialLabel() { return this.p && db.isSerialized(this.p) ? db.serialLabel(this.p) : 'IMEI'; },
+        get productType() { return this.p ? db.productType(this.p) : 'accessory'; },
+        get stockTracked() { return !!this.p && db.isStockTracked(this.p); },
+        get icon() { const p = this.p || {}; return ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : db.isSerialized(p) ? 'phone' : db.productType(p) === 'part' ? 'cpu' : db.productType(p) === 'service' ? 'wrench' : 'cube'; },
+        get tags() { return Array.isArray(this.p && this.p.tags) ? this.p.tags : []; },
+        get specRows() { return Object.entries((this.p && this.p.specs) || {}).filter(([, v]) => String(v || '').trim()).map(([k, v]) => ({ key: k, label: db.specLabel(k), value: v })); },
+        get scopeBranchIds() { return this.scope === 'all' ? this.allBranches.map((b) => b.id) : [Number(this.scope)]; },
+        get scopeLabel() { return this.scope === 'all' ? 'all branches' : db.branchName(Number(this.scope)); },
+        get canExportUnits() { return utils.canExportHere() && session.can('imei.export'); },
+        /** The sales report, by product, for the same period (sales.html lists invoices, not product lines). */
+        get salesReportHref() { return 'report-sales.html?' + (this.range ? this.range.query : 'range=all') + (this.isSuperAdmin ? '&branch=' + this.scope : '') + '#product'; },
+        inScope(branchId) { return this.scopeBranchIds.includes(Number(branchId)); },
+        gradeClass(g) { return ({ A: 'badge-green', B: 'badge-blue', C: 'badge-amber', D: 'badge-red' })[g] || 'badge-slate'; },
+        ptaBadge(k) { if (!k || k === 'not_applicable') return ''; return ui.badge(k === 'unknown' ? 'pending' : k, k === 'approved' ? 'PTA' : k === 'non_pta' ? 'Non-PTA' : 'PTA ?'); },
+        historyHref(i) { return i.status === 'voided' ? 'report-imei-history.html?unit=' + i.id : 'report-imei-history.html?imei=' + encodeURIComponent(i.imei); },
+        pageNums(pg) { const out = []; for (let n = Math.max(1, pg.page - 2); n <= Math.min(pg.pages, pg.page + 2); n++) out.push(n); return out; },
+
+        load() {
+          const p = this.p;
+          this.categoryName = db.categoryName(p.category_id);
+          this.brandName = db.brandName(p.brand_id);
+          this.margin = p.retail_price > 0 ? Math.round((p.retail_price - p.cost_price) / p.retail_price * 1000) / 10 : 0;
+          this.bars = this.barcodeBars(p.barcode);
+
+          // stock per branch — same scope as the rest of the page, so the tiles and the table always agree
+          const branches = this.allBranches.filter((b) => this.inScope(b.id));
+          this.stockRows = branches.map((b) => {
+            const r = db.first('branch_stock', (s) => s.branch_id == b.id && s.product_id == p.id);
+            const qty = r ? r.quantity : 0, avg = r ? r.avg_cost : 0;
+            return { branch_id: b.id, code: b.code, name: b.name, qty, avg_cost: avg, value: utils.round2(qty * avg), status: qty === 0 ? 'out' : qty <= p.min_stock ? 'low' : 'ok' };
+          });
+          const totals = { qty: this.stockRows.reduce((a, s) => a + s.qty, 0), value: utils.sum(this.stockRows, 'value'), low: this.stockRows.filter((s) => s.status !== 'ok').length };
+
+          // lookups
+          const salesById = new Map(db.all('sales').map((s) => [s.id, s]));
+          const saleItemsById = new Map(db.all('sale_items').map((s) => [s.id, s]));
+          const purchaseItemsById = new Map(db.all('purchase_items').map((s) => [s.id, s]));
+          const transfersById = new Map(db.all('stock_transfers').map((s) => [s.id, s]));
+          const transferByImei = new Map();
+          db.all('transfer_items').forEach((t) => (t.imei_ids || []).forEach((id) => transferByImei.set(Number(id), t.transfer_id)));
+          const returnByImei = new Map();
+          db.all('sale_return_items').forEach((r) => { if (r.imei_id) returnByImei.set(Number(r.imei_id), r.return_id); });
+          const refFor = (type, id) => this.refFor(type, id);
+
+          // serialized units in scope
+          const productPta = p.pta_status || (PTA_DEVICES.includes(p.device_type) ? 'unknown' : 'not_applicable');
+          const allImeis = db.all('product_imeis').filter((i) => i.product_id == p.id);
+          this.imeis = utils.sortBy(allImeis.filter((i) => this.inScope(i.branch_id)), 'created_at', 'desc').map((i) => {
+            let ref = null;
+            if (i.status === 'sold' && i.sale_item_id) { const si = saleItemsById.get(Number(i.sale_item_id)); ref = si ? refFor('sale', si.sale_id) : null; }
+            else if (i.status === 'in_transit' && transferByImei.has(i.id)) { const t = transfersById.get(transferByImei.get(i.id)); ref = t ? { label: t.transfer_no + ' → ' + db.branchCode(t.to_branch_id), href: 'transfer-view.html?id=' + t.id } : null; }
+            else if ((i.status === 'returned' || i.status === 'defective') && returnByImei.has(i.id)) ref = refFor('sale_return', returnByImei.get(i.id));
+            if (!ref && i.purchase_item_id) { const pi = purchaseItemsById.get(Number(i.purchase_item_id)); ref = pi ? refFor('purchase', pi.purchase_id) : null; }
+            const voided = i.status === 'voided';
+            const pta = i.pta_status || productPta;
+            const customPrice = Number(i.sale_price) > 0;
+            return {
+              ...i, ref, pta, showPta: pta !== 'not_applicable', grade: i.grade || '', customPrice, price: customPrice ? Number(i.sale_price) : (Number(p.retail_price) || 0),
+              shownImei: voided ? (i.voided_imei || i.imei) : i.imei, shownImei2: voided ? (i.voided_imei2 || '') : (i.imei2 || ''),
+            };
+          });
+          totals.imeiVoided = this.imeis.filter((i) => i.status === 'voided').length;
+          totals.imeis = this.imeis.length - totals.imeiVoided;
+          totals.imeiSellable = this.imeis.filter((i) => ABM.stock.SELLABLE.includes(i.status)).length;
+          totals.imeiSold = this.imeis.filter((i) => i.status === 'sold').length;
+
+          // every sale line of this product in scope (voided invoices excluded), newest first
+          const lines = db.all('sale_items').filter((i) => i.product_id == p.id).map((i) => { const s = salesById.get(i.sale_id); return s ? { ...i, invoice_no: s.invoice_no, sale_date: s.sale_date, branch_id: s.branch_id, status: s.status, customer: db.customerName(s.customer_id) } : null; }).filter((l) => l && l.status !== 'void' && this.inScope(l.branch_id));
+          this.salesAll = utils.sortBy(lines, (l) => String(l.sale_date) + '-' + utils.pad(l.id, 8), 'desc');
+          const since = utils.isoDate(utils.addDays(new Date(), -30));
+          const last30 = this.salesAll.filter((l) => utils.dayOf(l.sale_date) >= since);
+          totals.sold30 = last30.reduce((a, l) => a + (l.quantity - (l.returned_quantity || 0)), 0);
+          totals.revenue30 = utils.sum(last30, (l) => (l.total / l.quantity) * (l.quantity - (l.returned_quantity || 0)));
+
+          // movements (running balance = balance_after), newest first
+          const moves = db.all('stock_movements').filter((m) => m.product_id == p.id && this.inScope(m.branch_id));
+          totals.moves = moves.length;
+          const reasons = ABM.stock.ADJUST_REASONS || {};
+          this.movesAll = utils.sortBy(moves, (m) => m.created_at + '-' + utils.pad(m.id, 8), 'desc').map((m) => ({ ...m, ref: refFor(m.reference_type, m.reference_id), reason: m.reason_code ? (reasons[m.reason_code] || utils.titleCase(m.reason_code)) : '' }));
+
+          // price changes (all branches — prices are per product)
+          this.pricesAll = utils.sortBy(db.all('price_history').filter((h) => String(h.product_id) === String(p.id)), (h) => String(h.created_at) + '-' + utils.pad(h.id, 8), 'desc').map((h) => {
+            const o = Number(h.old_value) || 0, n = Number(h.new_value) || 0;
+            return { ...h, fieldLabel: FIELD_LABEL[h.field] || utils.titleCase(h.field), sourceLabel: SOURCE_LABEL[h.source] || utils.titleCase(h.source || 'edit'), delta: utils.round2(n - o), deltaPct: o ? Math.round((n - o) / o * 1000) / 10 : null, ref: refFor(h.reference_type, h.reference_id) };
+          });
+          this.totals = totals;
+          this.applyRange();
+        },
+        /** The history cards follow the period chosen in the range bar. */
+        applyRange() {
+          const r = this.range;
+          const inR = (v) => !r || r.contains(v);
+          this.sales = this.salesAll.filter((l) => inR(l.sale_date));
+          this.moves = this.movesAll.filter((m) => inR(m.created_at));
+          this.prices = this.pricesAll.filter((h) => inR(h.created_at));
+        },
+        refFor(type, id) {
+          if (!type || !id) return null;
+          const find = (coll) => db.find(coll, id);
+          if (type === 'sale') { const s = find('sales'); return s ? { label: s.invoice_no, href: 'sale-view.html?id=' + s.id } : null; }
+          if (type === 'purchase') { const s = find('purchases'); return s ? { label: s.purchase_no, href: 'purchase-view.html?id=' + s.id } : null; }
+          if (type === 'transfer') { const s = find('stock_transfers'); return s ? { label: s.transfer_no, href: 'transfer-view.html?id=' + s.id } : null; }
+          if (type === 'sale_return') { const s = find('sale_returns'); return s ? { label: s.return_no, href: 'sale-view.html?id=' + s.sale_id } : null; }
+          if (type === 'stock_count') { const s = find('stock_counts'); return s ? { label: s.count_no || 'Count #' + s.id, href: 'stock-count-view.html?id=' + s.id } : null; }
+          if (type === 'supplier_return') { const s = find('supplier_returns'); return s ? { label: s.return_no, href: 'supplier-return-view.html?id=' + s.id } : null; }
+          if (type === 'repair_job') { const s = find('repair_jobs'); return s ? { label: s.job_no, href: 'repair-view.html?id=' + s.id } : null; }
+          if (type === 'product_imei') { const u = find('product_imeis'); return u ? { label: u.status === 'voided' ? (u.voided_imei || u.imei) : u.imei, href: u.status === 'voided' ? 'report-imei-history.html?unit=' + u.id : 'report-imei-history.html?imei=' + encodeURIComponent(u.imei) } : null; }
+          return null;
+        },
+        get salesTotals() { return { units: this.sales.reduce((a, l) => a + (Number(l.quantity) || 0) - (Number(l.returned_quantity) || 0), 0), revenue: utils.sum(this.sales, (l) => (Number(l.total) || 0) / (Number(l.quantity) || 1) * ((Number(l.quantity) || 0) - (Number(l.returned_quantity) || 0))) }; },
+        get salesPager() { return utils.paginate(this.sales, this.salesPage, SALES_PER_PAGE); },
+        get movesPager() { return utils.paginate(this.moves, this.movesPage, PER_PAGE); },
+        get pricesPager() { return utils.paginate(this.prices, this.pricesPage, SALES_PER_PAGE); },
+        get imeiFiltered() {
+          const f = this.imeiFilter;
+          const q = f.q.trim().toUpperCase();
+          return this.imeis.filter((i) => {
+            // units voided as registered by mistake only show when asked for
+            if (f.status ? i.status !== f.status : i.status === 'voided') return false;
+            if (f.grade && (f.grade === 'none' ? !!i.grade : i.grade !== f.grade)) return false;
+            if (f.pta && i.pta !== f.pta) return false;
+            if (q && !(String(i.shownImei).toUpperCase().includes(q) || String(i.shownImei2 || '').toUpperCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get imeiPager() { return utils.paginate(this.imeiFiltered, this.imeiPage, PER_PAGE); },
+        get imeiPageNumbers() { return this.pageNums(this.imeiPager); },
+        moveClass(type) {
+          return { purchase: 'badge-green', sale: 'badge-navy', sale_return: 'badge-blue', transfer_out: 'badge-amber', transfer_in: 'badge-green', transfer_return: 'badge-amber', repair: 'badge-purple', adjustment: 'badge-purple', opening: 'badge-slate', defective: 'badge-red', count_in: 'badge-green', count_out: 'badge-red', transit_loss: 'badge-red', supplier_return: 'badge-amber', supplier_replacement: 'badge-green', scrap: 'badge-red' }[type] || 'badge-slate';
+        },
+
+        /* ------------------------------------------------------------ CSV */
+        fileBase() { const r = this.range ? this.range.value : {}; return String(this.p.sku || 'product').replace(/[^A-Za-z0-9-]+/g, '') + '-' + (r.from || 'all') + '-to-' + (r.to || utils.today()); },
+        exportUnits() {
+          const rows = this.imeiFiltered; if (!rows.length) return;
+          const cols = [
+            { label: this.serialLabel, key: 'shownImei' }, { label: 'IMEI 2', key: 'shownImei2' }, { label: 'Branch', value: (r) => db.branchCode(r.branch_id) }, { label: 'Status', value: (r) => ui.statusLabel(r.status) },
+            { label: 'Grade', key: 'grade' }, { label: 'Battery %', value: (r) => (r.battery_health == null ? '' : r.battery_health) }, { label: 'PTA', value: (r) => PTA_LABEL[r.pta] || r.pta }, { label: 'Accessories', key: 'accessories' },
+            { label: 'Cost', key: 'cost_price' }, { label: 'Selling price', key: 'price' }, { label: 'Unit price set', value: (r) => (r.customPrice ? 'Yes' : 'No') },
+            { label: 'Registered', value: (r) => utils.date(r.created_at, 'iso') }, { label: 'Reference', value: (r) => (r.ref ? r.ref.label : '') }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('units-' + String(this.p.sku || 'product').replace(/[^A-Za-z0-9-]+/g, '') + '-' + utils.today() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' unit' + (rows.length === 1 ? '' : 's') + '.');
+        },
+        exportSales() {
+          const rows = this.sales; if (!rows.length) return;
+          const cols = [
+            { label: 'Invoice', key: 'invoice_no' }, { label: 'Date', value: (r) => utils.datetime(r.sale_date) }, { label: 'Branch', value: (r) => db.branchCode(r.branch_id) }, { label: 'Customer', key: 'customer' },
+            { label: this.serialLabel, key: 'imei' }, { label: 'Qty', key: 'quantity' }, { label: 'Returned', value: (r) => r.returned_quantity || 0 },
+            { label: 'Unit price', key: 'unit_price' }, { label: 'Discount', value: (r) => r.discount_amount || 0 }, { label: 'Total', key: 'total' }, { label: 'Unit cost', key: 'unit_cost' },
+          ];
+          if (!utils.download('sales-' + this.fileBase() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' sale line' + (rows.length === 1 ? '' : 's') + '.');
+        },
+        exportMoves() {
+          const rows = this.moves; if (!rows.length) return;
+          const cols = [
+            { label: 'Date', value: (m) => utils.date(m.created_at, 'iso') }, { label: 'Time', value: (m) => utils.time(m.created_at) }, { label: 'Branch', value: (m) => db.branchCode(m.branch_id) },
+            { label: 'Type', value: (m) => ui.statusLabel(m.movement_type) }, { label: 'Reason', key: 'reason' }, { label: 'Quantity', key: 'quantity' }, { label: 'Unit cost', key: 'unit_cost' },
+            { label: 'Balance after', key: 'balance_after' }, { label: 'Reference', value: (m) => (m.ref ? m.ref.label : '') },
+            { label: this.serialLabel, value: (m) => { if (!m.imei_id) return ''; const u = db.find('product_imeis', m.imei_id); return u ? (u.status === 'voided' ? (u.voided_imei || u.imei) : u.imei) : ''; } },
+            { label: 'Notes', key: 'notes' }, { label: 'By', value: (m) => db.userName(m.user_id) },
+          ];
+          if (!utils.download('movements-' + this.fileBase() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' movement' + (rows.length === 1 ? '' : 's') + '.');
+        },
+        exportPrices() {
+          const rows = this.prices; if (!rows.length) return;
+          const cols = [
+            { label: 'Date', value: (h) => utils.datetime(h.created_at) }, { label: 'Price', key: 'fieldLabel' }, { label: 'Old', key: 'old_value' }, { label: 'New', key: 'new_value' },
+            { label: 'Change %', value: (h) => (h.deltaPct === null ? '' : h.deltaPct) }, { label: 'Source', key: 'sourceLabel' }, { label: 'Reference', value: (h) => (h.ref ? h.ref.label : '') },
+            { label: 'By', value: (h) => (h.user_id ? db.userName(h.user_id) : 'System') },
+          ];
+          if (!utils.download('prices-' + this.fileBase() + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported ' + rows.length + ' price change' + (rows.length === 1 ? '' : 's') + '.');
+        },
+        /** Simple CSS barcode placeholder: bar widths derived from the code's digits (not a real symbology). */
+        barcodeBars(code) {
+          const out = [];
+          String(code || '').split('').forEach((ch) => {
+            const n = /\d/.test(ch) ? Number(ch) : ch.charCodeAt(0) % 10;
+            out.push({ w: 1 + (n % 3), g: 1 + (n % 2) });
+            out.push({ w: 1 + ((n * 7 + 3) % 3), g: 1 + ((n >> 1) % 2) });
+          });
+          return out;
+        },
+      };
+    }
+  </script>
+</body>
+</html>

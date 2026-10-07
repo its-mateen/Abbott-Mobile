@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Invoice · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="sale-view" data-title="Invoice" data-perm="sales.view">
+  <main x-data="saleViewPage()" @keydown.escape.window="closeModals()">
+
+    <!-- Not found -->
+    <template x-if="!sale">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('receipt','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Invoice not found</h2>
+          <p class="text-sm text-slate-600 mt-2" x-text="notFoundReason"></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap">
+            <a href="sales.html" class="btn btn-primary"><span x-html="ABM.icon('receipt')"></span>Sales history</a>
+            <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New sale</a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="sale">
+      <div>
+        <!-- Page header -->
+        <div class="page-header">
+          <div class="min-w-0">
+            <a href="sales.html" class="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-navy-700 mb-1"><span x-html="ABM.icon('arrow-left','w-3.5 h-3.5')"></span>Sales history</a>
+            <h2 class="page-title flex items-center gap-2 flex-wrap"><span class="mono !text-2xl" x-text="sale.invoice_no"></span><span x-html="$badge(sale.status)"></span></h2>
+            <p class="page-subtitle">
+              <span class="badge badge-slate" x-text="branch.code"></span> <span x-text="branch.name"></span> · <span x-text="ABM.utils.datetime(sale.sale_date)"></span> · Cashier <b class="text-slate-700" x-text="ABM.db.userName(sale.user_id)"></b>
+            </p>
+          </div>
+          <div class="page-actions">
+            <template x-if="canPrint"><a :href="'invoice.html?id=' + sale.id + '&layout=thermal&autoprint=1'" class="btn btn-secondary"><span x-html="ABM.icon('printer')"></span>Print thermal</a></template>
+            <template x-if="canPrint"><a :href="'invoice.html?id=' + sale.id + '&layout=a4&autoprint=1'" class="btn btn-secondary"><span x-html="ABM.icon('document')"></span>Print A4</a></template>
+            <template x-if="canReturn && returnable"><button type="button" class="btn btn-primary" @click="openReturn()"><span x-html="ABM.icon('return')"></span>Return items</button></template>
+            <template x-if="voidable"><button type="button" class="btn btn-danger-soft btn" @click="openVoid()"><span x-html="ABM.icon('x-circle')"></span>Void</button></template>
+            <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New sale</a>
+          </div>
+        </div>
+
+        <!-- Status banners -->
+        <div class="alert alert-danger mb-4" x-show="sale.status === 'void'"><span x-html="ABM.icon('x-circle')"></span><div><b>This invoice was voided.</b> Stock and ledger entries have been reversed. It is kept for the audit trail only.<span x-show="sale.notes" class="block text-xs mt-0.5" x-text="sale.notes"></span></div></div>
+        <div class="alert alert-warning mb-4" x-show="sale.status === 'partially_returned' || sale.status === 'returned'"><span x-html="ABM.icon('return')"></span><div><b x-text="sale.status === 'returned' ? 'All items on this invoice were returned.' : 'Some items on this invoice were returned.'"></b> <span x-text="returnedUnits + ' of ' + totalUnits + ' units returned · ' + $money(refundedTotal) + ' refunded.'"></span> See the returns list below.</div></div>
+        <div class="alert alert-info mb-4" x-show="canVoid && sale.status !== 'void' && !voidable"><span x-html="ABM.icon('info')"></span><div x-text="returns.length ? 'This invoice cannot be voided because it has returns. Use a return for the remaining items instead.' : 'Only same-day invoices can be voided. Use a return to reverse items on older invoices.'"></div></div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <!-- LEFT: items, payments, returns -->
+          <div class="lg:col-span-2 space-y-4 min-w-0">
+            <div class="card">
+              <div class="card-header">
+                <div><div class="card-title">Items</div><div class="card-subtitle"><span x-text="items.length"></span> line<span x-text="items.length === 1 ? '' : 's'"></span> · <span x-text="totalUnits"></span> unit<span x-text="totalUnits === 1 ? '' : 's'"></span></div></div>
+                <span class="text-xs text-slate-500 hidden sm:inline">Serial numbers link to unit history</span>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th class="w-8">#</th>
+                      <th>Product</th>
+                      <th class="hidden md:table-cell">Warranty</th>
+                      <th class="num">Qty</th>
+                      <th class="num hidden sm:table-cell">Price</th>
+                      <th class="num hidden lg:table-cell">Discount</th>
+                      <th class="num">Total</th>
+                      <th class="num hidden md:table-cell">Returned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(it, i) in items" :key="it.id">
+                      <tr :class="it.returned_quantity >= it.quantity && 'opacity-60'">
+                        <td class="text-slate-400" x-text="i + 1"></td>
+                        <td>
+                          <div class="min-w-0 max-w-[18rem]">
+                            <a :href="'product-view.html?id=' + it.product_id" class="font-semibold text-slate-800 hover:text-navy-700 block" x-text="it.label"></a>
+                            <div class="text-xs text-slate-500"><span x-text="it.sku"></span><span x-show="it.isService"> · <span x-html="$badge('service')"></span></span></div>
+                            <div class="text-xs mt-0.5 flex flex-wrap gap-x-1" x-show="it.serialValue">
+                              <span class="text-slate-400" x-text="it.serialLabel + ':'"></span>
+                              <a :href="'report-imei-history.html?imei=' + encodeURIComponent(it.serialValue)" class="mono text-navy-700 hover:underline break-all" x-text="it.serialValue"></a>
+                              <span class="text-slate-400" x-show="it.imei2" x-text="'· IMEI 2: ' + it.imei2"></span>
+                            </div>
+                            <div class="text-xs text-slate-500 md:hidden mt-0.5" x-show="it.warranty" x-text="'Warranty ' + it.warranty + ' mo · until ' + $date(it.warrantyUntil)"></div>
+                            <div class="text-xs text-amber-700 md:hidden mt-0.5" x-show="it.returned_quantity > 0" x-text="it.returned_quantity + ' returned'"></div>
+                          </div>
+                        </td>
+                        <td class="hidden md:table-cell whitespace-nowrap">
+                          <template x-if="it.warranty"><div><div class="text-slate-800" x-text="it.warranty + ' month' + (it.warranty === 1 ? '' : 's')"></div><div class="text-xs" :class="it.warrantyActive ? 'text-emerald-700' : 'text-slate-400'" x-text="(it.warrantyActive ? 'until ' : 'expired ') + $date(it.warrantyUntil)"></div></div></template>
+                          <template x-if="!it.warranty"><span class="text-slate-400">—</span></template>
+                        </td>
+                        <td class="num" x-text="it.quantity"></td>
+                        <td class="num hidden sm:table-cell whitespace-nowrap" x-text="$money(it.unit_price)"></td>
+                        <td class="num hidden lg:table-cell whitespace-nowrap" :class="it.discount_amount > 0 ? 'text-rose-600' : 'text-slate-400'" x-text="it.discount_amount > 0 ? '-' + $money(it.discount_amount) : '—'"></td>
+                        <td class="num font-semibold whitespace-nowrap" x-text="$money(it.total)"></td>
+                        <td class="num hidden md:table-cell"><span class="badge badge-amber" x-show="it.returned_quantity > 0" x-text="it.returned_quantity + ' / ' + it.quantity"></span><span class="text-slate-400" x-show="!it.returned_quantity">—</span></td>
+                      </tr>
+                    </template>
+                    <template x-if="!items.length"><tr><td colspan="8" class="empty">This invoice has no line items.</td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <!-- Payments -->
+              <div class="card">
+                <div class="card-header"><div><div class="card-title">Payments</div><div class="card-subtitle" x-text="payments.length ? payments.length + ' payment' + (payments.length === 1 ? '' : 's') + (payments.length > 1 ? ' · split' : '') : 'No payment recorded'"></div></div><span class="badge badge-slate" x-show="payments.length > 1">Split</span></div>
+                <ul class="divide-y divide-slate-100">
+                  <template x-for="p in payments" :key="p.id">
+                    <li class="px-5 py-3 flex items-center gap-3">
+                      <span x-html="$badge(p.method)"></span>
+                      <div class="min-w-0 flex-1">
+                        <div class="text-xs text-slate-500 truncate" x-text="p.reference ? 'Ref ' + p.reference : ABM.utils.time(p.created_at)"></div>
+                        <div class="text-xs text-slate-500 truncate" x-show="p.account"><span x-text="(p.bankReturned ? 'Taken back out of ' : 'Into ') + p.account"></span></div>
+                      </div>
+                      <div class="font-semibold tabular whitespace-nowrap" :class="p.bankReturned && 'line-through text-slate-400'" x-text="$money(p.amount)"></div>
+                    </li>
+                  </template>
+                  <li class="px-5 py-3 flex items-center gap-3" x-show="sale.due_amount > 0">
+                    <span x-html="$badge('credit','Khata')"></span>
+                    <div class="min-w-0 flex-1 text-xs text-slate-500">On customer ledger</div>
+                    <div class="font-semibold tabular text-rose-600 whitespace-nowrap" x-text="$money(sale.due_amount)"></div>
+                  </li>
+                  <li class="px-5 py-3 flex items-center gap-3" x-show="changeGiven > 0">
+                    <span class="badge badge-slate">Change</span>
+                    <div class="min-w-0 flex-1 text-xs text-slate-500">Returned to customer</div>
+                    <div class="font-semibold tabular whitespace-nowrap" x-text="$money(changeGiven)"></div>
+                  </li>
+                  <template x-if="!payments.length && !(sale.due_amount > 0)"><li class="empty py-8 text-sm">No payments recorded.</li></template>
+                </ul>
+              </div>
+
+              <!-- Returns -->
+              <div class="card">
+                <div class="card-header"><div><div class="card-title">Returns</div><div class="card-subtitle" x-text="returns.length ? returns.length + ' return' + (returns.length === 1 ? '' : 's') + ' · ' + $money(refundedTotal) + ' refunded' : 'No returns against this invoice'"></div></div><a href="returns.html" class="text-xs font-semibold text-navy-700 hover:underline" x-show="canReturn">All returns</a></div>
+                <ul class="divide-y divide-slate-100">
+                  <template x-for="r in returns" :key="r.id">
+                    <li class="px-5 py-3">
+                      <div class="flex items-center gap-3">
+                        <div class="min-w-0 flex-1">
+                          <a :href="'returns.html?id=' + r.id" class="mono font-semibold text-navy-700 hover:underline" x-text="r.return_no"></a>
+                          <div class="text-xs text-slate-500" x-text="ABM.utils.datetime(r.return_date) + ' · ' + r.units + ' unit' + (r.units === 1 ? '' : 's') + ' · by ' + r.by"></div>
+                          <div class="text-xs text-slate-600 mt-0.5 truncate" x-text="r.reason"></div>
+                        </div>
+                        <div class="text-right whitespace-nowrap">
+                          <div class="font-semibold tabular text-rose-600" x-text="'-' + $money(r.refund_amount)"></div>
+                          <span x-html="$badge(r.refund_method, r.refund_method === 'ledger' ? 'Ledger' : null)"></span>
+                        </div>
+                      </div>
+                      <div class="text-xs text-slate-500 mt-1" x-show="r.splitText" x-text="r.splitText"></div>
+                      <div class="mt-1.5 flex flex-wrap gap-1">
+                        <span class="badge badge-green" x-show="r.good" x-text="r.good + ' good'"></span>
+                        <span class="badge badge-red" x-show="r.defective" x-text="r.defective + ' defective'"></span>
+                      </div>
+                    </li>
+                  </template>
+                  <template x-if="!returns.length"><li class="empty py-8 text-sm"><span x-text="sale.status === 'void' ? 'Voided invoices cannot be returned.' : (returnable ? 'Nothing returned yet.' : 'No returnable items remain.')"></span><div class="mt-3" x-show="canReturn && returnable"><button type="button" class="btn btn-secondary btn-sm" @click="openReturn()"><span x-html="ABM.icon('return','w-4 h-4')"></span>Return items</button></div></li></template>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT: customer, totals, ledger, meta -->
+          <div class="space-y-4 min-w-0">
+            <!-- Customer -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Customer</div><a :href="'customer-view.html?id=' + sale.customer_id" class="text-xs font-semibold text-navy-700 hover:underline" x-show="customer && !customer.is_walkin">View ledger</a></div>
+              <div class="card-body">
+                <div class="flex items-start gap-3">
+                  <div class="avatar w-11 h-11 text-sm" x-text="ABM.utils.initials(customer ? customer.name : 'W')"></div>
+                  <div class="min-w-0 flex-1">
+                    <template x-if="customer && !customer.is_walkin"><a :href="'customer-view.html?id=' + customer.id" class="font-bold text-slate-900 hover:text-navy-700 block truncate" x-text="customer.name"></a></template>
+                    <template x-if="!customer || customer.is_walkin"><div class="font-bold text-slate-900 truncate" x-text="customer ? customer.name : 'Walk-in Customer'"></div></template>
+                    <div class="text-sm text-slate-600 mt-0.5 space-y-0.5" x-show="customer && !customer.is_walkin">
+                      <div class="flex items-center gap-1.5" x-show="customer && customer.phone"><span class="text-slate-400" x-html="ABM.icon('phone-call','w-3.5 h-3.5')"></span><span x-text="customer ? customer.phone : ''"></span></div>
+                      <div class="flex items-center gap-1.5" x-show="customer && customer.email"><span class="text-slate-400" x-html="ABM.icon('mail','w-3.5 h-3.5')"></span><span class="truncate" x-text="customer ? customer.email : ''"></span></div>
+                      <div class="flex items-start gap-1.5" x-show="customer && customer.address"><span class="text-slate-400 mt-0.5" x-html="ABM.icon('map-pin','w-3.5 h-3.5')"></span><span x-text="customer ? customer.address : ''"></span></div>
+                      <div class="text-xs text-slate-500" x-show="customer && customer.cnic">CNIC <span class="mono" x-text="customer ? customer.cnic : ''"></span></div>
+                    </div>
+                    <div class="text-xs text-slate-500 mt-0.5" x-show="!customer || customer.is_walkin">Cash customer · no ledger</div>
+                  </div>
+                </div>
+                <div class="mt-4 grid grid-cols-2 gap-2 text-sm" x-show="customer && !customer.is_walkin">
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Ledger balance</div>
+                    <div class="font-bold mt-0.5 truncate" :class="customerBalance > 0 ? 'text-rose-600' : customerBalance < 0 ? 'text-emerald-700' : 'text-slate-800'" x-text="customerBalance < 0 ? $money(-customerBalance, {decimals:0}) + ' credit' : $money(customerBalance, {decimals:0})"></div>
+                  </div>
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Credit limit</div>
+                    <div class="font-bold mt-0.5 text-slate-800 truncate" x-text="customer && customer.credit_limit ? $money(customer.credit_limit, {decimals:0}) : '—'"></div>
+                  </div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2" x-show="canPos">
+                  <a :href="'pos.html?customer=' + sale.customer_id" class="btn btn-secondary btn-sm"><span x-html="ABM.icon('cart','w-4 h-4')"></span>New sale for customer</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Totals -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Totals</div><span x-html="$badge(sale.due_amount > 0 ? (sale.paid_amount > 0 ? 'partial' : 'unpaid') : 'paid')"></span></div>
+              <div class="card-body text-sm space-y-2">
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Subtotal</span><span class="tabular text-slate-800" x-text="$money(sale.subtotal)"></span></div>
+                <!-- sales.discount_amount bundles line + invoice discounts: show them apart so the % label matches its amount -->
+                <div class="flex justify-between gap-3" x-show="lineDiscount > 0"><span class="text-slate-500">Line discounts</span><span class="tabular text-rose-600" x-text="'-' + $money(lineDiscount)"></span></div>
+                <div class="flex justify-between gap-3" x-show="!(lineDiscount > 0) || invoiceDiscount > 0"><span class="text-slate-500"><span x-text="lineDiscount > 0 ? 'Invoice discount' : 'Discount'"></span><span x-show="sale.discount_type === 'percent' && sale.discount_value" x-text="' (' + sale.discount_value + '%)'"></span></span><span class="tabular" :class="invoiceDiscount > 0 ? 'text-rose-600' : 'text-slate-400'" x-text="invoiceDiscount > 0 ? '-' + $money(invoiceDiscount) : '—'"></span></div>
+                <div class="flex justify-between gap-3"><span class="text-slate-500"><span x-text="taxLabel"></span> (<span x-text="sale.tax_rate || 0"></span>%)</span><span class="tabular text-slate-800" x-text="sale.tax_amount > 0 ? $money(sale.tax_amount) : '—'"></span></div>
+                <!-- online orders carry a delivery fee on the sale; without this row the totals would not foot -->
+                <div class="flex justify-between gap-3" x-show="sale.delivery_fee > 0"><span class="text-slate-500">Delivery</span><span class="tabular text-slate-800" x-text="$money(sale.delivery_fee)"></span></div>
+                <div class="divider"></div>
+                <div class="flex justify-between items-baseline gap-3"><span class="font-bold text-slate-900">Grand total</span><span class="text-xl font-extrabold tabular text-slate-900" x-text="$money(sale.total)"></span></div>
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Paid</span><span class="tabular text-emerald-700 font-semibold" x-text="$money(sale.paid_amount)"></span></div>
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Balance due</span><span class="tabular font-semibold" :class="sale.due_amount > 0 ? 'text-rose-600' : 'text-slate-400'" x-text="sale.due_amount > 0 ? $money(sale.due_amount) : $money(0)"></span></div>
+                <div class="flex justify-between gap-3" x-show="refundedTotal > 0"><span class="text-slate-500">Refunded</span><span class="tabular text-amber-700 font-semibold" x-text="'-' + $money(refundedTotal)"></span></div>
+              </div>
+            </div>
+
+            <!-- Ledger note -->
+            <div class="alert alert-warning" x-show="sale.due_amount > 0 && sale.status !== 'void'">
+              <span x-html="ABM.icon('users')"></span>
+              <div class="min-w-0">
+                <b x-text="$money(sale.due_amount)"></b> of this invoice is unpaid and recorded on <b x-text="customer ? customer.name : 'the customer'"></b>'s ledger (khata).
+                <span x-show="customer && !customer.is_walkin">Current balance <b x-text="$money(customerBalance)"></b>.</span>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <a :href="'customer-view.html?id=' + sale.customer_id + '&pay=1'" class="btn btn-money btn-sm" x-show="canReceive"><span x-html="ABM.icon('banknotes','w-4 h-4')"></span>Receive payment</a>
+                  <a :href="'customer-view.html?id=' + sale.customer_id" class="btn btn-secondary btn-sm">Open ledger</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- Meta -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Details</div></div>
+              <div class="card-body text-sm space-y-2">
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Branch</span><span class="text-slate-800 text-right" x-text="branch.name"></span></div>
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Cashier</span><span class="text-slate-800 text-right" x-text="ABM.db.userName(sale.user_id)"></span></div>
+                <div class="flex justify-between gap-3"><span class="text-slate-500">Date</span><span class="text-slate-800 text-right" x-text="ABM.utils.datetime(sale.sale_date)"></span></div>
+                <div class="flex justify-between gap-3" x-show="sale.repair_job_id"><span class="text-slate-500">Repair job</span><a :href="'repair-view.html?id=' + sale.repair_job_id" class="font-semibold text-navy-700 hover:underline">Open job card</a></div>
+                <div class="flex justify-between gap-3" x-show="order"><span class="text-slate-500">Online order</span>
+                  <template x-if="order && canOrders"><a :href="'online-order-view.html?id=' + order.id" class="font-semibold text-navy-700 hover:underline mono" x-text="order.order_no"></a></template>
+                  <template x-if="order && !canOrders"><span class="mono text-slate-800" x-text="order.order_no"></span></template>
+                </div>
+                <div class="flex justify-between gap-3" x-show="sale.updated_at && sale.updated_at !== sale.created_at"><span class="text-slate-500">Updated</span><span class="text-slate-800 text-right" x-text="ABM.utils.datetime(sale.updated_at)"></span></div>
+                <div x-show="sale.notes"><div class="text-slate-500 mb-1">Notes</div><div class="rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-slate-700 whitespace-pre-wrap break-words" x-text="sale.notes"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Return modal -->
+    <div x-show="ret.open" x-cloak class="modal-backdrop" @click.self="closeReturn()">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="returnTitle">
+        <form @submit.prevent="submitReturn()" novalidate>
+          <div class="modal-header">
+            <div><div class="modal-title" id="returnTitle">Return items</div><div class="text-xs text-slate-500">Against <span class="mono" x-text="sale ? sale.invoice_no : ''"></span> · <span x-text="customer ? customer.name : ''"></span></div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeReturn()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><div>Enter the quantity to return per line. <b>Good</b> units go back to sellable stock; <b>defective</b> units are quarantined and not counted as stock. Services are refunded without stock movement.</div></div>
+
+            <div class="space-y-2">
+              <div class="hidden sm:grid grid-cols-12 gap-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                <div class="col-span-5">Product</div><div class="col-span-2 text-right">Return qty</div><div class="col-span-3">Condition</div><div class="col-span-2 text-right">Refund</div>
+              </div>
+              <template x-for="l in ret.lines" :key="l.id">
+                <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-center rounded-xl border p-3" :class="l.qty > 0 ? 'border-navy-500/40 bg-navy-50/40' : 'border-slate-200'">
+                  <div class="sm:col-span-5 min-w-0">
+                    <div class="font-semibold text-slate-800 truncate" x-text="l.label"></div>
+                    <div class="text-xs text-slate-500" x-show="l.serialValue"><span x-text="l.serialLabel + ': '"></span><span class="mono" x-text="l.serialValue"></span></div>
+                    <div class="text-xs text-slate-500">Sold <span x-text="l.sold"></span> · returnable <b class="text-slate-700" x-text="l.max"></b> · <span x-text="$money(l.unitRefund)"></span> each<span x-show="l.isService"> · service</span></div>
+                    <p class="field-error" x-show="ret.errors['q' + l.id]" x-text="ret.errors['q' + l.id]"></p>
+                  </div>
+                  <div class="sm:col-span-2 flex items-center gap-1 sm:justify-end">
+                    <span class="text-xs text-slate-500 sm:hidden w-20">Return qty</span>
+                    <input type="number" min="0" :max="l.max" step="1" class="input input-sm !w-20 text-right" :class="ret.errors['q' + l.id] && 'is-invalid'" x-model.number="l.qty" :disabled="l.isSerialized" :aria-label="'Return quantity for ' + l.label">
+                    <button type="button" class="btn btn-ghost btn-sm !px-2 text-xs" x-show="!l.isSerialized" @click="l.qty = l.qty === l.max ? 0 : l.max" x-text="l.qty === l.max ? 'None' : 'All'"></button>
+                    <button type="button" class="btn btn-sm !px-2 text-xs" :class="l.qty ? 'btn-secondary' : 'btn-primary'" x-show="l.isSerialized" @click="l.qty = l.qty ? 0 : 1" x-text="l.qty ? 'Remove' : 'Select'"></button>
+                  </div>
+                  <div class="sm:col-span-3 flex items-center gap-1">
+                    <span class="text-xs text-slate-500 sm:hidden w-20">Condition</span>
+                    <select class="select input-sm flex-1" x-model="l.condition" :disabled="!l.qty || l.isService" :aria-label="'Condition for ' + l.label">
+                      <option value="good">Good (restock)</option>
+                      <option value="defective">Defective</option>
+                    </select>
+                  </div>
+                  <div class="sm:col-span-2 text-right font-semibold tabular" :class="l.qty ? 'text-slate-900' : 'text-slate-400'"><span class="text-xs font-normal text-slate-500 sm:hidden">Refund </span><span x-text="$money(l.qty * l.unitRefund)"></span></div>
+                </div>
+              </template>
+              <p class="field-error" x-show="ret.errors.lines" x-text="ret.errors.lines"></p>
+            </div>
+
+            <!-- Refund plan: what is still owed is cancelled first, store credit goes back as store credit,
+                 and only the rest is paid out — never more money than the invoice actually took in.
+                 NOTE: x-text is evaluated even while x-show is false, so every binding must survive sale === null. -->
+            <div class="rounded-xl border border-slate-200 p-3 sm:p-4 space-y-3" data-refund-plan>
+              <div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <div class="text-sm font-bold text-slate-800">How the refund is paid</div>
+                <div class="text-xs text-slate-500" x-show="retTotal > 0" x-text="'Refund value ' + $money(retTotal)"></div>
+              </div>
+              <div class="text-sm text-slate-500" x-show="!(retTotal > 0)">Pick the items being returned to see the refund.</div>
+              <ul class="text-sm divide-y divide-slate-100" x-show="retTotal > 0">
+                <li class="flex items-start justify-between gap-3 py-1.5" x-show="plan.due > 0">
+                  <span class="min-w-0"><span class="font-semibold text-slate-800">Off the unpaid balance</span><span class="block text-xs text-slate-500" x-text="'This invoice still has ' + $money(plan.dueBefore) + ' on the customer ledger (khata) — that is cancelled first.'"></span></span>
+                  <b class="tabular whitespace-nowrap" x-text="$money(plan.due)"></b>
+                </li>
+                <li class="flex items-start justify-between gap-3 py-1.5" x-show="plan.credit > 0">
+                  <span class="min-w-0"><span class="font-semibold text-slate-800">Back to store credit</span><span class="block text-xs text-slate-500">This part was paid with store credit, so it goes back as store credit.</span></span>
+                  <b class="tabular whitespace-nowrap" x-text="$money(plan.credit)"></b>
+                </li>
+                <li class="flex items-start justify-between gap-3 py-1.5" x-show="plan.rest > 0">
+                  <span class="min-w-0"><span class="font-semibold text-slate-800" x-text="ret.method === 'store_credit' ? 'Kept as store credit' : 'Paid out'"></span><span class="block text-xs text-slate-500" x-text="refundMethodHint"></span></span>
+                  <b class="tabular whitespace-nowrap" x-text="$money(plan.rest)"></b>
+                </li>
+              </ul>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" x-show="plan.rest > 0">
+                <div class="min-w-0">
+                  <label class="label" for="ret-method">Refund <span x-text="$money(plan.rest)"></span> as <span class="req">*</span></label>
+                  <select id="ret-method" class="select" x-model="ret.method" @change="ret.account_id = ''" :class="ret.errors.method && 'is-invalid'">
+                    <template x-for="m in refundMethods" :key="m.key"><option :value="m.key" :selected="m.key === ret.method" :disabled="m.key === 'store_credit' && !customerHasLedger" x-text="m.label + (m.key === 'store_credit' && !customerHasLedger ? ' (walk-in: no ledger)' : '')"></option></template>
+                  </select>
+                </div>
+                <div class="min-w-0" x-show="isBank(ret.method)">
+                  <label class="label" for="ret-account">Paid from account <span class="req">*</span></label>
+                  <select id="ret-account" class="select" x-model="ret.account_id" :class="ret.errors.account && 'is-invalid'">
+                    <option value="" x-show="!refundAccounts.length">No account set up</option>
+                    <template x-for="a in refundAccounts" :key="a.id"><option :value="String(a.id)" :selected="String(a.id) === String(retAccountId() || '')" x-text="a.name + ' · ' + $money(a.balance, {decimals:0})"></option></template>
+                  </select>
+                  <p class="field-error" x-show="ret.errors.account" x-text="ret.errors.account"></p>
+                </div>
+                <div class="min-w-0 sm:col-span-2" x-show="isBank(ret.method)">
+                  <label class="label" for="ret-ref">Transaction reference</label>
+                  <input id="ret-ref" type="text" class="input" x-model="ret.reference" placeholder="Card reversal / transfer id (optional)" maxlength="60">
+                </div>
+              </div>
+              <p class="field-error" x-show="ret.errors.method" x-text="ret.errors.method"></p>
+              <p class="help" x-show="retTotal > 0 && plan.moneyIn > 0" x-text="'Money taken on this invoice ' + $money(plan.moneyIn) + (plan.moneyOut > 0 ? ' · already refunded ' + $money(plan.moneyOut) : '') + ' · up to ' + $money(plan.moneyLeft) + ' can still be paid out.'"></p>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="ret-reason">Reason <span class="req">*</span></label>
+                <input id="ret-reason" type="text" list="return-reasons" class="input" x-model="ret.reason" :class="ret.errors.reason && 'is-invalid'" placeholder="e.g. Defective on arrival" maxlength="160" x-ref="reason">
+                <datalist id="return-reasons"><option value="Customer changed mind"></option><option value="Defective on arrival"></option><option value="Wrong item / variant"></option><option value="Warranty claim"></option><option value="Damaged packaging"></option></datalist>
+                <p class="field-error" x-show="ret.errors.reason" x-text="ret.errors.reason"></p>
+              </div>
+              <div>
+                <label class="label" for="ret-notes">Notes</label>
+                <input id="ret-notes" type="text" class="input" x-model="ret.notes" placeholder="Optional internal note" maxlength="240">
+              </div>
+            </div>
+
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="text-sm text-slate-600 min-w-0"><b class="text-slate-900" x-text="retUnits"></b> unit<span x-text="retUnits === 1 ? '' : 's'"></span> · <span x-text="retDefective"></span> defective<span x-show="retTotal > 0"> · <span x-text="planSummary"></span></span></div>
+              <div class="text-xl font-extrabold tabular text-slate-900" x-text="$money(retTotal)"></div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeReturn()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="ret.busy || !retUnits"><span x-html="ABM.icon('return')"></span>Confirm return</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Void modal -->
+    <div x-show="vd.open" x-cloak class="modal-backdrop" @click.self="closeVoid()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="voidTitle">
+        <form @submit.prevent="submitVoid()" novalidate>
+          <div class="modal-header">
+            <div class="modal-title text-rose-600" id="voidTitle">Void invoice</div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeVoid()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="alert alert-danger"><span x-html="ABM.icon('warning')"></span><div><b x-text="sale ? sale.invoice_no : ''"></b> will be marked void. This cannot be undone.</div></div>
+            <ul class="text-sm text-slate-700 space-y-1.5">
+              <li class="flex gap-2"><span class="text-emerald-600 mt-0.5" x-html="ABM.icon('check','w-4 h-4')"></span><span><b x-text="stockUnits"></b> stock unit<span x-text="stockUnits === 1 ? '' : 's'"></span> return to <span x-text="branch ? branch.name : ''"></span> (serialized units become resellable).</span></li>
+              <li class="flex gap-2" x-show="sale && sale.due_amount > 0"><span class="text-emerald-600 mt-0.5" x-html="ABM.icon('check','w-4 h-4')"></span><span>Ledger due of <b x-text="sale ? $money(sale.due_amount) : ''"></b> is reversed on the customer account.</span></li>
+              <li class="flex gap-2" x-show="storeCreditUsed > 0"><span class="text-emerald-600 mt-0.5" x-html="ABM.icon('check','w-4 h-4')"></span><span>Store credit of <b x-text="$money(storeCreditUsed)"></b> is restored to the customer.</span></li>
+              <li class="flex gap-2" x-show="cashPaid > 0"><span class="text-amber-600 mt-0.5" x-html="ABM.icon('warning','w-4 h-4')"></span><span>Hand back <b x-text="$money(cashPaid)"></b> in cash from the drawer.</span></li>
+              <li class="flex gap-2" x-show="bankPaid > 0"><span class="text-amber-600 mt-0.5" x-html="ABM.icon('warning','w-4 h-4')"></span><span><b x-text="$money(bankPaid)"></b> taken by card / wallet / transfer is taken back out of <b x-text="bankAccountNames || 'the bank account'"></b> — refund the customer the same way.</span></li>
+              <li class="flex gap-2" x-show="order && sale && String(order.sale_id) === String(sale.id)"><span class="text-emerald-600 mt-0.5" x-html="ABM.icon('check','w-4 h-4')"></span><span>Web order <b class="mono" x-text="order ? order.order_no : ''"></b> goes back to <b>Confirmed</b> so it can be invoiced again.</span></li>
+            </ul>
+            <div>
+              <label class="label" for="void-reason">Reason <span class="req">*</span></label>
+              <input id="void-reason" type="text" class="input" x-model="vd.reason" :class="vd.error && 'is-invalid'" placeholder="e.g. Entered by mistake" maxlength="160" x-ref="voidReason">
+              <p class="field-error" x-show="vd.error" x-text="vd.error"></p>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeVoid()">Cancel</button>
+            <button type="submit" class="btn btn-danger" :disabled="vd.busy"><span x-html="ABM.icon('x-circle')"></span>Void invoice</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function saleViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const user = session.user() || {};
+      const addMonths = (d, n) => { const x = new Date(utils.parseDate(d) || new Date()); x.setMonth(x.getMonth() + Number(n || 0)); return x; };
+      const isBank = (m) => ABM.bank.isNonCash(m);
+      const TOL = 0.05;   // unit refunds are rounded per unit: allow a few paisa of drift against the caps
+      /** How a refund can be paid out (the part left after the due and the store credit). */
+      const REFUND_METHODS = [
+        { key: 'cash', label: 'Cash from the drawer' }, { key: 'card', label: 'Back to the card' }, { key: 'jazzcash', label: 'JazzCash' },
+        { key: 'easypaisa', label: 'EasyPaisa' }, { key: 'bank_transfer', label: 'Bank transfer' }, { key: 'store_credit', label: 'Store credit' },
+      ];
+      /**
+       * How a return was refunded: { due, credit, paid, method }. Returns saved since the refund plan carry
+       * refund_due / refund_credit / refund_paid; older ones had a single method for the whole amount.
+       */
+      const splitOf = (r) => {
+        const amt = utils.round2(Number(r.refund_amount) || 0);
+        if (r.refund_due != null || r.refund_credit != null || r.refund_paid != null) {
+          return { due: Number(r.refund_due) || 0, credit: Number(r.refund_credit) || 0, paid: Number(r.refund_paid) || 0, method: r.refund_method, legacy: false };
+        }
+        if (r.refund_method === 'ledger') return { due: amt, credit: 0, paid: 0, method: 'ledger', legacy: true };
+        if (r.refund_method === 'store_credit') return { due: 0, credit: amt, paid: 0, method: 'store_credit', legacy: true };
+        return { due: 0, credit: 0, paid: amt, method: r.refund_method || 'cash', legacy: true };
+      };
+      const splitText = (sp) => {
+        const parts = [];
+        if (sp.due > 0) parts.push(utils.money(sp.due) + ' off the due');
+        if (sp.credit > 0) parts.push(utils.money(sp.credit) + ' store credit');
+        if (sp.paid > 0) parts.push(utils.money(sp.paid) + ' ' + ui.statusLabel(sp.method).toLowerCase());
+        return parts.length > 1 ? parts.join(' · ') : '';
+      };
+      /**
+       * What an invoice can still give back, from fresh data: the money it actually took in (cash, card,
+       * wallet, transfer and khata payments put against it — never store credit), the store credit used to pay
+       * it, and what earlier returns on it already gave back from each.
+       */
+      const refundBasis = (s) => {
+        const pays = db.where('sale_payments', { sale_id: s.id });
+        const scPaid = utils.round2(utils.sum(pays.filter((p) => p.method === 'store_credit'), 'amount'));
+        const moneyIn = utils.round2(Math.max(0, (Number(s.paid_amount) || 0) - scPaid));
+        let scUsed = 0, moneyUsed = 0, moneyOut = 0;
+        utils.sortBy(db.where('sale_returns', { sale_id: s.id }), (r) => String(r.id).padStart(8, '0')).forEach((r) => {
+          const sp = splitOf(r);
+          // store credit handed out on a return first gives back what was paid with store credit
+          const restored = !sp.legacy ? Number(r.refund_credit_restored) || 0 : Math.min(Math.max(0, scPaid - scUsed), sp.credit);
+          scUsed = utils.round2(scUsed + restored);
+          moneyUsed = utils.round2(moneyUsed + sp.paid + Math.max(0, sp.credit - restored));
+          moneyOut = utils.round2(moneyOut + sp.paid);
+        });
+        return { scPaid, moneyIn, moneyOut, scLeft: utils.round2(Math.max(0, scPaid - scUsed)), moneyLeft: utils.round2(Math.max(0, moneyIn - moneyUsed)) };
+      };
+      /** The refund plan for `total` on sale `s`: due first, then store credit paid, then the rest (capped by moneyLeft). */
+      const planFor = (s, total) => {
+        const b = refundBasis(s);
+        const dueBefore = utils.round2(Math.max(0, Number(s.due_amount) || 0));
+        const due = utils.round2(Math.min(dueBefore, total));
+        const credit = utils.round2(Math.min(b.scLeft, total - due));
+        const rest = utils.round2(Math.max(0, total - due - credit));
+        return { total, dueBefore, due, credit, rest, scPaid: b.scPaid, moneyIn: b.moneyIn, moneyOut: b.moneyOut, moneyLeft: b.moneyLeft, over: rest > b.moneyLeft + TOL };
+      };
+      return {
+        id: utils.qs('id'),
+        sale: null, notFoundReason: 'The invoice you are looking for does not exist or was removed.',
+        items: [], payments: [], returns: [], customer: null, order: null, branch: { name: '', code: '' },
+        taxLabel: db.setting('tax_label') || 'Tax',
+        canReturn: session.can('returns.add'), canVoid: session.can('sales.delete'), canPrint: session.can('sales.print'), canPos: session.can('pos.view'), canReceive: session.can('customers.payments'),
+        canOrders: session.can('orders.view'),
+        refundMethods: REFUND_METHODS,
+        ret: { open: false, busy: false, lines: [], method: 'cash', account_id: '', reference: '', reason: '', notes: '', errors: {} },
+        vd: { open: false, busy: false, reason: '', error: '' },
+
+        init() {
+          this.load();
+          if (this.sale && utils.qs('return') === '1' && this.canReturn && this.returnable) this.$nextTick(() => this.openReturn());
+        },
+        load() {
+          const s = db.find('sales', this.id);
+          if (!s) { this.sale = null; return; }
+          if (!session.isSuperAdmin() && String(s.branch_id) !== String(session.branchId())) { this.sale = null; this.notFoundReason = 'This invoice belongs to another branch (' + db.branchName(s.branch_id) + ') and is not available here.'; return; }
+          this.sale = { ...s };
+          this.branch = db.branch(s.branch_id) || { name: '—', code: '—' };
+          this.customer = db.customer(s.customer_id);
+          this.items = db.where('sale_items', { sale_id: s.id }).map((it) => {
+            const p = db.product(it.product_id) || {};
+            const unit = it.imei_id ? db.find('product_imeis', it.imei_id) : null;
+            const warranty = Number(it.warranty_months != null ? it.warranty_months : (p.warranty_months || 0)) || 0;
+            const until = warranty ? addMonths(s.sale_date, warranty) : null;
+            return {
+              ...it, returned_quantity: it.returned_quantity || 0,
+              label: db.productLabel(it.product_id), sku: p.sku || '', isService: db.productType(p) === 'service', isSerialized: db.isSerialized(p), isStockTracked: db.isStockTracked(p),
+              serialLabel: db.serialLabel(p), serialValue: it.imei || (unit ? unit.imei : ''), imei2: unit ? unit.imei2 : null,
+              warranty, warrantyUntil: until ? utils.isoDate(until) : null, warrantyActive: until ? until >= new Date() : false,
+            };
+          });
+          this.payments = utils.sortBy(db.where('sale_payments', { sale_id: s.id }), 'created_at').map((p) => {
+            // card / wallet / transfer money: which account it landed in, and whether a void took it back out
+            const txn = p.bank_txn_id ? db.find('bank_transactions', p.bank_txn_id) : null;
+            const acc = db.find('bank_accounts', p.account_id || (txn && txn.account_id));
+            const ownRow = txn && txn.reference_type === 'sale_payment' && String(txn.reference_id) === String(p.id);
+            return { ...p, account: acc ? acc.name : '', bankReturned: !!p.bank_reversal_id || !!(ownRow && txn.reversed_by) };
+          });
+          this.order = s.online_order_id ? db.find('online_orders', s.online_order_id) : null;
+          const rItems = db.all('sale_return_items');
+          this.returns = utils.sortBy(db.where('sale_returns', { sale_id: s.id }), 'return_date', 'desc').map((r) => {
+            const its = rItems.filter((x) => x.return_id === r.id);
+            return { ...r, splitText: splitText(splitOf(r)), units: its.reduce((a, x) => a + x.quantity, 0), good: its.filter((x) => x.condition === 'good').reduce((a, x) => a + x.quantity, 0), defective: its.filter((x) => x.condition === 'defective').reduce((a, x) => a + x.quantity, 0), by: db.userName(r.user_id) };
+          });
+        },
+
+        /* --------------------------------------------------------- derived */
+        get totalUnits() { return this.items.reduce((a, i) => a + (Number(i.quantity) || 0), 0); },
+        get returnedUnits() { return this.items.reduce((a, i) => a + (Number(i.returned_quantity) || 0), 0); },
+        get refundedTotal() { return utils.sum(this.returns, 'refund_amount'); },
+        /** sale.discount_amount = line discounts + invoice discount; split for display (matches invoice.html). */
+        get lineDiscount() { return utils.round2(Math.min(Number(this.sale && this.sale.discount_amount) || 0, utils.sum(this.items, 'discount_amount'))); },
+        get invoiceDiscount() { return utils.round2(Math.max(0, (Number(this.sale && this.sale.discount_amount) || 0) - this.lineDiscount)); },
+        get changeGiven() { const paid = utils.sum(this.payments, 'amount'); return this.sale && paid > this.sale.total ? utils.round2(paid - this.sale.total) : 0; },
+        get customerBalance() { return this.customer ? Number(this.customer.balance) || 0 : 0; },
+        get customerHasLedger() { return !!(this.customer && !this.customer.is_walkin); },
+        get returnable() { return !!this.sale && this.sale.status !== 'void' && this.items.some((i) => i.quantity - i.returned_quantity > 0); },
+        get isSameDay() { return !!this.sale && utils.isoDate(this.sale.sale_date) === utils.today(); },
+        get voidable() { return !!this.sale && this.canVoid && this.sale.status !== 'void' && this.returns.length === 0 && this.returnedUnits === 0 && this.isSameDay; },
+        get stockUnits() { return this.items.filter((i) => i.isStockTracked).reduce((a, i) => a + i.quantity, 0); },
+        get storeCreditUsed() { return utils.sum(this.payments.filter((p) => p.method === 'store_credit'), 'amount'); },
+        get cashLikePaid() { return utils.sum(this.payments.filter((p) => p.method !== 'store_credit'), 'amount'); },
+        get cashPaid() { return utils.sum(this.payments.filter((p) => p.method === 'cash'), 'amount'); },
+        get bankPaid() { return utils.sum(this.payments.filter((p) => isBank(p.method)), 'amount'); },
+        get bankAccountNames() { return [...new Set(this.payments.filter((p) => isBank(p.method) && p.account).map((p) => p.account))].join(', '); },
+        get retUnits() { return this.ret.lines.reduce((a, l) => a + (Number(l.qty) || 0), 0); },
+        get retDefective() { return this.ret.lines.filter((l) => l.condition === 'defective').reduce((a, l) => a + (Number(l.qty) || 0), 0); },
+        get retTotal() { return utils.round2(this.ret.lines.reduce((a, l) => a + (Number(l.qty) || 0) * l.unitRefund, 0)); },
+        /** The refund plan for the lines picked so far, from the invoice as it is stored right now. */
+        get plan() {
+          const s = this.sale ? (db.find('sales', this.sale.id) || this.sale) : null;
+          if (!s) return { total: 0, dueBefore: 0, due: 0, credit: 0, rest: 0, scPaid: 0, moneyIn: 0, moneyOut: 0, moneyLeft: 0, over: false };
+          return planFor(s, this.retTotal);
+        },
+        isBank(m) { return isBank(m); },
+        /** Open accounts of the invoice's branch a card / wallet / transfer refund can leave from. */
+        get refundAccounts() { return this.sale ? ABM.bank.accounts(this.sale.branch_id).filter((a) => a.is_active) : []; },
+        retAccountId() { return isBank(this.ret.method) && this.sale ? (this.ret.account_id || ABM.bank.accountFor(this.ret.method, this.sale.branch_id) || null) : null; },
+        get refundMethodHint() {
+          const m = this.ret.method;
+          if (m === 'cash') return 'Handed back from the cash drawer.';
+          if (m === 'store_credit') return 'Added to the customer\'s store credit for the next purchase.';
+          if (isBank(m)) { const a = db.find('bank_accounts', this.retAccountId()); return 'Sent back by ' + ui.statusLabel(m) + (a ? ' from ' + a.name : '') + '.'; }
+          return 'Choose how to pay it.';
+        },
+        get planSummary() {
+          const p = this.plan, parts = [];
+          if (p.due > 0) parts.push(utils.money(p.due) + ' off the due');
+          if (p.credit > 0) parts.push(utils.money(p.credit) + ' back to store credit');
+          if (p.rest > 0) parts.push(utils.money(p.rest) + ' ' + (this.ret.method === 'store_credit' ? 'as store credit' : 'by ' + ui.statusLabel(this.ret.method).toLowerCase()));
+          return parts.join(' · ');
+        },
+        closeModals() { this.closeReturn(); this.closeVoid(); },
+
+        /* ---------------------------------------------------------- return */
+        openReturn() {
+          if (!this.sale || !this.returnable) return;
+          const s = this.sale;
+          const lineNet = utils.sum(this.items, 'total');
+          const lineDisc = utils.sum(this.items, 'discount_amount');
+          const invoiceDisc = Math.max(0, utils.round2((Number(s.discount_amount) || 0) - lineDisc));
+          const factor = lineNet > 0 ? (lineNet - invoiceDisc) / lineNet : 1;
+          const taxMult = 1 + (Number(s.tax_rate) || 0) / 100;
+          this.ret = {
+            open: true, busy: false, method: 'cash', account_id: '', reference: '', reason: '', notes: '', errors: {},
+            lines: this.items.filter((i) => i.quantity - i.returned_quantity > 0).map((i) => ({
+              id: i.id, item: i, label: i.label, serialLabel: i.serialLabel, serialValue: i.serialValue, isService: i.isService, isSerialized: i.isSerialized, isStockTracked: i.isStockTracked,
+              sold: i.quantity, max: i.quantity - i.returned_quantity, qty: 0, condition: 'good',
+              unitRefund: utils.round2((i.total / (i.quantity || 1)) * factor * taxMult),
+            })),
+          };
+          this.$nextTick(() => this.$refs.reason && this.$refs.reason.focus());
+        },
+        closeReturn() { if (this.ret.open) this.ret.open = false; },
+        validateReturn() {
+          const e = {};
+          let any = false;
+          this.ret.lines.forEach((l) => {
+            const q = Number(l.qty);
+            if (l.qty === '' || l.qty === null || isNaN(q)) { e['q' + l.id] = 'Enter a whole number.'; return; }
+            if (!Number.isInteger(q) || q < 0) e['q' + l.id] = 'Enter a whole number of 0 or more.';
+            else if (q > l.max) e['q' + l.id] = 'Only ' + l.max + ' can be returned on this line.';
+            if (q > 0) any = true;
+          });
+          if (!any) e.lines = 'Select at least one item to return.';
+          const plan = this.plan, m = this.ret.method;
+          if (any && plan.rest > 0) {
+            // what is left after the due and the store credit is paid out: choose how, within what was paid in
+            if (m === 'ledger') e.method = 'Nothing more is owed on this invoice — choose how to refund the remaining ' + utils.money(plan.rest) + '.';
+            else if (!REFUND_METHODS.some((x) => x.key === m)) e.method = 'Choose how to refund the remaining ' + utils.money(plan.rest) + '.';
+            else if (m === 'store_credit' && !this.customerHasLedger) e.method = 'Store credit needs a customer with a ledger.';
+            else if (plan.over) e.method = 'Only ' + utils.money(plan.moneyIn) + ' was actually paid on this invoice' + (plan.moneyOut > 0 ? ' and ' + utils.money(plan.moneyOut) + ' of it has already been refunded' : '') + ' — at most ' + utils.money(plan.moneyLeft) + ' can be refunded, not ' + utils.money(plan.rest) + '.';
+            else if (isBank(m)) {
+              const accId = this.retAccountId(), acc = accId ? db.find('bank_accounts', accId) : null;
+              if (!acc) e.account = 'Choose the account the refund is paid from.';
+              else if (!acc.is_active) e.account = acc.name + ' is closed — choose another account.';
+              else if (!db.setting('allow_bank_overdraft') && (Number(acc.balance) || 0) < plan.rest - 0.005) e.account = acc.name + ' only holds ' + utils.money(acc.balance) + '.';
+            }
+          }
+          if (!String(this.ret.reason || '').trim()) e.reason = 'A reason is required.';
+          this.ret.errors = e;
+          return !Object.keys(e).length;
+        },
+        async submitReturn() {
+          if (!this.validateReturn()) { ui.error('Please fix the highlighted fields.'); return; }
+          // re-read: another tab may have returned units, taken a payment or voided the invoice meanwhile
+          const s = db.find('sales', this.sale.id);
+          if (!s || s.status === 'void') { ui.error('This invoice was voided in the meantime.'); this.ret.open = false; this.load(); return; }
+          const lines = this.ret.lines.filter((l) => Number(l.qty) > 0);
+          for (const l of lines) {
+            const it = db.find('sale_items', l.item.id);
+            const left = it ? (Number(it.quantity) || 0) - (Number(it.returned_quantity) || 0) : 0;
+            if (Number(l.qty) > left) { ui.error(`Only ${left} × ${l.label} can still be returned — the invoice changed in the meantime.`); this.load(); this.openReturn(); return; }
+          }
+          const refund = this.retTotal;
+          const plan = planFor(s, refund);
+          const payMethod = plan.rest > 0 ? this.ret.method : null;
+          if (payMethod && (plan.over || !REFUND_METHODS.some((x) => x.key === payMethod))) { this.validateReturn(); ui.error(this.ret.errors.method || 'Please fix the highlighted fields.'); return; }
+          const method = payMethod || (plan.credit > 0 ? 'store_credit' : 'ledger');
+          const toCredit = utils.round2(plan.credit + (payMethod === 'store_credit' ? plan.rest : 0));
+          const paid = payMethod && payMethod !== 'store_credit' ? plan.rest : 0;
+          const accountId = paid > 0 && isBank(payMethod) ? this.retAccountId() : null;
+          const acc = accountId ? db.find('bank_accounts', accountId) : null;
+          const reference = String(this.ret.reference || '').trim();
+          const parts = [];
+          if (plan.due > 0) parts.push(utils.money(plan.due) + ' off the unpaid balance');
+          if (toCredit > 0) parts.push(utils.money(toCredit) + ' as store credit');
+          if (paid > 0) parts.push(utils.money(paid) + (payMethod === 'cash' ? ' in cash from the drawer' : ' by ' + ui.statusLabel(payMethod) + (acc ? ' from ' + acc.name : '')));
+          const ok = await ui.confirm({ title: 'Confirm return?', message: `${this.retUnits} unit${this.retUnits === 1 ? '' : 's'} will be returned against ${s.invoice_no}. Refund ${utils.money(refund)}: ${parts.join(' · ')}.`, confirmText: 'Confirm return' });
+          if (!ok) return;
+          this.ret.busy = true;
+          try {
+            const bid = s.branch_id;
+            const reason = this.ret.reason.trim();
+            const notes = String(this.ret.notes || '').trim();
+            const returnNo = db.nextNumber('RET', db.branchCode(bid));
+            const ret = db.insert('sale_returns', {
+              return_no: returnNo, sale_id: s.id, branch_id: bid, customer_id: s.customer_id, user_id: user.id, return_date: utils.now(),
+              subtotal: refund, refund_amount: refund, refund_method: method,
+              // how the refund was split: off the invoice due / store credit (of which restored) / paid out
+              refund_due: plan.due, refund_credit: toCredit, refund_credit_restored: plan.credit, refund_paid: paid,
+              refund_cash: payMethod === 'cash' ? paid : 0,          // the part that left the cash drawer
+              refund_account_id: acc ? acc.id : null, refund_reference: reference || null, bank_txn_id: null,
+              shift_id: payMethod === 'cash' ? ((ABM.shift.current(user.id, bid) || {}).id || null) : null,
+              reason, notes,
+            });
+            if (acc) {
+              // card / wallet / transfer refunds leave the bank account now; nothing else is written if it cannot
+              let txn;
+              try { txn = ABM.bank.pay(payMethod, paid, { accountId: acc.id, branchId: bid, reference: reference || returnNo, party: db.customerName(s.customer_id), notes: `Refund ${returnNo} · ${s.invoice_no}`, ref: { type: 'sale_return', id: ret.id } }); }
+              catch (err) { db.remove('sale_returns', ret.id); throw err; }
+              db.update('sale_returns', ret.id, { bank_txn_id: txn ? txn.id : null });
+            }
+            const ref = { type: 'sale_return', id: ret.id };
+            const moveNote = `Return ${returnNo} against ${s.invoice_no}: ${reason}`;
+            lines.forEach((l) => {
+              const q = Number(l.qty);
+              const item = db.find('sale_items', l.item.id);
+              db.insert('sale_return_items', { return_id: ret.id, sale_item_id: item.id, product_id: item.product_id, imei_id: item.imei_id || null, quantity: q, unit_price: l.unitRefund, total: utils.round2(q * l.unitRefund), condition: l.isService ? 'good' : l.condition });
+              if (l.isSerialized && item.imei_id) {
+                ABM.stock.returnImei(item.imei_id, bid, l.condition, ref, moveNote);
+              } else if (l.isStockTracked) {
+                if (l.condition === 'good') ABM.stock.add(bid, item.product_id, q, item.unit_cost, 'sale_return', ref, null, moveNote);
+                else ABM.stock.movement(bid, item.product_id, 'defective', 0, item.unit_cost, ref, null, moveNote + ' (' + q + ' defective, not restocked)');
+              }
+              db.update('sale_items', item.id, { returned_quantity: (Number(item.returned_quantity) || 0) + q });
+            });
+            const its = db.where('sale_items', { sale_id: s.id });
+            const allReturned = its.every((i) => (i.returned_quantity || 0) >= i.quantity);
+            const patch = { status: allReturned ? 'returned' : 'partially_returned' };
+            if (plan.due > 0) {
+              // what is still owed is cancelled first — never more than the due, so no store credit appears by accident
+              patch.due_amount = utils.round2(Math.max(0, (Number(s.due_amount) || 0) - plan.due));
+              ABM.ledger.customer(s.customer_id, bid, 'refund', 0, plan.due, { referenceType: 'sale_return', referenceId: ret.id, notes: `Refund for ${returnNo} applied to ${s.invoice_no}` });
+            }
+            if (toCredit > 0) {
+              ABM.ledger.customer(s.customer_id, bid, 'store_credit', 0, toCredit, { referenceType: 'sale_return', referenceId: ret.id, notes: `Store credit for ${returnNo} (${s.invoice_no})${plan.credit > 0 ? ' · ' + utils.money(plan.credit) + ' paid with store credit' : ''}` });
+            }
+            db.update('sales', s.id, patch);
+            db.audit('sale.return', 'sale_return', ret.id, `${returnNo}: ${this.retUnits} unit(s) returned on ${s.invoice_no}, refund ${utils.money(refund)} — ${parts.join(', ')}${reference ? ' (ref ' + reference + ')' : ''}`, bid);
+            ui.success(`Return ${returnNo} recorded · ${parts.join(' · ')}.`);
+            this.ret.open = false;
+            this.load();
+            if (this.canPrint && await ui.confirm({ title: 'Return recorded', message: `${returnNo} was saved. Print the credit note for the customer now?`, confirmText: 'Print credit note', cancelText: 'Not now' })) {
+              location.href = 'returns.html?id=' + ret.id + '&print=1';
+            }
+          } catch (err) {
+            ui.error(err.message || 'Could not record the return.');
+            this.load();
+          } finally {
+            this.ret.busy = false;
+          }
+        },
+
+        /* ------------------------------------------------------------ void */
+        openVoid() { if (!this.voidable) return; this.vd = { open: true, busy: false, reason: '', error: '' }; this.$nextTick(() => this.$refs.voidReason && this.$refs.voidReason.focus()); },
+        closeVoid() { if (this.vd.open) this.vd.open = false; },
+        async submitVoid() {
+          if (!this.voidable) return;
+          const reason = String(this.vd.reason || '').trim();
+          if (!reason) { this.vd.error = 'A reason is required.'; return; }
+          this.vd.error = '';
+          // re-read: another tab may have voided it or recorded a return meanwhile
+          const s = db.find('sales', this.sale.id);
+          if (!s || s.status === 'void') { ui.error('This invoice is already void.'); this.vd.open = false; this.load(); return; }
+          if (db.where('sale_returns', { sale_id: s.id }).length) { ui.error('Items on this invoice were returned in the meantime — it can no longer be voided.'); this.vd.open = false; this.load(); return; }
+          const pays = db.where('sale_payments', { sale_id: s.id });
+          const order = s.online_order_id ? db.find('online_orders', s.online_order_id) : null;
+          const releases = !!(order && String(order.sale_id) === String(s.id));
+          // the bank side is undone first; an account closed since the sale would stop it half way, so check now
+          const closed = pays.map((p) => (isBank(p.method) && p.bank_txn_id ? db.find('bank_transactions', p.bank_txn_id) : null))
+            .filter((t) => t && !t.reversed_by).map((t) => db.find('bank_accounts', t.account_id)).find((a) => a && !a.is_active);
+          if (closed) { ui.error(`${closed.name} is closed — reopen it on Bank Accounts before voiding, so the card / wallet money can be taken back out.`); return; }
+          const bankTotal = utils.sum(pays.filter((p) => isBank(p.method) && p.bank_txn_id), 'amount');
+          const ok = await ui.confirm({ title: 'Void ' + s.invoice_no + '?', message: `Stock will be restored and ledger entries reversed.${bankTotal > 0 ? ' ' + utils.money(bankTotal) + ' of card / wallet / transfer money is taken back out of the bank.' : ''}${releases ? ' Web order ' + order.order_no + ' goes back to Confirmed.' : ''} This cannot be undone.`, confirmText: 'Void invoice', danger: true });
+          if (!ok) return;
+          this.vd.busy = true;
+          try {
+            const bid = s.branch_id;
+            const note = `Void ${s.invoice_no}: ${reason}`;
+            // 1. money that reached a bank or wallet account goes back out of it
+            let held = false;
+            const undone = [];
+            pays.forEach((p) => {
+              if (!isBank(p.method) || !p.bank_txn_id) return;
+              const r = this.undoBankPayment(p, s, reason, releases ? order : null);
+              if (r === 'held') held = true; else if (r) undone.push(r);
+            });
+            this.items.forEach((i) => {
+              if (!i.isStockTracked) return;
+              if (i.isSerialized && i.imei_id) ABM.stock.returnImei(i.imei_id, bid, 'good', { type: 'sale', id: s.id }, note);
+              else ABM.stock.add(bid, i.product_id, i.quantity, i.unit_cost, 'adjustment', { type: 'sale', id: s.id }, null, note);
+            });
+            if (this.customerHasLedger) {
+              if (s.due_amount > 0) ABM.ledger.customer(s.customer_id, bid, 'adjustment', 0, s.due_amount, { referenceType: 'sale', referenceId: s.id, notes: `${s.invoice_no} voided – credit sale reversed` });
+              pays.filter((p) => p.method === 'store_credit').forEach((p) => ABM.ledger.customer(s.customer_id, bid, 'store_credit', 0, p.amount, { referenceType: 'sale', referenceId: s.id, notes: `${s.invoice_no} voided – store credit restored` }));
+            }
+            db.update('sales', s.id, { status: 'void', notes: [s.notes, `Voided by ${user.name || 'user'} on ${utils.datetime(new Date())}: ${reason}`].filter(Boolean).join(' | ') });
+            // 2. a web order invoiced here is released so it is not stuck on a void invoice
+            const released = releases ? this.releaseOrder(order, s, reason, held) : null;
+            db.audit('sale.void', 'sale', s.id, `${s.invoice_no} voided (${utils.money(s.total)}): ${reason}${undone.length ? ' · ' + undone.map((u) => utils.money(u.amount) + ' ' + ui.statusLabel(u.method) + ' taken back out of ' + u.account).join(', ') : ''}${released ? ' · web order ' + released.order_no + ' released (' + ui.statusLabel(released.payment_status) + ')' : ''}`, bid);
+            ui.success(s.invoice_no + ' voided.' + (undone.length ? ' ' + undone.map((u) => utils.money(u.amount) + ' taken back out of ' + u.account).join(', ') + '.' : '') + (released ? ' Web order ' + released.order_no + ' is Confirmed again.' : ''));
+            this.vd.open = false;
+            this.load();
+          } catch (err) {
+            ui.error(err.message || 'Could not void the invoice.');
+            this.load();
+          } finally {
+            this.vd.busy = false;
+          }
+        },
+        /**
+         * Take a voided card / wallet / transfer payment back out of the account it landed in. A payment with a
+         * bank row of its own is undone with ABM.bank.undo; one that was settled together with other payments
+         * (the demo's daily card settlements) gets a reversing entry for its own amount only. Money that sits on
+         * the web order itself (the order's own receipt) stays: it is still held for that order → 'held'.
+         */
+        undoBankPayment(p, s, reason, order) {
+          const t = db.find('bank_transactions', p.bank_txn_id);
+          if (!t) return null;
+          if (order && order.bank_txn_id && String(order.bank_txn_id) === String(t.id)) return 'held';
+          if (p.bank_reversal_id || t.reversed_by) return null;
+          const acc = db.find('bank_accounts', t.account_id);
+          const why = `${s.invoice_no} voided: ${reason}`;
+          const own = t.reference_type === 'sale_payment' && String(t.reference_id) === String(p.id) && Math.abs((Number(t.amount) || 0) - (Number(p.amount) || 0)) < 0.01;
+          const row = own
+            ? ABM.bank.undo(t.id, why)
+            : ABM.bank.post(t.account_id, {
+              type: 'payment', amount: p.amount, method: p.method, reference: p.reference || s.invoice_no, party: db.customerName(s.customer_id),
+              notes: `${ui.statusLabel(p.method)} payment on ${why}`, ref: { type: 'sale_payment', id: p.id }, allowOverdraft: true, branchId: s.branch_id,
+            });
+          if (!row) return null;
+          db.update('sale_payments', p.id, { bank_reversal_id: row.id });
+          return { amount: Number(p.amount) || 0, method: p.method, account: acc ? acc.name : 'the bank' };
+        },
+        /** Money still held for a web order after its invoice is voided: its own un-reversed receipt or a live cheque. */
+        orderMoneyHeld(o) {
+          if (o.bank_txn_id) { const t = db.find('bank_transactions', o.bank_txn_id); if (t && !t.reversed_by) return true; }
+          if (o.cheque_id) { const c = db.find('cheques', o.cheque_id); if (c && !['bounced', 'cancelled'].includes(c.status)) return true; }
+          return false;
+        },
+        /** Put a web order back where it can be invoiced again: no sale, Confirmed (unless cancelled), payment recomputed. */
+        releaseOrder(order, s, reason, held) {
+          const o = db.find('online_orders', order.id);
+          if (!o || String(o.sale_id) !== String(s.id)) return null;
+          const stillHeld = !!held || this.orderMoneyHeld(o);
+          const status = o.status === 'cancelled' ? 'cancelled' : 'confirmed';
+          const payment_status = stillHeld ? 'paid' : 'unpaid';
+          const log = [...(o.status_log || []), { status, at: utils.now(), by: user.id || null, notes: `Invoice ${s.invoice_no} voided: ${reason}` }];
+          const patch = { sale_id: null, invoiced_at: null, status, status_log: log, payment_status };
+          if (!stillHeld) Object.assign(patch, { paid_at: null, payment_verified_at: null, payment_verified_by: null });
+          db.update('online_orders', o.id, patch);
+          db.audit('order.release', 'online_order', o.id, `${o.order_no} released: invoice ${s.invoice_no} voided — order back to ${ui.statusLabel(status)}, payment ${stillHeld ? 'still held (paid)' : 'unpaid'} · ${reason}`, s.branch_id);
+          return { order_no: o.order_no, status, payment_status };
+        },
+      };
+    }
+  </script>
+</body>
+</html>

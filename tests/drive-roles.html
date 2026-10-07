@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: roles &amp; permissions</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the roles service and the real Alpine components of roles.html, role-edit.html, users.html
+    // and a few CRUD pages, proving Add / Edit / Delete / View / Export are enforced one by one.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x ? '  [' + x + ']' : '')); };
+    const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const throws = (fn, re, m) => { try { fn(); ok(false, m, 'did not throw'); } catch (e) { ok(!re || re.test(e.message), m, e.message); } };
+
+    async function main() {
+      const { db, utils, ui, session, roles } = ABM;
+      db.reset();
+      const toasts = [];
+      ui.toast = (msg, type) => toasts.push((type || 'info') + ': ' + msg);
+      ui.error = (msg) => toasts.push('error: ' + msg); ui.warn = (msg) => toasts.push('warn: ' + msg); ui.success = (msg) => toasts.push('success: ' + msg);
+      ui.confirm = async () => true;
+      const lastToast = () => toasts[toasts.length - 1] || '';
+      const as = (username) => { session.logout(); session.login(db.all('users').find((u) => u.username === username)); };
+      const real = window.setTimeout;
+      const noNav = async (fn) => { window.setTimeout = (f, ms) => (ms >= 300 ? 0 : real(f, ms)); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q, page) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        if (page) document.body.dataset.page = page; else delete document.body.dataset.page;
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        if (o.init) o.init();
+        return o;
+      };
+
+      /* ========================= 1. the seed ========================= */
+      log('=== TEST 1: seeded roles');
+      eq(roles.all().map((r) => r.key), ['super_admin', 'branch_manager', 'cashier', 'technician'], 'T1: four starting roles, in order');
+      ok(roles.all().every((r) => r.is_system), 'T1: all four are built in');
+      ok(roles.all().filter((r) => !roles.isFull(r)).every((r) => JSON.stringify(roles.normalize(r.permissions).slice().sort()) === JSON.stringify(r.permissions.slice().sort())), 'T1: every seeded list is already normalised (each action carries its View, no unknown keys)');
+      eq(roles.permsOf('super_admin').length, roles.KEYS.length, 'T1: Super Admin holds every permission');
+      ok(roles.MODULES.every((m) => m.actions.length && m.pages.length), 'T1: every module has actions and pages');
+      ok(ABM.nav.every((g) => g.items.every((it) => !it.perm || roles.KEYS.includes(roles.canonical(it.perm)))), 'T1: every menu item is guarded by a real permission');
+      const pageMods = new Set(); roles.MODULES.forEach((m) => m.pages.forEach((p) => { ok(!pageMods.has(p), 'T1: page ' + p + ' belongs to one module only'); pageMods.add(p); }));
+
+      /* ========================= 2. checks and aliases ========================= */
+      log('=== TEST 2: session.can');
+      as('manager');
+      ok(session.can('products.delete') && session.can('products.manage') && session.can('bank.manage'), 'T2: a manager can delete products; old names still resolve');
+      ok(!session.can('settings.view') && !session.can('roles.view') && !session.can('branches.edit'), 'T2: but not settings, roles or branches');
+      as('cashier');
+      ok(session.can('pos.view') && session.can('pos.access'), 'T2: a cashier uses the POS (new and old name)');
+      ok(!session.can('sales.export') && !session.can('sales.void') && !session.can('sales.all'), 'T2: but cannot export, void or see everyone\'s sales');
+      eq(session.homeFor('cashier'), 'pos.html', 'T2: a cashier lands on the POS');
+      eq(session.homeFor('technician'), 'repairs.html', 'T2: a technician lands on repair jobs');
+      eq(roles.describe('sales.delete'), 'Sales History: Delete', 'T2: permissions read as words');
+      eq(roles.describe('transfers.approve'), 'Stock Transfers: Approve', 'T2: extras read as words too');
+      const techs = roles.technicians(1).map((u) => u.username).sort();
+      eq(techs, ['manager', 'technician'], 'T2: branch 1 can put its manager and technician on jobs (the owner is not a technician)');
+      ok(roles.isBench('technician') && !roles.isBench('branch_manager') && !roles.isBench('super_admin'), 'T2: only the technician is a bench technician');
+
+      /* ========================= 3. creating a role ========================= */
+      log('=== TEST 3: create a role');
+      as('admin');
+      throws(() => roles.create({ name: '', permissions: ['products.view'] }), /name/, 'T3: a role needs a name');
+      throws(() => roles.create({ name: 'Cashier', permissions: ['products.view'] }), /already/, 'T3: names are unique');
+      throws(() => roles.create({ name: 'Empty', permissions: [] }), /Tick at least one/, 'T3: a role needs a permission');
+      const keeper = roles.create({ name: 'Stock Keeper', description: 'Receives and counts stock', color: 'amber', permissions: ['products.add', 'products.edit', 'inventory.edit', 'expenses.view', 'nonsense.key'] });
+      eq(keeper.key, 'stock_keeper', 'T3: the key comes from the name');
+      eq(keeper.permissions, ['products.view', 'products.add', 'products.edit', 'inventory.view', 'inventory.edit', 'expenses.view'], 'T3: saved in catalogue order, View added, unknown keys dropped');
+      ok(db.all('audit_logs').some((a) => a.action === 'role.create' && a.entity_id === keeper.id), 'T3: creation is audited');
+
+      // give it to someone and sign in as them
+      const bob = db.insert('users', { name: 'Bob Keeper', username: 'bob', email: '', phone: '', role: 'stock_keeper', branch_id: 1, is_active: 1 });
+      as('bob');
+      ok(session.can('products.add') && session.can('products.edit') && !session.can('products.delete') && !session.can('products.export'), 'T3: Bob can add and edit products but not delete or export them');
+      const navKeys = []; ABM.nav.forEach((g) => g.items.forEach((it) => { if (!it.perm || session.can(it.perm)) navKeys.push(it.key); }));
+      eq(navKeys, ['products', 'labels', 'stock', 'expenses'], 'T3: Bob\'s menu shows exactly his screens');
+      eq(session.homeFor('stock_keeper'), 'products.html', 'T3: and he lands on the first of them');
+
+      /* ========================= 4. the pages obey it ========================= */
+      log('=== TEST 4: pages obey Add / Edit / Delete / Export');
+      await source('products.html', 'productsPage');
+      let pp = mk(productsPage, '', 'products');
+      ok(pp.canAdd && pp.canManage && !pp.canDelete, 'T4: products page — add yes, edit yes, delete no');
+      const victim = pp.rows[0];
+      await pp.remove(victim);
+      ok(!!db.find('products', victim.id), 'T4: remove() refuses and the product is still there');
+      ok(/not allowed to delete products/.test(lastToast()), 'T4: with a clear message', lastToast());
+      ok(!utils.canExportHere(), 'T4: the Export buttons hide on the products page');
+      eq(utils.download('x.csv', 'a,b'), false, 'T4: and exporting is refused even if called directly');
+      ok(/not allowed to export Products/.test(lastToast()), 'T4: naming the screen', lastToast());
+      eq(utils.download('t.csv', 'a,b', 'text/csv', { allow: true }) !== false, true, 'T4: a blank import template is still allowed');
+
+      await source('expenses.html', 'expensesPage');
+      let ep = mk(expensesPage, '?range=all', 'expenses');
+      ok(!ep.canAdd && !ep.canManage && !ep.canDelete, 'T4: expenses page is view-only for Bob');
+      ep.openAdd();
+      ok(!ep.modal.open, 'T4: openAdd() refuses');
+      const exp = db.all('expenses').find((e) => String(e.branch_id) === '1');
+      await ep.remove({ ...exp, categoryName: 'x' });
+      ok(!!db.find('expenses', exp.id), 'T4: remove() refuses too');
+
+      /* ========================= 5. editing a role through the page ========================= */
+      log('=== TEST 5: role-edit.html');
+      as('admin');
+      await source('role-edit.html', 'roleEditPage');
+      let re = mk(roleEditPage, '?id=' + keeper.id, 'role-edit');
+      ok(re.editable && !re.full && !re.isNew, 'T5: the admin can edit Stock Keeper');
+      eq(re.count, 6, 'T5: six permissions ticked');
+      const P = roles.module('products'), S = roles.module('sales'), T = roles.module('transfers');
+      re.toggle(P, 'delete');
+      ok(re.has('products.delete'), 'T5: tick Products: Delete');
+      re.toggle(S, 'export');
+      ok(re.has('sales.export') && re.has('sales.view'), 'T5: ticking Sales: Export also ticks Sales: View');
+      re.toggle(S, 'view');
+      ok(!re.has('sales.export') && !re.has('sales.view'), 'T5: unticking View clears the whole screen');
+      re.toggleRow(T);
+      ok(['view', 'add', 'delete', 'export', 'approve', 'ship', 'receive'].every((a) => re.has('transfers.' + a)), 'T5: the row switch ticks every transfer action');
+      eq(re.rowState(T), 'all', 'T5: and reads as all');
+      re.toggle(T, 'ship');
+      eq(re.rowState(T), 'some', 'T5: one off reads as some');
+      re.toggleRow(T); re.toggleRow(T);
+      eq(re.rowState(T), 'none', 'T5: switching twice from all clears it');
+      re.q = 'export';
+      ok(re.visibleModules.length > 5 && re.visibleModules.every((m) => m.actions.includes('export') || /export/i.test(m.label)), 'T5: the search box narrows to screens with Export', re.visibleModules.length);
+      re.toggleCol('export');
+      ok(re.visibleModules.filter((m) => m.actions.includes('export')).every((m) => re.has(m.key + '.export') && (!m.actions.includes('view') || re.has(m.key + '.view'))), 'T5: the Export column ticks every visible screen (with View)');
+      re.toggleCol('export');
+      ok(re.visibleModules.every((m) => !re.has(m.key + '.export')), 'T5: clicking it again clears the column');
+      re.q = '';
+      re.toggleGroup('Accounting');
+      eq(re.groupState('Accounting'), 'all', 'T5: the section link ticks all of Accounting');
+      re.toggleGroup('Accounting');
+      eq(re.groupState('Accounting'), 'none', 'T5: and clears it again');
+      ok(re.dirty, 'T5: the page knows there are unsaved changes');
+      re.form.name = 'Stock Keeper';
+      re.save();
+      ok(!re.dirty, 'T5: saved', lastToast());
+      const saved = db.find('roles', keeper.id);
+      ok(saved.permissions.includes('products.delete') && !saved.permissions.includes('sales.export') && !saved.permissions.includes('expenses.view'), 'T5: the stored role has the new ticks (and clearing Accounting removed Expenses: View)');
+      const upd = db.all('audit_logs').filter((a) => a.action === 'role.update').pop();
+      ok(upd && /products\.delete/.test(upd.details) && /expenses\.view/.test(upd.details), 'T5: the audit row names what was added and removed', upd && upd.details);
+      as('bob');
+      ok(session.can('products.delete'), 'T5: Bob can delete products straight away');
+
+      // copy from another role
+      as('admin');
+      re = mk(roleEditPage, '?id=' + keeper.id, 'role-edit');
+      re.copyFrom = String(roles.get('cashier').id);
+      re.applyCopy();
+      eq(re.list, roles.permsOf('cashier'), 'T5: "Copy permissions from" takes the cashier\'s ticks');
+
+      // the super admin role is locked; a new role page works
+      re = mk(roleEditPage, '?id=1', 'role-edit');
+      ok(re.full && !re.editable, 'T5: Super Admin opens read-only');
+      throws(() => roles.update(1, { name: 'Super Admin', permissions: ['dashboard.view'] }), /full access/, 'T5: and the service refuses to narrow it');
+      re = mk(roleEditPage, '', 'role-edit');
+      ok(re.isNew && re.editable && re.count === 0, 'T5: a blank new role');
+      re.form.name = 'Night Cashier';
+      re.toggle(roles.module('pos'), 'view');
+      re.toggle(roles.module('shifts'), 'add');
+      await noNav(() => re.save());
+      const night = roles.get('night_cashier');
+      ok(!!night && night.permissions.join() === 'pos.view,shifts.view,shifts.add', 'T5: created from the page', night && night.permissions.join());
+
+      /* ========================= 6. no escalation, no lock-out ========================= */
+      log('=== TEST 6: guard rails');
+      const deputy = roles.create({ name: 'Deputy', color: 'blue', permissions: ['roles.view', 'roles.add', 'roles.edit', 'users.view', 'users.add', 'users.edit', 'products.view', 'products.edit', 'pos.view'] });
+      const dee = db.insert('users', { name: 'Dee Deputy', username: 'dee', email: '', phone: '', role: 'deputy', branch_id: 1, is_active: 1 });
+      as('dee');
+      throws(() => roles.create({ name: 'Too Much', permissions: ['settings.edit'] }), /cannot grant/, 'T6: nobody can grant a permission they do not hold');
+      const small = roles.create({ name: 'Till Only', permissions: ['pos.view'] });
+      ok(!!small, 'T6: but a smaller role is fine');
+      ok(!roles.canGrant('super_admin') && !roles.canGrant('branch_manager') && roles.canGrant('till_only'), 'T6: only roles within her own access can be handed out');
+      eq(roles.assignable().map((r) => r.key).sort(), ['deputy', 'till_only'], 'T6: so her role picker offers exactly those');
+      throws(() => roles.update(roles.get('branch_manager').id, { name: 'Branch Manager', permissions: ['pos.view'] }), /do not hold/, 'T6: she cannot edit a bigger role');
+      throws(() => roles.update(deputy.id, { name: 'Deputy', permissions: ['roles.view', 'users.view'] }), /lock you out/, 'T6: removing Roles: Edit from her own role is refused');
+      await source('role-edit.html', 'roleEditPage');
+      re = mk(roleEditPage, '?id=' + roles.get('branch_manager').id, 'role-edit');
+      ok(!re.editable && /do not hold/.test(re.readOnlyReason), 'T6: the Branch Manager role opens read-only for her');
+      re = mk(roleEditPage, '?id=' + small.id, 'role-edit');
+      ok(re.editable && !re.canTick('settings.edit') && re.canTick('products.edit'), 'T6: in her editor, permissions she lacks cannot be ticked');
+      re.setAll(true);
+      ok(!re.has('settings.edit') && re.has('products.edit'), 'T6: "Tick everything" only ticks what she holds');
+
+      // users page for her
+      await source('users.html', 'usersPage');
+      let up = mk(usersPage, '', 'users');
+      ok(up.canAdd && up.canEdit && !up.canDelete && !up.allBranches, 'T6: users page — add and edit, no deactivate, own branch only');
+      ok(up.rows.every((u) => String(u.branch_id) === '1'), 'T6: she only sees branch 1 staff');
+      ok(!up.canTouch(db.all('users').find((u) => u.username === 'manager')), 'T6: she cannot touch the branch manager');
+      ok(up.canTouch(db.all('users').find((u) => u.username === 'bob')) === false, 'T6: nor Bob, whose role has screens she lacks');
+      up.openCreate();
+      eq(up.roleChoices.map((r) => r.key).sort(), ['deputy', 'till_only'], 'T6: the new-user role list is limited');
+      Object.assign(up.modal.form, { name: 'Tina Till', username: 'tina', role: 'branch_manager', password: 'secret123', password2: 'secret123' });
+      up.save();
+      ok(!db.all('users').some((u) => u.username === 'tina'), 'T6: forcing a bigger role is rejected', JSON.stringify(up.modal.errors));
+      up.modal.form.role = 'till_only'; up.modal.form.branch_id = '2';
+      up.save();
+      ok(/own branch/.test(up.modal.errors.branch_id || ''), 'T6: and so is another branch', up.modal.errors.branch_id);
+      up.modal.form.branch_id = '1';
+      up.save();
+      const tina = db.all('users').find((u) => u.username === 'tina');
+      ok(!!tina && tina.role === 'till_only' && tina.branch_id === 1, 'T6: a till-only user in her branch is created');
+      await up.toggleActive(up.rows.find((u) => u.username === 'tina') || tina);
+      ok(db.find('users', tina.id).is_active === 1, 'T6: she cannot deactivate anyone (no Users: Delete)');
+
+      /* ========================= 7. deleting roles ========================= */
+      log('=== TEST 7: delete');
+      as('admin');
+      throws(() => roles.remove(roles.get('cashier').id), /built-in/, 'T7: built-in roles cannot be deleted');
+      throws(() => roles.remove(roles.get('till_only').id), /Move them/, 'T7: a role someone has cannot be deleted');
+      await source('roles.html', 'rolesPage');
+      let rp = mk(rolesPage, '', 'roles');
+      ok(rp.rows.length === 8, 'T7: the roles page lists all eight', rp.rows.length);
+      const nightRow = rp.rows.find((r) => r.key === 'night_cashier');
+      eq(nightRow.assigned, 0, 'T7: Night Cashier is unused');
+      ok(rp.k.unused >= 1, 'T7: counted as unused');
+      await rp.remove(nightRow);
+      ok(!roles.get('night_cashier'), 'T7: deleted from the roles page');
+      ok(db.all('audit_logs').some((a) => a.action === 'role.delete'), 'T7: deletion is audited');
+      rp.onlyDiff = true;
+      ok(rp.compareRows.length > 0 && rp.compareRows.every((r) => r.differs), 'T7: the compare table can hide rows where every role agrees');
+
+      /* ========================= 8. scoping extras ========================= */
+      log('=== TEST 8: own-only scopes follow permissions');
+      await source('sales.html', 'salesPage');
+      as('cashier');
+      let sp = mk(salesPage, '?range=all', 'sales');
+      ok(sp.isCashier, 'T8: without "Everyone\'s sales" the cashier sees only their own');
+      const me = session.user().id;
+      ok(sp.rows.every((s) => String(s.user_id) === String(me)), 'T8: and every listed sale is theirs', sp.rows.length);
+      as('manager');
+      sp = mk(salesPage, '?range=all', 'sales');
+      ok(!sp.isCashier && sp.rows.some((s) => String(s.user_id) !== String(session.user().id)), 'T8: the manager sees the whole branch');
+      // give the cashier role "Everyone's sales" and it opens up
+      as('admin');
+      roles.update(roles.get('cashier').id, { name: 'Cashier', description: roles.get('cashier').description, color: 'slate', permissions: roles.get('cashier').permissions.concat(['sales.all']) });
+      as('cashier');
+      sp = mk(salesPage, '?range=all', 'sales');
+      ok(!sp.isCashier, 'T8: after ticking it, the cashier sees the whole branch too');
+
+      await source('shifts.html', 'shiftsPage');
+      let sh = mk(shiftsPage, '?range=all', 'shifts');
+      ok(sh.ownOnly && sh.canOpen, 'T8: a cashier runs only their own drawer');
+      as('manager');
+      sh = mk(shiftsPage, '?range=all', 'shifts');
+      ok(!sh.ownOnly, 'T8: a manager sees every drawer');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 800);
+  </script>
+</body>
+</html>

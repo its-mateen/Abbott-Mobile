@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Profit &amp; Loss · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .print-only { display: none; }
+    .pl-row td { padding: .5rem 1rem; }
+    .pl-section td { background: rgb(var(--slate-50)); font-size: .6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: rgb(var(--slate-500)); padding: .5rem 1rem; }
+    .pl-total td { font-weight: 700; border-top: 1px solid rgb(var(--slate-300)); }
+    .pl-grand td { font-weight: 800; border-top: 2px solid rgb(var(--slate-400)); background: rgb(var(--navy-500) / .06); font-size: .9375rem; }
+    .pl-total td:first-child, .pl-grand td:first-child { color: rgb(var(--slate-900)); }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      main { padding: 0 !important; max-width: none !important; }
+      .card { border: 1px solid #cbd5e1 !important; box-shadow: none !important; break-inside: avoid; margin-bottom: .75rem; }
+      .table thead th, .table tbody td { padding: .3rem .5rem !important; font-size: 11px !important; }
+      .table thead th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .table-wrap { overflow: visible !important; }
+      .hidden.md\:table-cell, .hidden.sm\:table-cell, .hidden.lg\:table-cell { display: table-cell !important; }
+      canvas { max-height: 200px !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="report-profit-loss" data-title="Profit &amp; Loss" data-perm="reports.view">
+  <main x-data="profitLossReport()">
+    <!-- Print header -->
+    <div class="print-only mb-4">
+      <div class="text-xl font-extrabold text-slate-900" x-text="companyName + ' — Profit & Loss Statement'"></div>
+      <div class="text-sm text-slate-600"><span x-text="scopeLabel"></span> · <span x-text="range.label"></span> · printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="userName"></span></div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Profit &amp; Loss</h2>
+        <p class="page-subtitle"><b x-text="scopeLabel"></b> · <span x-text="range.label"></span> · compared with <span x-text="prevLabel"></span></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>All reports</a>
+        <button type="button" class="btn btn-secondary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a :href="'report-sales.html?' + linkQuery" class="btn btn-primary"><span x-html="ABM.icon('chart')"></span>Sales detail</a>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto font-semibold" x-model="branchSel" x-ref="branchSelect" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg"><span x-text="ABM.db.branchCode(scopeId)"></span> · <span x-text="scopeLabel"></span></span>
+          </template>
+          <label class="inline-flex items-center gap-2 text-sm text-slate-600 select-none cursor-pointer">
+            <input type="checkbox" class="checkbox" x-model="showCompare">
+            <span>Show comparison column</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 no-print">
+      <a :href="'report-sales.html?' + linkQuery" class="stat stat-money" title="Open the sales report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Total revenue</div><div class="stat-value" x-text="$money(cur.revenue, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta flex items-center gap-1.5 flex-wrap">
+          <span class="badge" :class="delta('revenue') >= 0 ? 'badge-green' : 'badge-red'" x-show="prev.revenue > 0"><span x-html="ABM.icon(delta('revenue') >= 0 ? 'trend-up' : 'trend-down','w-3 h-3')"></span><span x-text="(delta('revenue')>=0?'+':'') + delta('revenue') + '%'"></span></span>
+          <span x-text="'retail ' + $money(cur.retail, {decimals:0})"></span>
+        </div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-sales.html?' + linkQuery + '#product'" class="stat stat-accent" title="Gross profit by product">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Gross profit</div><div class="stat-value" x-text="$money(cur.grossProfit, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('chart')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="cur.grossMargin"></span>% margin · COGS <span x-text="$money(cur.cogs, {decimals:0})"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-expenses.html?' + linkQuery" class="stat stat-danger" title="Open the expenses report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Operating expenses</div><div class="stat-value text-rose-600" x-text="$money(cur.expenses, {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('wallet')"></span>
+        </div>
+        <div class="stat-meta flex items-center gap-1.5 flex-wrap">
+          <span class="badge" :class="delta('expenses') <= 0 ? 'badge-green' : 'badge-red'" x-show="prev.expenses > 0"><span x-html="ABM.icon(delta('expenses') >= 0 ? 'trend-up' : 'trend-down','w-3 h-3')"></span><span x-text="(delta('expenses')>=0?'+':'') + delta('expenses') + '%'"></span></span>
+          <span x-text="cur.expenseCount + ' entries'"></span>
+        </div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#statement" class="stat" :class="cur.netProfit >= 0 ? 'stat-money' : 'stat-danger'" title="Jump to the statement">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Net profit</div><div class="stat-value" :class="cur.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="$money(cur.netProfit, {decimals:0})"></div></div>
+          <span class="chip" :class="cur.netProfit >= 0 ? 'chip-money' : 'chip-danger'" x-html="ABM.icon(cur.netProfit >= 0 ? 'trend-up' : 'trend-down')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="cur.netMargin"></span>% of revenue · <span x-text="prevLabel"></span> <b x-text="$money(prev.netProfit, {decimals:0})"></b></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <div class="print-area">
+      <!-- Statement -->
+      <div class="card mt-4" id="statement">
+        <div class="card-header">
+          <div class="min-w-0"><div class="card-title">Statement of profit &amp; loss</div><div class="card-subtitle"><span x-text="range.label"></span> · <span x-text="scopeLabel"></span></div></div>
+          <span class="badge" :class="cur.netProfit >= 0 ? 'badge-green' : 'badge-red'" x-text="(cur.netProfit >= 0 ? 'Profit ' : 'Loss ') + ABM.utils.money(Math.abs(cur.netProfit), {decimals:0})"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Line</th>
+                <th class="num" x-text="range.label"></th>
+                <th class="num hidden sm:table-cell" x-show="showCompare" x-text="prevLabel"></th>
+                <th class="num hidden md:table-cell" x-show="showCompare">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(row, idx) in statement" :key="idx">
+                <tr :class="row.kind === 'section' ? 'pl-section' : row.kind === 'total' ? 'pl-total' : row.kind === 'grand' ? 'pl-grand' : 'pl-row'">
+                  <template x-if="row.kind === 'section'">
+                    <td :colspan="showCompare ? 4 : 2" x-text="row.label"></td>
+                  </template>
+                  <template x-if="row.kind !== 'section'">
+                    <td>
+                      <div class="flex items-center gap-2 min-w-0" :class="row.indent && 'pl-4'">
+                        <template x-if="row.link">
+                          <a :href="row.link" class="font-medium text-navy-700 hover:underline truncate" x-text="row.label"></a>
+                        </template>
+                        <template x-if="!row.link">
+                          <span class="truncate" :class="row.muted ? 'text-slate-500 text-[13px]' : ''" x-text="row.label"></span>
+                        </template>
+                      </div>
+                    </td>
+                  </template>
+                  <template x-if="row.kind !== 'section'">
+                    <td class="num whitespace-nowrap" :class="row.tone" x-text="(row.negative && row.value > 0 ? '(' + ABM.utils.money(row.value, {decimals:0}) + ')' : $money(row.value, {decimals:0}))"></td>
+                  </template>
+                  <template x-if="row.kind !== 'section' && showCompare">
+                    <td class="num whitespace-nowrap hidden sm:table-cell text-slate-500" x-text="(row.negative && row.prev > 0 ? '(' + ABM.utils.money(row.prev, {decimals:0}) + ')' : ABM.utils.money(row.prev, {decimals:0}))"></td>
+                  </template>
+                  <template x-if="row.kind !== 'section' && showCompare">
+                    <td class="num whitespace-nowrap hidden md:table-cell">
+                      <span class="inline-flex items-center gap-1 justify-end" :class="changeTone(row)" x-show="row.prev !== 0 || row.value !== 0">
+                        <span x-html="ABM.icon(changePct(row) >= 0 ? 'trend-up' : 'trend-down','w-3.5 h-3.5')"></span>
+                        <span x-text="(changePct(row) >= 0 ? '+' : '') + changePct(row) + '%'"></span>
+                      </span>
+                    </td>
+                  </template>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer text-xs text-slate-500">
+          Revenue = gross sales − discounts − returns, plus delivered repair jobs. COGS uses the recorded unit cost of every item invoiced in the period and every spare part consumed on delivered jobs, less the cost of stock that came back on returns processed in the period (units returned defective are written off, so their cost stays in COGS). <span x-show="cur.tax > 0"><span x-text="taxLabel"></span> of <span x-text="ABM.utils.money(cur.tax, {decimals:0})"></span> is collected on behalf of the authority and is not revenue.</span>
+        </div>
+      </div>
+
+      <!-- Trend chart -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Six-month trend</div><div class="card-subtitle">Revenue vs gross profit vs expenses · <span x-text="scopeLabel"></span></div></div>
+        </div>
+        <div class="card-body">
+          <div class="h-64 sm:h-72"><canvas id="plChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- Per-branch breakdown -->
+      <div class="card mt-4" x-show="isSuperAdmin" x-cloak>
+        <div class="card-header">
+          <div><div class="card-title">Branch comparison</div><div class="card-subtitle">Same period, every active branch</div></div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Branch</th>
+                <th class="num">Revenue</th>
+                <th class="num hidden md:table-cell">COGS</th>
+                <th class="num">Gross profit</th>
+                <th class="num hidden sm:table-cell">Margin</th>
+                <th class="num hidden md:table-cell">Expenses</th>
+                <th class="num">Net profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="b in branchRows" :key="b.id">
+                <tr>
+                  <td><span class="badge badge-slate mr-1" x-text="b.code"></span><span class="font-medium text-slate-800" x-text="b.name"></span></td>
+                  <td class="num whitespace-nowrap" x-text="$money(b.revenue, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap hidden md:table-cell text-slate-500" x-text="$money(b.cogs, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap font-semibold text-emerald-700" x-text="$money(b.grossProfit, {decimals:0})"></td>
+                  <td class="num hidden sm:table-cell" x-text="b.grossMargin + '%'"></td>
+                  <td class="num whitespace-nowrap hidden md:table-cell text-rose-600" x-text="$money(b.expenses, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap font-bold" :class="b.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="$money(b.netProfit, {decimals:0})"></td>
+                </tr>
+              </template>
+              <template x-if="!branchRows.length"><tr><td colspan="7" class="empty">No branches to compare.</td></tr></template>
+            </tbody>
+            <tfoot x-show="branchRows.length">
+              <tr>
+                <td class="font-bold">All branches</td>
+                <td class="num whitespace-nowrap" x-text="$money(branchTotals.revenue, {decimals:0})"></td>
+                <td class="num whitespace-nowrap hidden md:table-cell" x-text="$money(branchTotals.cogs, {decimals:0})"></td>
+                <td class="num whitespace-nowrap" x-text="$money(branchTotals.grossProfit, {decimals:0})"></td>
+                <td class="num hidden sm:table-cell" x-text="branchTotals.grossMargin + '%'"></td>
+                <td class="num whitespace-nowrap hidden md:table-cell" x-text="$money(branchTotals.expenses, {decimals:0})"></td>
+                <td class="num whitespace-nowrap" :class="branchTotals.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'" x-text="$money(branchTotals.netProfit, {decimals:0})"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function profitLossReport() {
+      const { db, utils, ui, session } = ABM;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        branchSel: String(session.branchId() || ''),
+        companyName: db.setting('company_name', 'Abbott Mobile'),
+        taxLabel: db.setting('tax_label', 'Sales Tax'),
+        userName: (session.user() || {}).name || '',
+        range: null,
+        showCompare: true,
+        cur: null,
+        prev: null,
+        branchRows: [],
+        branchTotals: { revenue: 0, cogs: 0, grossProfit: 0, grossMargin: 0, expenses: 0, netProfit: 0 },
+        trend: [],
+        chart: null,
+
+        init() {
+          const qb = utils.qs('branch');
+          if (this.isSuperAdmin && qb !== null) this.branchSel = (qb === 'all' || this.branches.some((b) => String(b.id) === String(qb))) ? String(qb) : String(session.branchId() || '');
+          this.cur = this.blank(); this.prev = this.blank();
+          this.range = ABM.range('this_month', () => this.refresh(), 'report-pl');
+          this.refresh();
+          this.$nextTick(() => { if (this.$refs.branchSelect) this.$refs.branchSelect.value = this.branchSel; });
+          this.$watch('branchSel', () => this.refresh());
+          ABM.theme.onChange(() => this.drawChart());
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeId() { return this.isSuperAdmin ? (this.branchSel === 'all' ? null : Number(this.branchSel)) : session.branchId(); },
+        get scopeLabel() { return this.scopeId === null ? 'All branches' : db.branchName(this.scopeId); },
+        get linkQuery() { return this.range.query + (this.isSuperAdmin ? '&branch=' + encodeURIComponent(this.branchSel) : ''); },
+        get prevLabel() { const p = this.range.previous; return p.from ? utils.date(p.from, 'short') + ' – ' + utils.date(p.to, 'short') : 'previous period'; },
+
+        blank() { return { revenue: 0, retail: 0, online: 0, repair: 0, gross: 0, discounts: 0, returns: 0, productRevenue: 0, cogs: 0, cogsProducts: 0, cogsSold: 0, returnedCost: 0, cogsParts: 0, grossProfit: 0, grossMargin: 0, expenses: 0, expenseCount: 0, netProfit: 0, netMargin: 0, tax: 0, invoices: 0, byCategory: {} }; },
+
+        /* ---------------------------------------------------------- compute */
+        /** Full P&L for a {from,to} window and a branch (null = all branches). */
+        periodFor(rangeValue, branchId) {
+          const out = this.blank();
+          if (!rangeValue) return out;
+          const inScope = (row) => branchId === null || branchId === undefined || Number(row.branch_id) === Number(branchId);
+          const inR = (d) => utils.inRange(d, rangeValue);
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && inScope(s) && inR(s.sale_date));
+          const ids = new Set(sales.map((s) => s.id));
+          const items = db.all('sale_items').filter((i) => ids.has(i.sale_id));
+          const onlineSaleIds = new Set(db.all('online_orders').filter((o) => o.sale_id).map((o) => String(o.sale_id)));
+          out.invoices = sales.length;
+          out.gross = utils.sum(sales, 'subtotal');
+          out.discounts = utils.sum(sales, 'discount_amount');
+          out.tax = utils.sum(sales, 'tax_amount');
+          const returnRows = db.all('sale_returns').filter((x) => inScope(x) && inR(x.return_date));
+          out.returns = utils.sum(returnRows, 'refund_amount');
+          out.productRevenue = utils.round2(out.gross - out.discounts - out.returns);
+          const onlineGross = utils.sum(sales.filter((s) => onlineSaleIds.has(String(s.id))), 'subtotal');
+          const shareOnline = out.gross ? onlineGross / out.gross : 0;
+          out.online = utils.round2(out.productRevenue * shareOnline);
+          out.retail = utils.round2(out.productRevenue - out.online);
+          const jobs = db.all('repair_jobs').filter((j) => j.status === 'delivered' && inScope(j) && inR(j.delivered_at || j.completed_at || j.received_at));
+          out.repair = utils.sum(jobs, 'total');
+          out.repairJobs = jobs.length;
+          out.revenue = utils.round2(out.productRevenue + out.repair);
+          /* COGS must sit in the SAME period as the revenue it belongs to: the full cost of everything
+             invoiced in the period, less the cost of units that came back on returns processed in the period
+             (the refund is already deducted from revenue above). Only units returned in good condition go back
+             on the shelf — a defective unit is written off, so its cost stays in COGS. Using
+             sale_items.returned_quantity instead would credit the cost in the period of the SALE while the
+             refund lands in the period of the RETURN, so a cross-month return overstated one month and
+             understated the other. */
+          out.cogsSold = utils.sum(items, (i) => (Number(i.unit_cost) || 0) * (Number(i.quantity) || 0));
+          const returnIds = new Set(returnRows.map((x) => x.id));
+          const saleItemById = new Map(db.all('sale_items').map((i) => [String(i.id), i]));
+          out.returnedCost = utils.sum(db.all('sale_return_items').filter((ri) => returnIds.has(ri.return_id) && ri.condition !== 'defective'), (ri) => {
+            const si = saleItemById.get(String(ri.sale_item_id));
+            const unitCost = si ? Number(si.unit_cost) || 0 : Number((db.find('products', ri.product_id) || {}).cost_price) || 0;
+            return unitCost * (Number(ri.quantity) || 0);
+          });
+          out.cogsProducts = utils.round2(out.cogsSold - out.returnedCost);
+          const jobIds = new Set(jobs.map((j) => j.id));
+          out.cogsParts = utils.sum(db.all('repair_items').filter((it) => jobIds.has(it.job_id) && it.type === 'part'), (it) => (Number(it.unit_cost) || 0) * (Number(it.quantity) || 0));
+          out.cogs = utils.round2(out.cogsProducts + out.cogsParts);
+          out.grossProfit = utils.round2(out.revenue - out.cogs);
+          out.grossMargin = out.revenue ? Math.round(out.grossProfit / out.revenue * 100) : 0;
+          const expenses = db.all('expenses').filter((e) => inScope(e) && inR(e.expense_date));
+          out.expenses = utils.sum(expenses, 'amount');
+          out.expenseCount = expenses.length;
+          expenses.forEach((e) => { const k = e.category_id || 0; out.byCategory[k] = utils.round2((out.byCategory[k] || 0) + (Number(e.amount) || 0)); });
+          out.netProfit = utils.round2(out.grossProfit - out.expenses);
+          out.netMargin = out.revenue ? Math.round(out.netProfit / out.revenue * 100) : 0;
+          return out;
+        },
+
+        refresh() {
+          const bid = this.scopeId;
+          this.cur = this.periodFor(this.range.value, bid);
+          this.prev = this.periodFor(this.range.previous, bid);
+          if (this.isSuperAdmin) {
+            this.branchRows = this.branches.map((b) => ({ id: b.id, code: b.code, name: b.name, ...this.periodFor(this.range.value, b.id) }));
+            const t = { revenue: 0, cogs: 0, grossProfit: 0, expenses: 0, netProfit: 0 };
+            this.branchRows.forEach((b) => { t.revenue += b.revenue; t.cogs += b.cogs; t.grossProfit += b.grossProfit; t.expenses += b.expenses; t.netProfit += b.netProfit; });
+            Object.keys(t).forEach((k) => { t[k] = utils.round2(t[k]); });
+            t.grossMargin = t.revenue ? Math.round(t.grossProfit / t.revenue * 100) : 0;
+            this.branchTotals = t;
+          }
+          this.buildTrend();
+          this.$nextTick(() => this.drawChart());
+        },
+
+        buildTrend() {
+          const end = utils.parseDate(this.range.value.to || utils.today()) || new Date();
+          const bid = this.scopeId;
+          const out = [];
+          for (let i = 5; i >= 0; i--) {
+            const d = new Date(end.getFullYear(), end.getMonth() - i, 1);
+            const from = utils.isoDate(d);
+            const to = utils.isoDate(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+            const p = this.periodFor({ from, to }, bid);
+            out.push({ label: d.toLocaleDateString('en-GB', { month: 'short', year: '2-digit' }), revenue: p.revenue, grossProfit: p.grossProfit, expenses: p.expenses, netProfit: p.netProfit });
+          }
+          this.trend = out;
+        },
+
+        /* -------------------------------------------------------- statement */
+        get statement() {
+          const c = this.cur, p = this.prev;
+          const catIds = [...new Set([...Object.keys(c.byCategory), ...Object.keys(p.byCategory)])];
+          const cats = catIds
+            .map((id) => ({ id, name: id === '0' ? 'Uncategorised' : (db.find('expense_categories', id) || {}).name || 'Uncategorised', value: c.byCategory[id] || 0, prev: p.byCategory[id] || 0 }))
+            .sort((a, b) => b.value - a.value);
+          const rows = [
+            { kind: 'section', label: 'Revenue' },
+            { kind: 'line', label: 'Gross sales', value: c.gross, prev: p.gross, link: 'report-sales.html?' + this.linkQuery },
+            { kind: 'line', label: 'Less: discounts given', value: c.discounts, prev: p.discounts, negative: true, tone: 'text-amber-700', good: 'down' },
+            { kind: 'line', label: 'Less: sales returns', value: c.returns, prev: p.returns, negative: true, tone: 'text-rose-600', good: 'down', link: 'returns.html?' + this.range.query },
+            { kind: 'total', label: 'Net product revenue', value: c.productRevenue, prev: p.productRevenue },
+            { kind: 'line', label: 'of which retail counter sales', value: c.retail, prev: p.retail, indent: true, muted: true },
+            { kind: 'line', label: 'of which online orders', value: c.online, prev: p.online, indent: true, muted: true, link: 'report-online-sales.html?' + this.linkQuery },
+            { kind: 'line', label: 'Repair revenue (delivered jobs)', value: c.repair, prev: p.repair, link: 'report-repairs.html?' + this.linkQuery },
+            { kind: 'total', label: 'TOTAL REVENUE', value: c.revenue, prev: p.revenue },
+            { kind: 'section', label: 'Cost of goods sold' },
+            { kind: 'line', label: 'Cost of products sold', value: c.cogsSold, prev: p.cogsSold, negative: true, good: 'down' },
+            { kind: 'line', label: 'Less: cost of stock returned by customers', value: c.returnedCost, prev: p.returnedCost, indent: true, muted: true, good: 'down' },
+            { kind: 'line', label: 'Spare parts consumed on repairs', value: c.cogsParts, prev: p.cogsParts, negative: true, good: 'down' },
+            { kind: 'total', label: 'TOTAL COST OF GOODS SOLD', value: c.cogs, prev: p.cogs, negative: true, good: 'down' },
+            { kind: 'grand', label: 'GROSS PROFIT (' + c.grossMargin + '% margin)', value: c.grossProfit, prev: p.grossProfit, tone: 'text-emerald-700' },
+            { kind: 'section', label: 'Operating expenses' },
+          ];
+          cats.forEach((cat) => rows.push({ kind: 'line', label: cat.name, value: cat.value, prev: cat.prev, negative: true, good: 'down', link: 'expenses.html?' + this.range.query + '&category=' + cat.id }));
+          if (!cats.length) rows.push({ kind: 'line', label: 'No expenses recorded', value: 0, prev: 0, muted: true });
+          rows.push({ kind: 'total', label: 'TOTAL OPERATING EXPENSES', value: c.expenses, prev: p.expenses, negative: true, good: 'down', link: 'report-expenses.html?' + this.linkQuery });
+          rows.push({ kind: 'grand', label: 'NET PROFIT (' + c.netMargin + '% of revenue)', value: c.netProfit, prev: p.netProfit, tone: c.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-600' });
+          return rows;
+        },
+        delta(key) {
+          const a = Number(this.cur[key]) || 0, b = Number(this.prev[key]) || 0;
+          if (!b) return a ? 100 : 0;
+          return Math.round((a - b) / Math.abs(b) * 100);
+        },
+        changePct(row) {
+          const a = Number(row.value) || 0, b = Number(row.prev) || 0;
+          if (!b) return a ? 100 : 0;
+          return Math.round((a - b) / Math.abs(b) * 100);
+        },
+        changeTone(row) {
+          const pct = this.changePct(row);
+          if (pct === 0) return 'text-slate-400';
+          const goodWhenDown = row.good === 'down';
+          const isGood = goodWhenDown ? pct < 0 : pct > 0;
+          return isGood ? 'text-emerald-700' : 'text-rose-600';
+        },
+
+        /* ------------------------------------------------------------ chart */
+        drawChart() {
+          const el = document.getElementById('plChart');
+          if (!window.Chart || !el) return;
+          try {
+            const existing = Chart.getChart(el);
+            if (existing) existing.destroy();
+            const tc = ABM.theme.chart();
+            Chart.defaults.color = tc.tick;
+            Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+            const shortNum = (v) => (Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : Math.abs(v) >= 1000 ? Math.round(v / 1000) + 'k' : v);
+            this.chart = new Chart(el, {
+              type: 'bar',
+              data: {
+                labels: this.trend.map((t) => t.label),
+                datasets: [
+                  { label: 'Revenue', data: this.trend.map((t) => t.revenue), backgroundColor: tc.primary, borderRadius: 4, maxBarThickness: 34 },
+                  { label: 'Gross profit', data: this.trend.map((t) => t.grossProfit), backgroundColor: tc.money, borderRadius: 4, maxBarThickness: 34 },
+                  { label: 'Expenses', data: this.trend.map((t) => t.expenses), backgroundColor: tc.danger, borderRadius: 4, maxBarThickness: 34 },
+                ],
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: tc.tick } }, tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + utils.money(c.raw, { decimals: 0 }) } } },
+                scales: { x: { grid: { display: false }, ticks: { color: tc.tick } }, y: { beginAtZero: true, grid: { color: tc.grid }, ticks: { color: tc.tick, callback: shortNum } } },
+              },
+            });
+          } catch (e) { console.warn('P&L chart could not be drawn', e); }
+        },
+
+        /* ----------------------------------------------------------- export */
+        exportCsv() {
+          const rows = this.statement.filter((r) => r.kind !== 'section').map((r) => ({
+            line: r.label, current: r.negative ? -(Number(r.value) || 0) : (Number(r.value) || 0),
+            previous: r.negative ? -(Number(r.prev) || 0) : (Number(r.prev) || 0), change: this.changePct(r) + '%',
+          }));
+          const cols = [{ label: 'Line', key: 'line' }, { label: this.range.label, key: 'current' }, { label: this.prevLabel, key: 'previous' }, { label: 'Change', key: 'change' }];
+          const v = this.range.value;
+          if (!utils.download('profit-loss-' + (v.from || 'all') + '-to-' + (v.to || utils.today()) + '.csv', utils.toCsv(rows, cols))) return;
+          ui.success('Exported the profit & loss statement.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

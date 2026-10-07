@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Returns · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    /* printable credit note (paper-white in both themes) */
+    .doc { background: #fff; color: #0f172a; width: 100%; margin: 0 auto; border-radius: .5rem; font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+    .doc-thermal { max-width: 80mm; padding: 4mm; font-size: 11.5px; line-height: 1.38; }
+    .doc-a4 { max-width: 190mm; padding: 10mm; font-size: 12.5px; line-height: 1.45; }
+    .doc .muted { color: #475569; }
+    .doc .dim { color: #64748b; }
+    .doc .hr { border-top: 1px dashed #94a3b8; margin: .5rem 0; }
+    .doc-a4 .hr { border-top: 1px solid #cbd5e1; margin: .8rem 0; }
+    .doc .rule { border-bottom: 1px dotted #cbd5e1; }
+    .doc table { width: 100%; border-collapse: collapse; }
+    .doc th, .doc td { padding: .18rem 0; vertical-align: top; text-align: left; }
+    .doc-a4 .items th, .doc-a4 .items td { padding: .4rem .5rem; border-bottom: 1px solid #e2e8f0; }
+    .doc-a4 .items thead th { background: #f1f5f9; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: #475569; border-bottom: 1px solid #cbd5e1; }
+    .doc .r { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .doc .mono { font-size: .95em; overflow-wrap: anywhere; }
+    .doc .sig { border-top: 1px solid #64748b; padding-top: .3rem; }
+    @media screen and (max-width: 700px) {
+      .doc-a4 { padding: 5mm; font-size: 11px; }
+      .doc-a4 .col-opt { display: none; }
+      .doc-a4 .items th, .doc-a4 .items td { padding: .3rem .25rem; }
+      .doc .r { white-space: normal; }
+    }
+    @media print {
+      .page-content, .no-print { display: none !important; }
+      .print-modal { display: block !important; position: static !important; background: none !important; backdrop-filter: none !important; padding: 0 !important; }
+      .print-modal .modal-panel { max-width: none !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; width: auto !important; animation: none !important; background: #fff !important; }
+      .print-modal .modal-header, .print-modal .modal-footer { display: none !important; }
+      .print-modal .modal-body { padding: 0 !important; background: #fff !important; }
+      .doc { box-shadow: none !important; border-radius: 0 !important; max-width: none; }
+      .doc-thermal, .doc-a4 { padding: 0; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="returns" data-title="Returns" data-perm="returns.view">
+  <main x-data="returnsPage()" @keydown.escape.window="closeAll()">
+    <style x-text="pm.layout === 'thermal' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4 portrait; margin: 12mm; }'"></style>
+
+    <div class="page-content">
+      <!-- Page header -->
+      <div class="page-header">
+        <div class="min-w-0">
+          <h2 class="page-title">Returns &amp; refunds</h2>
+          <p class="page-subtitle">
+            <span x-text="ABM.utils.num(tiles.count)"></span> return<span x-text="tiles.count === 1 ? '' : 's'"></span> ·
+            <span x-text="$money(tiles.refund, {decimals:0})"></span> refunded · <b x-text="scopeLabel"></b>
+          </p>
+        </div>
+        <div class="page-actions">
+          <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+          <button type="button" class="btn btn-primary" x-show="canAdd" @click="openNew()"><span x-html="ABM.icon('return')"></span>New return</button>
+          <a :href="'sales.html?' + range.query" class="btn btn-secondary"><span x-html="ABM.icon('receipt')"></span>Sales</a>
+        </div>
+      </div>
+
+      <!-- Period filter (standard range bar) -->
+      <div class="card mb-4">
+        <div class="card-body !py-3">
+          <div class="range-bar">
+            <div class="tabs-pill">
+              <template x-for="p in range.presets" :key="p.key">
+                <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+              </template>
+            </div>
+            <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+              <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')" aria-label="From date">
+              <span class="text-xs text-slate-500">to</span>
+              <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')" aria-label="To date">
+            </div>
+            <span class="range-label" x-text="range.label"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI tiles (clickable) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <a :href="selfLink({ method: '', condition: '' })" class="stat stat-accent" title="Show every return in this period">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Returns</div><div class="stat-value" x-text="ABM.utils.num(tiles.count)"></div></div>
+            <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('return','w-4 h-4')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="ABM.utils.num(tiles.units)"></span> unit<span x-text="tiles.units === 1 ? '' : 's'"></span> across <span x-text="tiles.invoices"></span> invoice<span x-text="tiles.invoices === 1 ? '' : 's'"></span></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a :href="'report-sales.html?' + range.query + '#returns'" class="stat stat-danger" title="Open the sales report for this period">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Refunded</div><div class="stat-value text-rose-600" x-text="$money(tiles.refund, {decimals:0})"></div></div>
+            <span class="chip chip-danger !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+          </div>
+          <div class="stat-meta">cash <b x-text="$money(tiles.cash, {decimals:0})"></b><span x-show="tiles.bank > 0"> · bank <b x-text="$money(tiles.bank, {decimals:0})"></b></span> · avg <span x-text="$money(tiles.count ? tiles.refund / tiles.count : 0, {decimals:0})"></span></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a :href="selfLink({ condition: 'defective' })" class="stat stat-warning" title="Show returns that contain defective units">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Defective units</div><div class="stat-value" :class="tiles.defective && 'text-amber-700'" x-text="ABM.utils.num(tiles.defective)"></div></div>
+            <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('warning','w-4 h-4')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="ABM.utils.num(tiles.good)"></span> good unit<span x-text="tiles.good === 1 ? '' : 's'"></span> back in stock</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a :href="selfLink({ method: 'store_credit' })" class="stat" title="Show returns refunded as store credit">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Store credit issued</div><div class="stat-value" x-text="$money(tiles.storeCredit, {decimals:0})"></div></div>
+            <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('wallet','w-4 h-4')"></span>
+          </div>
+          <div class="stat-meta">ledger adjustments <b x-text="$money(tiles.ledger, {decimals:0})"></b></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </div>
+
+      <!-- Filters -->
+      <div class="card mt-4">
+        <div class="card-body !py-3">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+            <div class="relative md:col-span-5">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+              <input type="search" class="input pl-9" placeholder="Return no, invoice no, customer or phone…" x-model.debounce.200ms="q" aria-label="Search returns">
+            </div>
+            <select class="select md:col-span-3" x-model="f.method" aria-label="Refund method">
+              <option value="">All refund methods</option>
+              <option value="cash">Cash refund</option>
+              <option value="card">Card refund</option>
+              <option value="jazzcash">JazzCash refund</option>
+              <option value="easypaisa">EasyPaisa refund</option>
+              <option value="bank_transfer">Bank transfer refund</option>
+              <option value="store_credit">Store credit</option>
+              <option value="ledger">Reduced ledger due</option>
+            </select>
+            <select class="select md:col-span-2" x-model="f.condition" aria-label="Condition">
+              <option value="">Any condition</option>
+              <option value="good">Good (restocked)</option>
+              <option value="defective">Defective</option>
+            </select>
+            <select class="select md:col-span-2" x-model="scope" x-ref="branchSel" aria-label="Branch" x-show="isSuperAdmin">
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+              <option value="all">All branches</option>
+            </select>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <div class="text-slate-500"><b class="text-slate-800" x-text="filtered.length"></b> return<span x-text="filtered.length === 1 ? '' : 's'"></span> match · refunded <b class="text-rose-600" x-text="$money(filteredTotal, {decimals:0})"></b></div>
+            <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Return notes</div><div class="card-subtitle" x-text="range.label + ' · ' + scopeLabel"></div></div>
+          <div class="text-xs text-slate-500 hidden sm:block">Newest first</div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Return</th>
+                <th class="hidden lg:table-cell">Date</th>
+                <th class="hidden md:table-cell">Invoice</th>
+                <th>Customer</th>
+                <th class="num hidden xl:table-cell">Items</th>
+                <th class="hidden md:table-cell">Condition</th>
+                <th class="num">Refund</th>
+                <th class="hidden 2xl:table-cell">Processed by</th>
+                <th class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in pager.items" :key="r.id">
+                <tr>
+                  <td>
+                    <button type="button" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" @click="openDetail(r)" x-text="r.return_no"></button>
+                    <div class="text-xs text-slate-400 lg:hidden whitespace-nowrap" x-text="ABM.utils.datetime(r.return_date)"></div>
+                    <div class="text-xs text-slate-400 md:hidden">
+                      <a :href="'sale-view.html?id=' + r.sale_id" class="hover:underline mono" x-text="r.saleNo"></a>
+                    </div>
+                  </td>
+                  <td class="hidden lg:table-cell whitespace-nowrap"><div class="text-slate-800" x-text="$date(r.return_date)"></div><div class="text-xs text-slate-400" x-text="ABM.utils.time(r.return_date)"></div></td>
+                  <td class="hidden md:table-cell">
+                    <a :href="'sale-view.html?id=' + r.sale_id" class="font-medium text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.saleNo"></a>
+                    <div class="text-xs text-slate-400" x-show="r.saleDate" x-text="$date(r.saleDate)"></div>
+                  </td>
+                  <td>
+                    <div class="min-w-0 max-w-[12rem]">
+                      <template x-if="!r.isWalkin"><a :href="'customer-view.html?id=' + r.customer_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate" x-text="r.customerName"></a></template>
+                      <template x-if="r.isWalkin"><div class="font-medium text-slate-600 truncate" x-text="r.customerName"></div></template>
+                      <div class="text-xs text-slate-400 truncate" x-text="r.reason"></div>
+                    </div>
+                  </td>
+                  <td class="num hidden xl:table-cell"><span x-text="r.units"></span><span class="text-xs text-slate-400" x-text="' / ' + r.lines.length + ' line' + (r.lines.length === 1 ? '' : 's')"></span></td>
+                  <td class="hidden md:table-cell">
+                    <div class="flex flex-wrap gap-1">
+                      <span class="badge badge-green" x-show="r.good" x-text="r.good + ' good'"></span>
+                      <span class="badge badge-red" x-show="r.defective" x-text="r.defective + ' defective'"></span>
+                      <span class="text-slate-400 text-xs" x-show="!r.good && !r.defective">—</span>
+                    </div>
+                  </td>
+                  <td class="num whitespace-nowrap">
+                    <div class="font-semibold text-rose-600" x-text="'-' + $money(r.refund_amount)"></div>
+                    <div class="mt-0.5"><span x-html="$badge(r.refund_method, r.refund_method === 'ledger' ? 'Ledger' : null)"></span></div>
+                    <div class="text-[11px] text-slate-500 mt-0.5 whitespace-normal" x-show="r.isSplit" x-text="r.splitNote"></div>
+                    <div class="mt-0.5 md:hidden flex flex-wrap gap-1 justify-end">
+                      <span class="badge badge-green" x-show="r.good" x-text="r.good + ' good'"></span>
+                      <span class="badge badge-red" x-show="r.defective" x-text="r.defective + ' def.'"></span>
+                    </div>
+                  </td>
+                  <td class="hidden 2xl:table-cell text-slate-600 whitespace-nowrap" x-text="r.by"></td>
+                  <td class="actions">
+                    <div class="inline-flex items-center gap-0.5">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="View return detail" @click="openDetail(r)" x-html="ABM.icon('eye','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print credit note" @click="openPrint(r)" x-html="ABM.icon('printer','w-4 h-4')"></button>
+                      <a :href="'sale-view.html?id=' + r.sale_id" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Open the original invoice" x-html="ABM.icon('receipt','w-4 h-4')"></a>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!pager.items.length">
+                <tr><td colspan="9">
+                  <div class="empty">
+                    <span x-html="ABM.icon('return')"></span>
+                    <div class="empty-title">No returns found</div>
+                    <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No returns were recorded in this period.'"></div>
+                    <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="!rows.length && range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                      <button type="button" class="btn btn-primary btn-sm" x-show="canAdd" @click="openNew()">New return</button>
+                    </div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+          <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+          <div class="flex items-center gap-1">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-info mt-4">
+        <span x-html="ABM.icon('info')"></span>
+        <div>Returns are always recorded against the original invoice so stock, IMEI / serial status and the customer ledger stay in sync. Use <b>New return</b> to find the invoice, then confirm the lines on the sale.</div>
+      </div>
+    </div>
+
+    <!-- ===================== Return detail modal ===================== -->
+    <div x-show="dt.open" x-cloak class="modal-backdrop" @click.self="dt.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="dtTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title mono" id="dtTitle" x-text="dt.row ? dt.row.return_no : ''"></div>
+            <div class="text-xs text-slate-500" x-show="dt.row">
+              <span x-text="dt.row ? ABM.utils.datetime(dt.row.return_date) : ''"></span> · against
+              <span class="mono" x-text="dt.row ? dt.row.saleNo : ''"></span> · by <span x-text="dt.row ? dt.row.by : ''"></span>
+            </div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="dt.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-4" x-show="dt.row">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Refund</div>
+              <div class="font-bold text-rose-600 mt-0.5 truncate" x-text="dt.row ? $money(dt.row.refund_amount) : ''"></div>
+              <div class="mt-1"><span x-html="dt.row ? $badge(dt.row.refund_method, dt.row.refund_method === 'ledger' ? 'Ledger' : null) : ''"></span></div>
+            </div>
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Customer</div>
+              <div class="font-semibold text-slate-800 mt-0.5 truncate" x-text="dt.row ? dt.row.customerName : ''"></div>
+              <div class="text-xs text-slate-500 truncate" x-text="dt.row ? (dt.row.customerPhone || 'Walk-in · no ledger') : ''"></div>
+            </div>
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 min-w-0">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Units</div>
+              <div class="font-bold text-slate-800 mt-0.5" x-text="dt.row ? dt.row.units : ''"></div>
+              <div class="mt-1 flex flex-wrap gap-1">
+                <span class="badge badge-green" x-show="dt.row && dt.row.good" x-text="dt.row ? dt.row.good + ' good' : ''"></span>
+                <span class="badge badge-red" x-show="dt.row && dt.row.defective" x-text="dt.row ? dt.row.defective + ' defective' : ''"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- how the refund was paid: off the invoice due / store credit / money paid out -->
+          <div class="rounded-xl border border-slate-200 p-3 min-w-0" x-show="dt.row && dt.row.splitParts.length" data-refund-split>
+            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">How the refund was paid</div>
+            <ul class="text-sm divide-y divide-slate-100">
+              <template x-for="p in (dt.row ? dt.row.splitParts : [])" :key="p.key">
+                <li class="flex items-start justify-between gap-3 py-1.5"><span class="min-w-0 text-slate-700 break-words" x-text="p.label"></span><b class="tabular whitespace-nowrap" x-text="$money(p.amount)"></b></li>
+              </template>
+            </ul>
+          </div>
+
+          <div class="table-wrap border border-slate-200 rounded-xl">
+            <table class="table">
+              <thead><tr><th>Product</th><th class="num">Qty</th><th class="num hidden sm:table-cell">Unit price</th><th class="num">Total</th><th>Condition</th></tr></thead>
+              <tbody>
+                <template x-for="l in (dt.row ? dt.row.lines : [])" :key="l.id">
+                  <tr>
+                    <td>
+                      <div class="min-w-0 max-w-[16rem]">
+                        <a :href="'product-view.html?id=' + l.product_id" class="font-semibold text-slate-800 hover:text-navy-700 block" x-text="l.label"></a>
+                        <div class="text-xs text-slate-500" x-show="l.sku" x-text="l.sku"></div>
+                        <div class="text-xs mt-0.5 flex flex-wrap gap-x-1" x-show="l.serialValue">
+                          <span class="text-slate-400" x-text="l.serialLabel + ':'"></span>
+                          <a :href="'report-imei-history.html?imei=' + encodeURIComponent(l.serialValue)" class="mono text-navy-700 hover:underline break-all" x-text="l.serialValue"></a>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="num" x-text="l.qty"></td>
+                    <td class="num hidden sm:table-cell whitespace-nowrap" x-text="$money(l.unit_price)"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="$money(l.total)"></td>
+                    <td><span x-html="$badge(l.condition)"></span></td>
+                  </tr>
+                </template>
+                <template x-if="dt.row && !dt.row.lines.length"><tr><td colspan="5" class="empty">This return has no line items.</td></tr></template>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            <div class="min-w-0">
+              <div class="text-slate-500 mb-1">Reason</div>
+              <div class="rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-slate-700 break-words" x-text="dt.row ? (dt.row.reason || '—') : ''"></div>
+            </div>
+            <div class="min-w-0">
+              <div class="text-slate-500 mb-1">Notes</div>
+              <div class="rounded-lg bg-slate-50 border border-slate-200 p-2.5 text-slate-700 break-words" x-text="dt.row ? (dt.row.notes || '—') : ''"></div>
+            </div>
+          </div>
+
+          <div class="alert alert-warning" x-show="dt.row && dt.row.defective > 0">
+            <span x-html="ABM.icon('warning')"></span>
+            <div><b x-text="dt.row ? dt.row.defective : ''"></b> unit(s) were quarantined as defective — they are not counted as sellable stock. Track them in the <a href="imeis.html?status=defective" class="font-semibold underline">unit registry</a>.</div>
+          </div>
+        </div>
+        <div class="modal-footer flex-wrap">
+          <button type="button" class="btn btn-secondary" @click="dt.open = false">Close</button>
+          <a :href="dt.row ? 'sale-view.html?id=' + dt.row.sale_id : '#'" class="btn btn-secondary"><span x-html="ABM.icon('receipt')"></span>Open invoice</a>
+          <button type="button" class="btn btn-primary" @click="openPrint(dt.row)"><span x-html="ABM.icon('printer')"></span>Print credit note</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== New return modal ===================== -->
+    <div x-show="nr.open" x-cloak class="modal-backdrop" @click.self="nr.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="nrTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title" id="nrTitle">New return</div>
+            <div class="text-xs text-slate-500">Find the original invoice — the return is confirmed on the sale</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="nr.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-4">
+          <div class="alert alert-info">
+            <span x-html="ABM.icon('info')"></span>
+            <div>Search by invoice number, customer name or phone. Opening an invoice takes you straight to its return form, where you pick the lines, the condition of each unit and the refund method.</div>
+          </div>
+          <div>
+            <label class="label" for="nr-q">Invoice no, customer or phone</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+              <input id="nr-q" type="search" class="input pl-9" placeholder="e.g. INV-MB-000012 or 0300-1234567" x-model.debounce.150ms="nr.q" x-ref="nrq">
+            </div>
+            <p class="help">Only invoices with units that can still be returned are listed<span x-show="!isSuperAdmin"> for your branch</span>.</p>
+          </div>
+
+          <div class="space-y-2">
+            <template x-for="s in nrResults" :key="s.id">
+              <a :href="'sale-view.html?id=' + s.id + '&return=1'" class="flex items-center gap-3 rounded-xl border border-slate-200 p-3 hover:border-navy-500/50 hover:bg-navy-50/40">
+                <span class="chip chip-slate !w-9 !h-9 flex-none" x-html="ABM.icon('receipt','w-4 h-4')"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="font-semibold text-navy-700 mono" x-text="s.invoice_no"></div>
+                  <div class="text-xs text-slate-500 truncate"><span x-text="ABM.utils.datetime(s.sale_date)"></span> · <span x-text="s.customerName"></span><span x-show="s.customerPhone"> · <span x-text="s.customerPhone"></span></span></div>
+                  <div class="text-xs text-slate-500"><b class="text-slate-700" x-text="s.returnable"></b> unit(s) returnable<span x-show="s.branchCode && isSuperAdmin"> · <span x-text="s.branchCode"></span></span></div>
+                </div>
+                <div class="text-right whitespace-nowrap">
+                  <div class="font-semibold tabular text-slate-800" x-text="$money(s.total, {decimals:0})"></div>
+                  <span class="text-xs font-semibold text-navy-700">Return →</span>
+                </div>
+              </a>
+            </template>
+            <template x-if="!nrResults.length">
+              <div class="empty py-8">
+                <span x-html="ABM.icon('search')"></span>
+                <div class="empty-title" x-text="nr.q ? 'No matching invoice' : 'No returnable invoices'"></div>
+                <div class="text-sm mt-1" x-text="nr.q ? 'Check the invoice number, or search by customer name / phone.' : 'Every invoice in this branch has already been fully returned.'"></div>
+                <div class="mt-4"><a :href="'sales.html?range=all'" class="btn btn-secondary btn-sm">Browse sales history</a></div>
+              </div>
+            </template>
+            <div class="text-xs text-slate-500 text-center" x-show="nrMore > 0" x-text="'+ ' + nrMore + ' more invoice(s) — refine your search.'"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="nr.open = false">Cancel</button>
+          <a :href="'sales.html?' + range.query" class="btn btn-primary"><span x-html="ABM.icon('receipt')"></span>Sales history</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================== Print credit note ===================== -->
+    <div x-show="pm.open" x-cloak class="modal-backdrop print-modal" @click.self="pm.open = false">
+      <div class="modal-panel" :class="pm.layout === 'a4' ? 'modal-xl' : 'modal-lg'" role="dialog" aria-modal="true" aria-label="Credit note">
+        <div class="modal-header no-print">
+          <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+            <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.layout === 'thermal' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.layout = 'thermal'">80 mm</button>
+            <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.layout === 'a4' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.layout = 'a4'">A4</button>
+          </div>
+          <div class="flex items-center gap-1">
+            <button type="button" class="btn btn-primary btn-sm" @click="doPrint()"><span x-html="ABM.icon('printer','w-4 h-4')"></span>Print</button>
+            <button type="button" class="btn btn-ghost btn-icon" @click="pm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+        </div>
+        <div class="modal-body bg-slate-200">
+          <template x-if="pm.row">
+            <div class="print-area doc shadow-lg" :class="pm.layout === 'thermal' ? 'doc-thermal' : 'doc-a4'">
+              <!-- header -->
+              <div :class="pm.layout === 'a4' ? 'flex items-start justify-between gap-6' : 'text-center'">
+                <div class="min-w-0">
+                  <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[18mm] w-auto" :class="pm.layout === 'a4' ? '' : 'mx-auto'" onerror="ABM.brand.onError(this)">
+                  <div class="font-extrabold leading-tight" :class="pm.layout === 'a4' ? 'text-2xl' : 'text-base'" x-text="settings.company_name || 'Abbott Mobile'"></div>
+                  <div class="font-semibold mt-1 text-[.95em]" x-text="pm.row.branchName"></div>
+                  <div class="muted text-[.9em]" x-show="pm.row.branchAddress" x-text="pm.row.branchAddress"></div>
+                  <div class="muted text-[.9em]" x-show="pm.row.branchPhone">Tel <span x-text="pm.row.branchPhone"></span></div>
+                  <div class="muted text-[.9em]" x-show="pm.row.branchTaxId"><span class="mono" x-text="pm.row.branchTaxId"></span></div>
+                </div>
+                <div class="flex-none" :class="pm.layout === 'a4' ? 'text-right' : 'mt-2'">
+                  <div class="font-extrabold uppercase tracking-[.12em]" :class="pm.layout === 'a4' ? 'text-xl' : 'text-sm'">Credit Note</div>
+                  <div class="font-bold mono mt-0.5" x-text="pm.row.return_no"></div>
+                  <div class="text-[.9em]" x-text="ABM.utils.date(pm.row.return_date) + ' · ' + ABM.utils.time(pm.row.return_date)"></div>
+                  <div class="text-[.9em] muted">Against invoice <span class="mono" x-text="pm.row.saleNo"></span></div>
+                  <div class="text-[.9em] muted">Processed by <span x-text="pm.row.by"></span></div>
+                </div>
+              </div>
+              <div class="hr"></div>
+              <!-- customer -->
+              <div class="min-w-0">
+                <div class="font-bold uppercase text-[.75em] tracking-[.1em] muted">Customer</div>
+                <div class="font-semibold" x-text="pm.row.customerName"></div>
+                <div class="text-[.9em]" x-show="pm.row.customerPhone" x-text="pm.row.customerPhone"></div>
+                <div class="text-[.9em] muted" x-show="pm.row.customerAddress" x-text="pm.row.customerAddress"></div>
+              </div>
+              <div class="hr"></div>
+              <!-- lines · thermal -->
+              <template x-if="pm.layout === 'thermal'">
+                <div>
+                  <template x-for="l in pm.row.lines" :key="'t' + l.id">
+                    <div class="py-1 rule">
+                      <div class="font-semibold"><span x-text="l.no + '. '"></span><span x-text="l.label"></span></div>
+                      <div class="dim text-[.92em]" x-show="l.serialValue"><span x-text="l.serialLabel"></span>: <span class="mono" x-text="l.serialValue"></span></div>
+                      <div class="dim text-[.92em]">Condition: <span x-text="ABM.utils.titleCase(l.condition)"></span></div>
+                      <div class="flex items-baseline justify-between gap-2">
+                        <span><span x-text="l.qty"></span> × <span x-text="ABM.utils.money(l.unit_price)"></span></span>
+                        <span class="font-semibold r" x-text="ABM.utils.money(l.total)"></span>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="!pm.row.lines.length"><div class="py-2 dim text-center">No line items.</div></template>
+                </div>
+              </template>
+              <!-- lines · A4 -->
+              <template x-if="pm.layout === 'a4'">
+                <table class="items">
+                  <thead><tr><th style="width:2.2rem">#</th><th>Description</th><th class="r" style="width:3rem">Qty</th><th class="r col-opt" style="width:6.5rem">Unit price</th><th class="r" style="width:7rem">Amount</th></tr></thead>
+                  <tbody>
+                    <template x-for="l in pm.row.lines" :key="'a' + l.id">
+                      <tr>
+                        <td class="dim" x-text="l.no"></td>
+                        <td>
+                          <div class="font-semibold" x-text="l.label"></div>
+                          <div class="muted text-[.88em]" x-show="l.serialValue"><span x-text="l.serialLabel"></span>: <span class="mono" x-text="l.serialValue"></span></div>
+                          <div class="dim text-[.88em]">Condition: <span x-text="ABM.utils.titleCase(l.condition)"></span></div>
+                        </td>
+                        <td class="r" x-text="l.qty"></td>
+                        <td class="r col-opt" x-text="ABM.utils.money(l.unit_price)"></td>
+                        <td class="r font-semibold" x-text="ABM.utils.money(l.total)"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!pm.row.lines.length"><tr><td colspan="5" class="dim" style="text-align:center">No line items.</td></tr></template>
+                  </tbody>
+                </table>
+              </template>
+              <!-- totals -->
+              <div :class="pm.layout === 'a4' ? 'mt-4 flex justify-end' : 'mt-1'">
+                <table :class="pm.layout === 'a4' ? 'max-w-[85mm] w-full' : ''">
+                  <tbody>
+                    <tr><td class="muted">Units returned</td><td class="r" x-text="pm.row.units"></td></tr>
+                    <tr x-show="!pm.row.isSplit"><td class="muted">Refund method</td><td class="r" x-text="(pm.row.refund_method === 'ledger' ? 'Adjusted on ledger' : ABM.ui.statusLabel(pm.row.refund_method)) + (pm.row.accountName ? ' · ' + pm.row.accountName : '')"></td></tr>
+                    <!-- a split refund prints each part: what came off the invoice due, store credit, money paid out -->
+                    <template x-for="p in (pm.row.isSplit ? pm.row.splitParts : [])" :key="'cn' + p.key">
+                      <tr><td class="muted" x-text="p.label"></td><td class="r" x-text="ABM.utils.money(p.amount)"></td></tr>
+                    </template>
+                    <tr>
+                      <td class="font-extrabold uppercase tracking-wider" :class="pm.layout === 'a4' ? 'text-base' : 'text-[1.05em]'" style="border-top:2px solid #0f172a">Refund total</td>
+                      <td class="r font-extrabold" :class="pm.layout === 'a4' ? 'text-xl' : 'text-[1.25em]'" style="border-top:2px solid #0f172a" x-text="ABM.utils.money(pm.row.refund_amount)"></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="hr"></div>
+              <div class="text-[.9em]"><span class="muted font-semibold">Reason:</span> <span x-text="pm.row.reason || '—'"></span></div>
+              <div class="text-[.9em]" x-show="pm.row.notes"><span class="muted font-semibold">Notes:</span> <span x-text="pm.row.notes"></span></div>
+              <div class="text-[.82em] muted mt-2"><span class="font-bold uppercase tracking-[.1em]">Terms</span><div x-text="settings.invoice_terms || ''"></div></div>
+              <div class="grid grid-cols-2 gap-8 mt-8 text-[.85em]">
+                <div class="sig muted">Customer signature</div>
+                <div class="sig muted">For <span x-text="settings.company_name || 'Abbott Mobile'"></span> · <span x-text="pm.row.by"></span></div>
+              </div>
+              <div class="hr"></div>
+              <div class="text-center text-[.88em]">
+                <div class="font-semibold" x-show="settings.receipt_footer" x-text="settings.receipt_footer"></div>
+                <div class="dim text-[.9em] mt-0.5">Powered by Abbott Mobile</div>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="modal-footer no-print">
+          <button type="button" class="btn btn-secondary" @click="pm.open = false">Close</button>
+          <button type="button" class="btn btn-primary" @click="doPrint()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function returnsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const settings = db.settings();
+      /**
+       * How a return was refunded: { due, credit, paid, method }. Returns saved since the refund plan carry
+       * refund_due / refund_credit / refund_paid; older ones had a single method for the whole amount.
+       */
+      const splitOf = (r) => {
+        const amt = utils.round2(Number(r.refund_amount) || 0);
+        if (r.refund_due != null || r.refund_credit != null || r.refund_paid != null) {
+          return { due: Number(r.refund_due) || 0, credit: Number(r.refund_credit) || 0, paid: Number(r.refund_paid) || 0, method: r.refund_method };
+        }
+        if (r.refund_method === 'ledger') return { due: amt, credit: 0, paid: 0, method: 'ledger' };
+        if (r.refund_method === 'store_credit') return { due: 0, credit: amt, paid: 0, method: 'store_credit' };
+        return { due: 0, credit: 0, paid: amt, method: r.refund_method || 'cash' };
+      };
+      const PAID_LABEL = { cash: 'Cash from the drawer', card: 'Back to card', jazzcash: 'JazzCash', easypaisa: 'EasyPaisa', bank_transfer: 'Bank transfer' };
+      return {
+        settings,
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('returns.add'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        scope: String(session.branchId() || ''),
+        range: null,
+        rows: [], openSales: [],
+        tiles: { count: 0, units: 0, invoices: 0, refund: 0, cash: 0, bank: 0, storeCredit: 0, ledger: 0, good: 0, defective: 0 },
+        q: '',
+        f: { method: '', condition: '' },
+        page: 1,
+        dt: { open: false, row: null },
+        nr: { open: false, q: '' },
+        pm: { open: false, row: null, layout: String(db.setting('default_print_layout') || 'thermal').toLowerCase() === 'a4' ? 'a4' : 'thermal' },
+
+        get scopeLabel() { return this.scope === 'all' ? 'all branches' : db.branchName(this.scope); },
+
+        init() {
+          this.range = ABM.range('this_month', () => this.compute(), 'returns');
+          const qs = utils.qs;
+          if (this.isSuperAdmin && qs('branch') && (qs('branch') === 'all' || this.branches.some((b) => String(b.id) === qs('branch')))) this.scope = qs('branch');
+          ['method', 'condition'].forEach((k) => { if (qs(k)) this.f[k] = qs(k); });
+          if (qs('q')) this.q = qs('q');
+          const lay = String(qs('layout') || '').toLowerCase();
+          if (lay === 'thermal' || lay === 'a4') this.pm.layout = lay;
+          this.compute();
+          // the branch <option> list is rendered by x-for AFTER x-model binds, so sync the select once
+          this.$nextTick(() => { if (this.$refs.branchSel) this.$refs.branchSel.value = this.scope; });
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('f', () => { this.page = 1; });
+          this.$watch('scope', () => { this.page = 1; this.compute(); });
+          // deep links from sale-view.html: returns.html?id=12[&print=1]
+          const id = qs('id');
+          if (id) {
+            const row = this.rows.find((r) => String(r.id) === String(id)) || this.buildRow(db.find('sale_returns', id));
+            if (row) this.$nextTick(() => { if (qs('print') === '1') this.openPrint(row); else this.openDetail(row); });
+            else ui.error('Return #' + id + ' was not found.');
+          }
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(row) { return this.scope === 'all' || String(row.branch_id) === String(this.scope); },
+        buildRow(ret) {
+          if (!ret) return null;
+          if (!session.isSuperAdmin() && String(ret.branch_id) !== String(session.branchId())) return null;
+          const its = db.where('sale_return_items', { return_id: ret.id });
+          const sale = db.find('sales', ret.sale_id);
+          const cust = db.customer(ret.customer_id);
+          const branch = db.branch(ret.branch_id) || {};
+          const lines = its.map((i, idx) => {
+            const p = db.product(i.product_id) || {};
+            const unit = i.imei_id ? db.find('product_imeis', i.imei_id) : null;
+            const saleItem = i.sale_item_id ? db.find('sale_items', i.sale_item_id) : null;
+            return {
+              id: i.id, no: idx + 1, product_id: i.product_id,
+              label: db.productLabel(i.product_id), sku: p.sku || '',
+              serialLabel: db.serialLabel(p), serialValue: (unit && unit.imei) || (saleItem && saleItem.imei) || '',
+              qty: Number(i.quantity) || 0, unit_price: utils.round2(Number(i.unit_price) || 0), total: utils.round2(Number(i.total) || 0),
+              condition: i.condition || 'good',
+            };
+          });
+          const good = lines.filter((l) => l.condition === 'good').reduce((a, l) => a + l.qty, 0);
+          const defective = lines.filter((l) => l.condition === 'defective').reduce((a, l) => a + l.qty, 0);
+          // the refund split: off the invoice due · store credit · paid out (cash / card / wallet / transfer)
+          const sp = splitOf(ret);
+          const acc = ret.refund_account_id ? db.find('bank_accounts', ret.refund_account_id) : null;
+          const parts = [];
+          if (sp.due > 0) parts.push({ key: 'due', label: 'Off the unpaid invoice balance', amount: sp.due });
+          if (sp.credit > 0) parts.push({ key: 'credit', label: 'Store credit', amount: sp.credit });
+          if (sp.paid > 0) parts.push({ key: 'paid', label: (PAID_LABEL[sp.method] || ui.statusLabel(sp.method)) + (acc ? ' · ' + acc.name : '') + (ret.refund_reference ? ' · ref ' + ret.refund_reference : ''), amount: sp.paid });
+          return {
+            ...ret, lines, good, defective, units: good + defective,
+            split: sp, splitParts: parts, isSplit: parts.length > 1, accountName: acc ? acc.name : '',
+            splitNote: parts.length > 1 ? parts.map((p) => utils.money(p.amount, { decimals: 0 }) + ' ' + (p.key === 'due' ? 'off due' : p.key === 'credit' ? 'credit' : ui.statusLabel(sp.method).toLowerCase())).join(' · ') : '',
+            refund_amount: utils.round2(Number(ret.refund_amount) || 0),
+            saleNo: sale ? sale.invoice_no : '—', saleDate: sale ? sale.sale_date : null,
+            customerName: db.customerName(ret.customer_id), customerPhone: cust ? cust.phone || '' : '',
+            customerAddress: cust && !cust.is_walkin ? cust.address || '' : '',
+            isWalkin: !cust || !!cust.is_walkin,
+            by: db.userName(ret.user_id), branchCode: db.branchCode(ret.branch_id),
+            branchName: branch.name || '—', branchAddress: branch.address || '', branchPhone: branch.phone || '', branchTaxId: branch.tax_id || '',
+          };
+        },
+        compute() {
+          const r = this.range;
+          this.rows = utils.sortBy(
+            db.all('sale_returns').filter((x) => this.inScope(x) && r.contains(x.return_date)).map((x) => this.buildRow(x)).filter(Boolean),
+            'return_date', 'desc');
+          const invoices = new Set(this.rows.map((x) => String(x.sale_id)));
+          this.tiles = {
+            count: this.rows.length,
+            units: this.rows.reduce((a, x) => a + x.units, 0),
+            invoices: invoices.size,
+            refund: utils.sum(this.rows, 'refund_amount'),
+            // each part of a split refund is counted where it went: only real cash counts as cash
+            cash: utils.sum(this.rows.filter((x) => x.split.method === 'cash'), (x) => x.split.paid),
+            bank: utils.sum(this.rows.filter((x) => ABM.bank.isNonCash(x.split.method)), (x) => x.split.paid),
+            storeCredit: utils.sum(this.rows, (x) => x.split.credit),
+            ledger: utils.sum(this.rows, (x) => x.split.due),
+            good: this.rows.reduce((a, x) => a + x.good, 0),
+            defective: this.rows.reduce((a, x) => a + x.defective, 0),
+          };
+          // invoices that still have returnable units (for the "New return" picker)
+          const byS = utils.groupBy(db.all('sale_items'), 'sale_id');
+          this.openSales = utils.sortBy(db.all('sales').filter((s) => this.inScope(s) && s.status !== 'void').map((s) => {
+            const its = byS[s.id] || [];
+            const returnable = its.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.returned_quantity) || 0)), 0);
+            const cust = db.customer(s.customer_id);
+            return { id: s.id, invoice_no: s.invoice_no, sale_date: s.sale_date, total: Number(s.total) || 0, returnable, customerName: db.customerName(s.customer_id), customerPhone: cust ? cust.phone || '' : '', branchCode: db.branchCode(s.branch_id) };
+          }).filter((s) => s.returnable > 0), 'sale_date', 'desc');
+        },
+
+        /* --------------------------------------------------------- filters */
+        get hasFilters() { return !!(this.q || this.f.method || this.f.condition); },
+        clearFilters() { this.q = ''; this.f = { method: '', condition: '' }; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const f = this.f;
+          return this.rows.filter((r) => {
+            // a split refund matches every way it was paid (e.g. part off the due, part in cash)
+            if (f.method === 'ledger' ? !(r.split.due > 0) : f.method === 'store_credit' ? !(r.split.credit > 0) : f.method && !(r.split.paid > 0 && r.split.method === f.method)) return false;
+            if (f.condition && !r.lines.some((l) => l.condition === f.condition)) return false;
+            if (q && ![r.return_no, r.saleNo, r.customerName, r.customerPhone, r.reason].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotal() { return utils.sum(this.filtered, 'refund_amount'); },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() {
+          const { page, pages } = this.pager; const out = [];
+          for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n);
+          return out;
+        },
+        selfLink(extra = {}) {
+          const p = new URLSearchParams(this.range.query);
+          if (this.isSuperAdmin) p.set('branch', this.scope);
+          Object.entries(extra).forEach(([k, v]) => { if (v) p.set(k, v); else p.delete(k); });
+          return 'returns.html?' + p.toString();
+        },
+
+        /* ---------------------------------------------------------- modals */
+        closeAll() { this.dt.open = false; this.nr.open = false; this.pm.open = false; },
+        openDetail(row) { if (!row) return; this.dt = { open: true, row }; },
+        openNew() { if (!this.canAdd) { ui.error('Your role is not allowed to process returns.'); return; } this.nr = { open: true, q: '' }; this.$nextTick(() => this.$refs.nrq && this.$refs.nrq.focus()); },
+        get nrMatches() {
+          const q = this.nr.q.trim().toLowerCase();
+          if (!q) return this.openSales;
+          return this.openSales.filter((s) => [s.invoice_no, s.customerName, s.customerPhone].some((v) => String(v || '').toLowerCase().includes(q)));
+        },
+        get nrResults() { return this.nrMatches.slice(0, 8); },
+        get nrMore() { return Math.max(0, this.nrMatches.length - 8); },
+        openPrint(row) { if (!row) return; this.dt.open = false; this.pm.row = row; this.pm.open = true; },
+        doPrint() { this.$nextTick(() => { try { window.print(); } catch (e) { ui.error('Printing is not available in this browser.'); } }); },
+
+        /* ------------------------------------------------------------- csv */
+        exportCsv() {
+          const cols = [
+            { label: 'Return no', key: 'return_no' }, { label: 'Date', value: (r) => utils.datetime(r.return_date) },
+            { label: 'Branch', key: 'branchCode' }, { label: 'Invoice', key: 'saleNo' },
+            { label: 'Customer', key: 'customerName' }, { label: 'Phone', key: 'customerPhone' },
+            { label: 'Lines', value: (r) => r.lines.length }, { label: 'Units', key: 'units' },
+            { label: 'Good', key: 'good' }, { label: 'Defective', key: 'defective' },
+            { label: 'Refund', key: 'refund_amount' }, { label: 'Method', value: (r) => (r.refund_method === 'ledger' ? 'Ledger' : ui.statusLabel(r.refund_method)) },
+            { label: 'Off invoice due', value: (r) => r.split.due }, { label: 'Store credit', value: (r) => r.split.credit },
+            { label: 'Paid out', value: (r) => r.split.paid }, { label: 'Paid via', value: (r) => (r.split.paid > 0 ? ui.statusLabel(r.split.method) : '') },
+            { label: 'Account', key: 'accountName' },
+            { label: 'Reason', key: 'reason' }, { label: 'Notes', key: 'notes' }, { label: 'Processed by', key: 'by' },
+          ];
+          const v = this.range.value;
+          if (!utils.download('returns-' + (v.from || 'all') + '-to-' + (v.to || 'today') + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' return' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

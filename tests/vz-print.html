@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Test helper: print preview</title>
+<style>body{margin:0;background:#888}iframe{display:block;border:0;background:#fff;margin:0 auto}</style></head>
+<body>
+<iframe id="f"></iframe>
+<script>
+  // Simulates @media print for a screenshot: headless --screenshot always renders screen media.
+  const q = new URLSearchParams(location.search);
+  const f = document.getElementById('f');
+  f.width = q.get('w') || 794;   // A4 at 96dpi
+  f.height = q.get('h') || 1400;
+  f.src = '../' + (q.get('page') || 'dashboard.html');
+  setTimeout(() => {
+    try {
+      const d = f.contentDocument;
+      const s = d.createElement('style');
+      s.textContent = [
+        '.print-only{display:block !important}',
+        '.no-print,#abm-sidebar,#abm-topbar,footer{display:none !important}',
+        'body{background:#fff !important}',
+        'main{padding:8px !important;max-width:none !important}',
+        '.po-doc table{border-collapse:collapse;width:100%}',
+        '.po-doc th,.po-doc td{border:1px solid #cbd5e1;padding:5px 8px;font-size:11px;vertical-align:top}',
+        '.po-doc th{background:#f1f5f9;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em}',
+        '.po-doc .grid.print\\:grid-cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}',
+        '.po-doc .grid.print\\:grid-cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}',
+      ].join('\n');
+      d.head.appendChild(s);
+      const doc = d.querySelector('.print-only');
+      console.log('VZ_PRINT found=' + !!doc + ' h=' + (doc ? doc.scrollHeight : 0) + ' w=' + (doc ? doc.scrollWidth : 0));
+      if (doc) console.log('VZ_PRINT_TEXT ' + JSON.stringify(doc.textContent.replace(/\s+/g, ' ').trim()));
+    } catch (e) { console.log('VZ_PRINT_ERR ' + e.message); }
+  }, 7000);
+</script>
+</body>
+</html>

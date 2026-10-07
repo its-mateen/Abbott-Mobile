@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Book a Repair · Abbott Mobiles</title>
+  <meta name="description" content="Book a mobile or laptop repair at Abbott Mobile, Lahore — free diagnosis, genuine parts, same-day service and a written warranty.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-repair">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopRepair()">
+
+    <!-- ============================================================ HERO -->
+    <section class="shop-hero">
+      <div class="shop-container">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center py-10 lg:py-16">
+          <div class="min-w-0">
+            <span class="shop-hero-badge">
+              <span x-html="SHOP.icon('wrench','')"></span>Repair lab
+            </span>
+            <h1 class="shop-h1 mt-4">Mobile &amp; laptop repairs, done right.</h1>
+            <p class="mt-4 text-base leading-relaxed text-white/70 max-w-xl" x-text="repair.intro"></p>
+            <div class="mt-7 flex flex-wrap gap-3">
+              <a href="#book" class="shop-btn shop-btn-accent shop-btn-lg" x-show="repair.enabled">
+                <span x-html="SHOP.icon('calendar','')"></span>Book a repair
+              </a>
+              <a :href="SHOP.waLink('Hello, I need a repair quote.')" target="_blank" rel="noopener"
+                 class="shop-btn shop-btn-glass shop-btn-lg" x-show="SHOP.waNumber()" x-cloak>
+                <span x-html="SHOP.socialIcon('whatsapp','')"></span>Get a quick quote
+              </a>
+            </div>
+            <div class="shop-hero-stats">
+              <div class="min-w-0">
+                <div class="shop-hero-stat-v">Free</div>
+                <div class="shop-hero-stat-l">Diagnosis</div>
+              </div>
+              <div class="min-w-0">
+                <div class="shop-hero-stat-v">Same day</div>
+                <div class="shop-hero-stat-l">Most mobile jobs</div>
+              </div>
+              <div class="min-w-0">
+                <div class="shop-hero-stat-v" x-text="branches.length + ' branches'"></div>
+                <div class="shop-hero-stat-l">Lahore</div>
+              </div>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="shop-hero-art !aspect-[4/3]">
+              <div class="w-full h-full p-5 sm:p-7 grid grid-cols-2 gap-3 sm:gap-4 content-center">
+                <template x-for="t in heroTiles" :key="t.label">
+                  <div class="rounded-2xl ring-1 ring-white/20 bg-white/10 backdrop-blur p-3 sm:p-4 flex flex-col justify-center min-w-0">
+                    <span class="text-white/80" x-html="SHOP.icon(t.icon,'w-6 h-6')"></span>
+                    <div class="text-white font-extrabold text-sm sm:text-base mt-2 leading-tight" x-text="t.label"></div>
+                    <div class="text-[11px] text-white/60 mt-0.5 leading-snug" x-text="t.text"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================== HOW IT WORKS -->
+    <section class="shop-section-tight">
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div>
+            <span class="shop-eyebrow">Simple &amp; transparent</span>
+            <h2 class="shop-h2 mt-1">How it works</h2>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+          <template x-for="(s, i) in howItWorks" :key="s.title">
+            <div class="shop-card shop-card-pad min-w-0">
+              <div class="flex items-center gap-3">
+                <span class="shop-tile-icon flex-none" x-html="SHOP.icon(s.icon,'')"></span>
+                <span class="text-3xl font-extrabold text-slate-900/10 leading-none" x-text="'0' + (i + 1)"></span>
+              </div>
+              <h3 class="shop-h3 mt-3" x-text="s.title"></h3>
+              <p class="text-sm text-slate-600 leading-relaxed mt-1.5" x-text="s.text"></p>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================== SERVICE PRICES -->
+    <section class="shop-section-tight" x-show="groups.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div>
+            <span class="shop-eyebrow">Price list</span>
+            <h2 class="shop-h2 mt-1">What a repair costs</h2>
+            <p class="shop-lead mt-1 text-sm" x-show="showPrices" x-cloak>
+              Prices below are the labour charge. Spare parts are quoted separately after a free diagnosis — you approve before we start.
+            </p>
+            <p class="shop-lead mt-1 text-sm" x-show="!showPrices" x-cloak>
+              Every job is quoted after a free diagnosis — book below and we will call you with the price.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+          <template x-for="g in groups" :key="g.key">
+            <div class="shop-card min-w-0 flex flex-col">
+              <div class="p-5 pb-3 flex items-center gap-3">
+                <span class="shop-tile-icon flex-none" x-html="SHOP.icon(g.icon,'')"></span>
+                <div class="min-w-0">
+                  <h3 class="shop-h3 truncate" x-text="g.label"></h3>
+                  <p class="text-xs text-slate-500"><span x-text="g.items.length"></span> service<span x-show="g.items.length !== 1">s</span></p>
+                </div>
+              </div>
+              <ul class="px-5 pb-2 divide-y divide-slate-200/70 flex-1">
+                <template x-for="s in g.items" :key="s.id">
+                  <li class="flex items-center gap-3 py-2.5 min-w-0">
+                    <span class="min-w-0 flex-1">
+                      <a :href="'product.html?id=' + s.id" class="block text-sm font-semibold text-slate-800 leading-snug hover:underline" x-text="serviceName(s)"></a>
+                      <span class="block text-[11px] text-slate-500" x-text="turnaround(s)"></span>
+                    </span>
+                    <span class="text-sm font-extrabold text-slate-900 shop-nowrap" x-show="showPrices" x-cloak
+                          x-text="'from ' + $money(s.retail_price, {decimals:0})"></span>
+                    <button type="button" class="shop-btn shop-btn-outline shop-btn-sm flex-none" @click="pickService(s)">Book</button>
+                  </li>
+                </template>
+              </ul>
+              <div class="px-5 pb-5 pt-1">
+                <p class="text-[11px] text-slate-500 leading-relaxed" x-text="g.note"></p>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================== BOOKING -->
+    <section class="shop-section-tight" id="book">
+      <div class="shop-container">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-start">
+
+          <!-- disabled -->
+          <template x-if="!repair.enabled">
+            <div class="lg:col-span-2 min-w-0">
+              <div class="shop-card shop-card-pad text-center">
+                <span class="shop-tile-icon mx-auto" x-html="SHOP.icon('info','')"></span>
+                <h2 class="shop-h2 mt-4">Online booking is paused</h2>
+                <p class="shop-lead mt-2 text-sm">
+                  Our repair lab is still open — please walk in to any branch or call us and we will book your device in.
+                </p>
+                <div class="flex flex-col sm:flex-row justify-center gap-2 mt-5">
+                  <a :href="'tel:' + SHOP.digits(contact.phone || '')" class="shop-btn" x-show="contact.phone" x-cloak>
+                    <span x-html="SHOP.icon('phone-call','')"></span><span x-text="contact.phone"></span>
+                  </a>
+                  <a href="contact.html" class="shop-btn shop-btn-outline">Find a branch</a>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- success -->
+          <template x-if="repair.enabled && booked">
+            <div class="lg:col-span-2 min-w-0">
+              <div class="shop-card overflow-hidden">
+                <div class="p-6 sm:p-8 text-center text-white shop-on-dark"
+                     style="background:linear-gradient(150deg, rgb(var(--shop-accent-600)), rgb(var(--shop-primary-900)))">
+                  <span class="inline-flex w-14 h-14 rounded-2xl items-center justify-center bg-white/15 border border-white/25"
+                        x-html="SHOP.icon('check-circle','w-8 h-8')"></span>
+                  <h2 class="shop-h2 mt-4 text-white">Your repair is booked</h2>
+                  <p class="text-sm text-white/75 mt-2">
+                    We will call you on <b class="text-white" x-text="booked.phone"></b> to confirm the slot and give you an estimate.
+                  </p>
+                  <span class="shop-badge shop-badge-solid !text-sm !py-1.5 !px-3 mt-4" x-text="'Reference ' + reference"></span>
+                </div>
+                <div class="p-5 sm:p-7">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="min-w-0">
+                      <div class="shop-label">Device</div>
+                      <p class="text-sm font-bold text-slate-900 break-words"
+                         x-text="[ABM.db.deviceTypeLabel(booked.device_type), booked.brand, booked.model].filter(Boolean).join(' · ')"></p>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="shop-label">Preferred visit</div>
+                      <p class="text-sm font-bold text-slate-900" x-text="$date(booked.preferred_date, 'long')"></p>
+                      <p class="text-xs text-slate-500 break-words" x-text="ABM.db.branchName(booked.preferred_branch_id)"></p>
+                    </div>
+                    <div class="min-w-0 sm:col-span-2">
+                      <div class="shop-label">Problem</div>
+                      <p class="text-sm text-slate-600 break-words" x-text="booked.problem"></p>
+                    </div>
+                  </div>
+
+                  <h3 class="shop-h3 mt-6">What happens next</h3>
+                  <ol class="mt-3 space-y-3">
+                    <template x-for="(s, i) in nextSteps" :key="i">
+                      <li class="flex gap-3 min-w-0">
+                        <span class="w-7 h-7 flex-none rounded-full bg-slate-900/5 text-slate-600 font-extrabold text-xs flex items-center justify-center" x-text="i + 1"></span>
+                        <span class="min-w-0">
+                          <span class="block text-sm font-bold text-slate-900" x-text="s.title"></span>
+                          <span class="block text-xs text-slate-500 leading-relaxed" x-text="s.text"></span>
+                        </span>
+                      </li>
+                    </template>
+                  </ol>
+
+                  <div class="flex flex-col sm:flex-row gap-2 mt-6">
+                    <a :href="SHOP.waLink('Hello, I booked a repair (Ref ' + reference + ') for my ' + booked.brand + ' ' + booked.model + '.')"
+                       target="_blank" rel="noopener" class="shop-btn shop-btn-accent flex-1" x-show="SHOP.waNumber()" x-cloak>
+                      <span x-html="SHOP.socialIcon('whatsapp','')"></span>Send details on WhatsApp
+                    </a>
+                    <button type="button" class="shop-btn shop-btn-outline flex-1" @click="bookAnother()">
+                      <span x-html="SHOP.icon('plus','')"></span>Book another device
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- form -->
+          <template x-if="repair.enabled && !booked">
+            <div class="lg:col-span-2 min-w-0">
+              <form class="shop-card shop-card-pad" @submit.prevent="submit()" novalidate>
+                <div class="flex items-center gap-2.5">
+                  <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('calendar','w-4 h-4')"></span>
+                  <div class="min-w-0">
+                    <h2 class="shop-h3">Book your repair</h2>
+                    <p class="text-xs text-slate-500">Takes a minute — no payment needed now.</p>
+                  </div>
+                </div>
+
+                <div class="mt-5">
+                  <span class="shop-label">Device type *</span>
+                  <div class="flex flex-wrap gap-2">
+                    <template x-for="t in deviceTypes" :key="t">
+                      <button type="button" class="shop-chip" :class="form.device_type === t && 'is-active'"
+                              @click="form.device_type = t" :aria-pressed="form.device_type === t">
+                        <span x-html="SHOP.icon(deviceIcon(t),'')"></span>
+                        <span class="truncate" x-text="ABM.db.deviceTypeLabel(t)"></span>
+                      </button>
+                    </template>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-name">Your name *</label>
+                    <input id="rp-name" type="text" class="shop-input" x-model="form.name" @input="errors.name = ''"
+                           :class="errors.name && '!border-rose-500'" autocomplete="name" placeholder="e.g. Ahmed Raza">
+                    <p class="shop-error" x-show="errors.name" x-cloak x-text="errors.name"></p>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-phone">Mobile number *</label>
+                    <input id="rp-phone" type="tel" inputmode="tel" class="shop-input" x-model="form.phone"
+                           @input="errors.phone = ''" @blur="formatPhone()" :class="errors.phone && '!border-rose-500'"
+                           autocomplete="tel" placeholder="03xx-xxxxxxx">
+                    <p class="shop-error" x-show="errors.phone" x-cloak x-text="errors.phone"></p>
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <label class="shop-label" for="rp-email">Email (optional)</label>
+                    <input id="rp-email" type="email" class="shop-input" x-model="form.email" @input="errors.email = ''"
+                           :class="errors.email && '!border-rose-500'" autocomplete="email" placeholder="you@example.com">
+                    <p class="shop-error" x-show="errors.email" x-cloak x-text="errors.email"></p>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-brand">Brand</label>
+                    <input id="rp-brand" type="text" class="shop-input" x-model="form.brand" list="rp-brands" placeholder="e.g. Samsung">
+                    <datalist id="rp-brands">
+                      <template x-for="b in brandNames" :key="b"><option :value="b"></option></template>
+                    </datalist>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-model">Model</label>
+                    <input id="rp-model" type="text" class="shop-input" x-model="form.model" placeholder="e.g. Galaxy A55">
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <label class="shop-label" for="rp-problem">What is wrong? *</label>
+                    <textarea id="rp-problem" class="shop-textarea" x-model="form.problem" @input="errors.problem = ''"
+                              :class="errors.problem && '!border-rose-500'"
+                              placeholder="Describe the fault — e.g. screen cracked, battery drains fast, will not charge…"></textarea>
+                    <p class="shop-error" x-show="errors.problem" x-cloak x-text="errors.problem"></p>
+                    <p class="text-[11px] text-slate-500 mt-1" x-show="!errors.problem">The more detail you give, the more accurate our estimate.</p>
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-date">Preferred date</label>
+                    <input id="rp-date" type="date" class="shop-input" x-model="form.preferred_date" :min="today">
+                  </div>
+                  <div class="min-w-0">
+                    <label class="shop-label" for="rp-branch">Preferred branch</label>
+                    <select id="rp-branch" class="shop-select" x-model="form.preferred_branch_id">
+                      <template x-for="b in branches" :key="b.id">
+                        <option :value="b.id" x-text="b.name + ' — ' + b.address"></option>
+                      </template>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="alert alert-danger mt-4 text-xs" x-show="formError" x-cloak>
+                  <span x-html="SHOP.icon('x-circle','w-4 h-4')"></span>
+                  <span class="min-w-0" x-text="formError"></span>
+                </div>
+
+                <button type="submit" class="shop-btn shop-btn-lg shop-btn-block mt-5" :disabled="busy">
+                  <span x-html="SHOP.icon(busy ? 'refresh' : 'wrench','')"></span>
+                  <span x-text="busy ? 'Sending…' : 'Book my repair'"></span>
+                </button>
+                <p class="text-[11px] text-slate-500 mt-3 text-center">
+                  No payment now. We call you with an estimate before any work starts.
+                </p>
+              </form>
+            </div>
+          </template>
+
+          <!-- side column -->
+          <div class="min-w-0 space-y-4">
+            <div class="shop-card shop-card-pad">
+              <h3 class="shop-h3">Why Abbott Mobile</h3>
+              <div class="space-y-3 mt-3">
+                <template x-for="t in trust" :key="t.title">
+                  <div class="flex gap-3 min-w-0">
+                    <span class="text-emerald-600 flex-none mt-0.5" x-html="SHOP.icon(t.icon,'w-4 h-4')"></span>
+                    <span class="min-w-0">
+                      <span class="block text-sm font-bold text-slate-900" x-text="t.title"></span>
+                      <span class="block text-xs text-slate-500 leading-relaxed" x-text="t.text"></span>
+                    </span>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="shop-card shop-card-pad">
+              <h3 class="shop-h3">Walk in instead</h3>
+              <ul class="space-y-3 mt-3">
+                <template x-for="b in branches" :key="b.id">
+                  <li class="min-w-0">
+                    <div class="text-sm font-bold text-slate-900 truncate" x-text="b.name"></div>
+                    <div class="text-xs text-slate-500 break-words" x-text="b.address"></div>
+                    <a :href="'tel:' + SHOP.digits(b.phone || '')" class="text-xs shop-link break-words" x-show="b.phone" x-cloak x-text="b.phone"></a>
+                  </li>
+                </template>
+              </ul>
+              <p class="text-[11px] text-slate-500 mt-3" x-show="contact.hours" x-cloak x-text="contact.hours"></p>
+              <a href="contact.html" class="shop-btn shop-btn-outline shop-btn-sm shop-btn-block mt-3">
+                <span x-html="SHOP.icon('map-pin','')"></span>Directions &amp; map
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= FAQ -->
+    <section class="shop-section shop-section-alt">
+      <div class="shop-container">
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div class="min-w-0">
+            <span class="shop-eyebrow">Good to know</span>
+            <h2 class="shop-h2 mt-1">Repair FAQs</h2>
+            <p class="shop-lead mt-2 text-sm">
+              Still unsure? Message us on WhatsApp with a photo of the fault and we will tell you what it needs.
+            </p>
+            <a :href="SHOP.waLink('Hello, I have a question about a repair.')" target="_blank" rel="noopener"
+               class="shop-btn shop-btn-accent shop-btn-sm mt-4" x-show="SHOP.waNumber()" x-cloak>
+              <span x-html="SHOP.socialIcon('whatsapp','')"></span>Ask a question
+            </a>
+          </div>
+          <div class="lg:col-span-2 min-w-0">
+            <div class="shop-card shop-card-pad">
+              <template x-for="(f, i) in faqs" :key="i">
+                <div class="shop-acc">
+                  <button type="button" class="shop-acc-btn" :aria-expanded="open === i" @click="open = (open === i ? -1 : i)">
+                    <span class="min-w-0" x-text="f.q"></span>
+                    <span x-html="SHOP.icon('chevron-down','')"></span>
+                  </button>
+                  <div class="shop-acc-body" x-show="open === i" x-cloak x-transition.opacity.duration.200ms>
+                    <p x-text="f.a"></p>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopRepair() {
+      const { db, utils } = ABM;
+      return {
+        repair: {}, commerce: {}, contact: {}, branches: [], deviceTypes: [], brandNames: [],
+        groups: [], showPrices: false, busy: false, booked: null, reference: '', open: 0,
+        formError: '', today: '',
+        form: { name: '', phone: '', email: '', device_type: 'mobile', brand: '', model: '', problem: '', preferred_date: '', preferred_branch_id: 1 },
+        errors: { name: '', phone: '', email: '', problem: '' },
+        howItWorks: [], trust: [], faqs: [], nextSteps: [], heroTiles: [],
+
+        init() {
+          this.repair = SHOP.repairBooking();
+          this.commerce = SHOP.commerce();
+          this.contact = SHOP.contact();
+          this.branches = SHOP.branches();
+          this.today = utils.today();
+          this.showPrices = !!(this.repair.show_prices && this.commerce.show_prices);
+          this.deviceTypes = (this.repair.device_types || []).filter(Boolean);
+          if (!this.deviceTypes.length) this.deviceTypes = ['mobile', 'laptop'];
+          this.form.device_type = this.deviceTypes[0];
+          this.form.preferred_date = this.today;
+          this.form.preferred_branch_id = (this.branches[0] || { id: SHOP.branchId() }).id;
+          this.brandNames = db.all('brands').filter((b) => b.is_active).map((b) => b.name);
+
+          this.groups = this.buildGroups();
+          this.howItWorks = [
+            { icon: 'calendar', title: 'Book online or walk in', text: 'Tell us the device and the fault. Pick a branch and a day that suits you — no payment needed to book.' },
+            { icon: 'search', title: 'Free diagnosis & quote', text: 'Our technicians check the device and call you with a fixed price. Nothing is opened up until you approve it.' },
+            { icon: 'shield-check', title: 'Repaired & warrantied', text: 'Genuine parts, tested before handover, with a written warranty on the repaired fault. Track the job online.' },
+          ];
+          this.trust = [
+            { icon: 'shield-check', title: 'Written warranty', text: '7 days on mobile jobs, 15 days on laptop jobs — on the repaired fault.' },
+            { icon: 'cpu', title: 'Genuine parts', text: 'OEM or grade-A parts only. We tell you exactly which grade we are fitting.' },
+            { icon: 'lock', title: 'Your data stays yours', text: 'We never browse your files. Please back up anyway — some repairs need a reset.' },
+            { icon: 'banknotes', title: 'Pay on collection', text: 'No advance for standard jobs. Cash, JazzCash, EasyPaisa or card.' },
+          ];
+          this.faqs = [
+            { q: 'Do I get a warranty on the repair?', a: 'Yes. Mobile repairs carry a 7-day warranty and laptop repairs a 15-day warranty covering the repaired fault only. Physical or liquid damage after collection is not covered. Keep the job card we give you.' },
+            { q: 'How long does a repair take?', a: 'Most mobile jobs — screens, batteries, charging ports — are completed the same day. Laptop jobs usually take 1–2 working days, longer if a part has to be ordered. We tell you the expected date when we quote.' },
+            { q: 'Is my data safe?', a: 'We only access what the repair requires and we never copy anything. Some repairs (software flashing, motherboard work) can wipe the device, so please back up before you hand it over and remove any screen lock or tell us the pattern.' },
+            { q: 'Do I need to book, or can I just walk in?', a: 'Walk-ins are always welcome during shop hours. Booking online simply means we keep a slot free, order the part in advance where possible and call you with an estimate before you travel.' },
+            { q: 'What if the device cannot be repaired?', a: 'Diagnosis is free. If the fault is not economical to fix we tell you honestly, return the device untouched and — if you want — quote you a trade-in against a replacement.' },
+          ];
+          this.nextSteps = [
+            { title: 'We call you back', text: 'Usually within an hour during shop hours to confirm the slot and give you an estimate.' },
+            { title: 'Bring the device in', text: 'Remove your screen lock or share the pattern, and back up anything important first.' },
+            { title: 'Free diagnosis, then your approval', text: 'We quote a fixed price. No work starts until you say yes.' },
+            { title: 'Collect and pay', text: 'We test the device with you at the counter and hand over the warranty slip.' },
+          ];
+          this.heroTiles = [
+            { icon: 'phone', label: 'Mobiles', text: 'Screens, batteries, charging ports, water damage' },
+            { icon: 'laptop', label: 'Laptops', text: 'Screens, keyboards, hinges, SSD & RAM upgrades' },
+            { icon: 'cpu', label: 'Chip level', text: 'Motherboard & IC-level repairs in-house' },
+            { icon: 'archive', label: 'Data recovery', text: 'Photos & files from dead phones and drives' },
+          ];
+
+          // ?service=ID preselects the device type and prefills the problem
+          const svc = SHOP.product(utils.qs('service'));
+          if (svc && db.productType(svc) === 'service') this.pickService(svc, true);
+
+          // QA aid (same family as ?__layout=1 / ?__click= in shop.js): prefill a valid booking.
+          if (utils.qs('__demo') === '1') {
+            this.form.name = 'Demo Customer';
+            this.form.phone = '0300-1234567';
+            this.form.email = 'demo@example.com';
+            this.form.brand = this.form.brand || 'Samsung';
+            this.form.model = this.form.model || 'Galaxy A55';
+            if (!this.form.problem) this.form.problem = 'Screen cracked after a drop, touch works but the glass is shattered.';
+          }
+        },
+
+        /* ------------------------------------------------ service groups */
+        groupOf(p) {
+          const hay = [p.name, p.variant, p.model, db.categoryName(p.category_id)].join(' ').toLowerCase();
+          if (p.device_type === 'laptop' || p.device_type === 'desktop') return 'laptop';
+          if (['mobile', 'tablet', 'smartwatch'].includes(p.device_type)) return 'mobile';
+          if (/laptop|notebook|macbook|desktop|thermal|keyboard|hinge/.test(hay)) return 'laptop';
+          if (/mobile|phone|iphone|android|tablet/.test(hay)) return 'mobile';
+          return 'any';
+        },
+        buildGroups() {
+          const meta = {
+            mobile: { label: 'Mobile & tablet repairs', icon: 'phone', note: 'Screens, batteries, charging ports, cameras, water damage and software — most done the same day.' },
+            laptop: { label: 'Laptop & computer repairs', icon: 'laptop', note: 'Screens, keyboards, hinges, fans and thermal service, plus SSD / RAM upgrades. Usually 1–2 working days.' },
+            any: { label: 'Any device', icon: 'wrench', note: 'Diagnostics, data recovery and software work for phones, tablets, laptops and desktops.' },
+          };
+          const buckets = { mobile: [], laptop: [], any: [] };
+          SHOP.services().forEach((p) => { buckets[this.groupOf(p)].push(p); });
+          return ['mobile', 'laptop', 'any']
+            .filter((k) => buckets[k].length)
+            .map((k) => ({ key: k, label: meta[k].label, icon: meta[k].icon, note: meta[k].note,
+              items: utils.sortBy(buckets[k], 'retail_price', 'asc') }));
+        },
+        serviceName(p) { return String(p.name || '').replace(/\s*\(?labor\)?$/i, '').replace(/\s+Labor\b/i, '').trim() || p.name; },
+        turnaround(p) {
+          const g = this.groupOf(p);
+          if (/data recovery/i.test(p.name)) return 'Typical turnaround: 2–5 days';
+          if (g === 'laptop') return 'Typical turnaround: 1–2 days';
+          if (/motherboard|chip/i.test(p.name)) return 'Typical turnaround: 2–3 days';
+          return 'Typical turnaround: same day';
+        },
+        deviceIcon(t) {
+          return ({ mobile: 'phone', tablet: 'phone', smartwatch: 'clock', laptop: 'laptop', desktop: 'desktop' })[t] || 'cube';
+        },
+
+        pickService(p, silent) {
+          const g = this.groupOf(p);
+          const want = g === 'laptop' ? 'laptop' : (g === 'mobile' ? 'mobile' : this.form.device_type);
+          if (this.deviceTypes.includes(want)) this.form.device_type = want;
+          const label = this.serviceName(p);
+          this.form.problem = 'I need: ' + label
+            + (this.showPrices ? ' (listed from ' + utils.money(p.retail_price, { decimals: 0 }) + ')' : '')
+            + '. ';
+          this.errors.problem = '';
+          if (!silent) {
+            this.booked = null;
+            const el = document.getElementById('book');
+            if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => { const f = document.getElementById('rp-name'); if (f) f.focus(); }, 350);
+            SHOP.toast(label + ' added to your request.', 'info');
+          }
+        },
+
+        /* ------------------------------------------------------ the form */
+        normalisePhone(v) {
+          let d = SHOP.digits(v);
+          if (d.slice(0, 4) === '0092') d = d.slice(4);
+          if (d.slice(0, 2) === '92' && d.length === 12) d = '0' + d.slice(2);
+          if (d.length === 10 && d.charAt(0) === '3') d = '0' + d;
+          return d;
+        },
+        formatPhone() {
+          const d = this.normalisePhone(this.form.phone);
+          if (/^03\d{9}$/.test(d)) this.form.phone = d.slice(0, 4) + '-' + d.slice(4);
+        },
+        validate() {
+          const e = { name: '', phone: '', email: '', problem: '' };
+          if (String(this.form.name || '').trim().length < 3) e.name = 'Please enter your name.';
+          const phone = this.normalisePhone(this.form.phone);
+          if (!phone) e.phone = 'Please enter your mobile number.';
+          else if (!/^03\d{9}$/.test(phone)) e.phone = 'Enter a Pakistani mobile number in the format 03xx-xxxxxxx.';
+          const email = String(this.form.email || '').trim();
+          if (email && !/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) e.email = 'That email address does not look right.';
+          if (String(this.form.problem || '').trim().length < 8) e.problem = 'Please describe the problem in a few words.';
+          this.errors = e;
+          return !Object.keys(e).some((k) => e[k]);
+        },
+        submit() {
+          if (this.busy) return;
+          this.formError = '';
+          if (!this.validate()) {
+            this.formError = 'Please fix the highlighted fields and try again.';
+            SHOP.toast('Please check the highlighted fields.', 'error');
+            return;
+          }
+          this.busy = true;
+          try {
+            const d = this.normalisePhone(this.form.phone);
+            const row = SHOP.bookRepair({
+              name: String(this.form.name).trim(),
+              phone: /^03\d{9}$/.test(d) ? d.slice(0, 4) + '-' + d.slice(4) : String(this.form.phone).trim(),
+              email: String(this.form.email || '').trim(),
+              device_type: this.form.device_type,
+              brand: String(this.form.brand || '').trim(),
+              model: String(this.form.model || '').trim(),
+              problem: String(this.form.problem).trim(),
+              preferred_date: this.form.preferred_date || this.today,
+              preferred_branch_id: this.form.preferred_branch_id,
+            });
+            this.booked = row;
+            this.reference = 'RQ-' + utils.pad(row.id);
+            SHOP.toast('Repair request sent. We will call you shortly.', 'success');
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (err) { window.scrollTo(0, 0); }
+          } catch (e) {
+            this.formError = e.message;
+            SHOP.toast(e.message, 'error');
+          } finally { this.busy = false; }
+        },
+        bookAnother() {
+          this.booked = null; this.reference = ''; this.formError = '';
+          this.form.brand = ''; this.form.model = ''; this.form.problem = '';
+          this.errors = { name: '', phone: '', email: '', problem: '' };
+          const el = document.getElementById('book');
+          if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        },
+      };
+    }
+  </script>
+</body>
+</html>

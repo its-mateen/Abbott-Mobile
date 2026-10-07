@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Shop all products · Abbott Mobiles</title>
+  <meta name="description" content="Browse smartphones, laptops, accessories, spare parts and repair services at Abbott Mobile, Lahore.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-products">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopCatalog()" @keydown.escape.window="drawer = false">
+
+    <!-- ========================================================= PAGE HEAD -->
+    <section class="border-b border-slate-200/70" style="background:linear-gradient(180deg, rgb(var(--shop-primary-500)/.07), transparent)">
+      <div class="shop-container py-6 sm:py-9">
+        <nav class="shop-crumbs" aria-label="Breadcrumb">
+          <a href="index.html">Home</a>
+          <span x-html="SHOP.icon('chevron-right','')"></span>
+          <span class="font-semibold text-slate-700" x-text="heading"></span>
+        </nav>
+        <h1 class="shop-h2 mt-2" x-text="heading"></h1>
+        <p class="shop-lead mt-1 text-sm">
+          <span x-text="ABM.utils.num(filtered.length)"></span> product<span x-show="filtered.length !== 1">s</span>
+          <span x-show="f.q" x-cloak> matching “<span class="font-semibold text-slate-700" x-text="f.q"></span>”</span>
+          · delivered from <span x-text="branchName"></span>
+        </p>
+      </div>
+    </section>
+
+    <div class="shop-container py-6">
+      <div class="grid grid-cols-1 lg:grid-cols-[17rem_1fr] gap-6">
+
+        <!-- ======================================================= FILTERS -->
+        <div x-show="drawer" x-cloak class="shop-drawer-backdrop lg:hidden" @click="drawer = false" x-transition.opacity></div>
+
+        <aside class="shop-filters" :class="drawer && 'is-open'" role="region" aria-label="Filters">
+          <div class="shop-filters-head lg:hidden">
+            <span class="font-extrabold text-slate-900">Filters</span>
+            <button type="button" class="shop-icon-btn ml-auto" @click="drawer = false" aria-label="Close filters">
+              <span x-html="SHOP.icon('x','')"></span>
+            </button>
+          </div>
+
+          <div class="shop-filters-body">
+            <!-- search -->
+            <div class="shop-filter-group">
+              <label class="shop-label" for="cat-q">Search</label>
+              <div class="shop-search">
+                <span class="shop-search-icon" x-html="SHOP.icon('search','')"></span>
+                <input id="cat-q" type="search" class="shop-input" placeholder="Name, brand, SKU…" x-model.debounce.250ms="f.q" @input.debounce.350ms="reset()">
+              </div>
+            </div>
+
+            <!-- categories grouped by product type -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Categories</div>
+              <template x-for="g in catGroups" :key="g.key">
+                <div class="mb-2">
+                  <div class="text-[10px] font-extrabold uppercase tracking-[.12em] text-slate-400 mt-2 mb-1" x-text="g.label"></div>
+                  <template x-for="c in g.items" :key="c.id">
+                    <button type="button" class="shop-filter-row" :class="f.category == c.id && 'is-active'"
+                            @click="f.category = (f.category == c.id ? '' : String(c.id)); reset()">
+                      <span class="truncate" x-text="c.name"></span>
+                      <span class="shop-filter-count" x-text="c.count"></span>
+                    </button>
+                  </template>
+                </div>
+              </template>
+            </div>
+
+            <!-- brands -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Brands</div>
+              <div class="max-h-56 overflow-y-auto pr-1 -mr-1">
+                <template x-for="b in brandList" :key="b.id">
+                  <button type="button" class="shop-filter-row" :class="f.brand == b.id && 'is-active'"
+                          @click="f.brand = (f.brand == b.id ? '' : String(b.id)); reset()">
+                    <span class="truncate" x-text="b.name"></span>
+                    <span class="shop-filter-count" x-text="b.count"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+
+            <!-- price -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Price (Rs.)</div>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="min-w-0">
+                  <label class="sr-only" for="cat-min">Minimum price</label>
+                  <input id="cat-min" type="number" min="0" class="shop-input" placeholder="Min" x-model.number="f.min" @input="reset()">
+                </div>
+                <div class="min-w-0">
+                  <label class="sr-only" for="cat-max">Maximum price</label>
+                  <input id="cat-max" type="number" min="0" class="shop-input" placeholder="Max" x-model.number="f.max" @input="reset()">
+                </div>
+              </div>
+              <p class="shop-error" x-show="priceError" x-cloak x-text="priceError"></p>
+              <div class="flex flex-wrap gap-1.5 mt-2">
+                <template x-for="b in priceBands" :key="b.label">
+                  <button type="button" class="shop-chip" @click="f.min = b.min; f.max = b.max; reset()" x-text="b.label"></button>
+                </template>
+              </div>
+            </div>
+
+            <!-- device type -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Device type</div>
+              <div class="flex flex-wrap gap-1.5">
+                <template x-for="d in deviceTypes" :key="d">
+                  <button type="button" class="shop-chip" :class="f.device === d && 'is-active'"
+                          @click="f.device = (f.device === d ? '' : d); reset()" x-text="ABM.db.deviceTypeLabel(d)"></button>
+                </template>
+              </div>
+            </div>
+
+            <!-- product type -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Product type</div>
+              <div class="flex flex-wrap gap-1.5">
+                <template x-for="t in productTypes" :key="t">
+                  <button type="button" class="shop-chip" :class="f.type === t && 'is-active'"
+                          @click="f.type = (f.type === t ? '' : t); reset()" x-text="ABM.db.productTypeLabel(t)"></button>
+                </template>
+              </div>
+            </div>
+
+            <!-- condition -->
+            <div class="shop-filter-group">
+              <div class="shop-filter-title">Condition</div>
+              <div class="flex flex-wrap gap-1.5">
+                <template x-for="c in conditions" :key="c">
+                  <button type="button" class="shop-chip" :class="f.condition === c && 'is-active'"
+                          @click="f.condition = (f.condition === c ? '' : c); reset()" x-text="ABM.utils.titleCase(c)"></button>
+                </template>
+              </div>
+            </div>
+
+            <!-- availability -->
+            <div class="shop-filter-group border-b-0">
+              <label class="shop-check">
+                <input type="checkbox" x-model="f.inStock" @change="reset()">
+                <span class="font-semibold">In stock only</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="shop-filters-foot">
+            <button type="button" class="shop-btn shop-btn-outline shop-btn-sm flex-1" @click="clearAll()">Clear all</button>
+            <button type="button" class="shop-btn shop-btn-sm flex-1 lg:hidden" @click="drawer = false"
+                    x-text="'Show ' + filtered.length"></button>
+          </div>
+        </aside>
+
+        <!-- ========================================================== GRID -->
+        <div class="min-w-0">
+
+          <!-- toolbar -->
+          <div class="flex flex-wrap items-center gap-2 mb-3">
+            <button type="button" id="btn-filters" class="shop-btn shop-btn-outline shop-btn-sm lg:hidden" @click="drawer = true">
+              <span x-html="SHOP.icon('filter','')"></span>Filters
+              <span class="shop-badge shop-badge-primary" x-show="activeChips.length" x-cloak x-text="activeChips.length"></span>
+            </button>
+            <span class="text-xs text-slate-500 hidden sm:inline">
+              Showing <b x-text="Math.min(limit, filtered.length)"></b> of <b x-text="filtered.length"></b>
+            </span>
+            <div class="ml-auto flex items-center gap-2 min-w-0">
+              <label class="text-xs font-semibold text-slate-500 hidden sm:inline shop-nowrap" for="cat-sort">Sort by</label>
+              <select id="cat-sort" class="shop-select !w-auto min-w-0" x-model="sort" @change="syncUrl()">
+                <template x-for="s in sorts" :key="s.key">
+                  <option :value="s.key" x-text="s.label"></option>
+                </template>
+              </select>
+            </div>
+          </div>
+
+          <!-- active filter chips -->
+          <div class="flex flex-wrap items-center gap-1.5 mb-4" x-show="activeChips.length" x-cloak>
+            <template x-for="c in activeChips" :key="c.key">
+              <button type="button" class="shop-chip" @click="clearOne(c.key)">
+                <span class="truncate" x-text="c.label"></span>
+                <span x-html="SHOP.icon('x','')"></span>
+              </button>
+            </template>
+            <button type="button" class="text-xs font-bold text-slate-500 hover:text-rose-600 px-2 py-1" @click="clearAll()">Clear all</button>
+          </div>
+
+          <!-- product grid -->
+          <div class="shop-grid-products" x-show="visible.length" x-cloak>
+            <template x-for="p in visible" :key="p.id">
+              <div class="shop-card shop-card-hover shop-product">
+                <a :href="'product.html?id=' + p.id" class="block relative" :aria-label="SHOP.title(p)">
+                  <div class="shop-media" x-html="SHOP.image(p)"></div>
+                  <div class="shop-media-tags">
+                    <template x-if="p.condition && p.condition !== 'new'">
+                      <span class="shop-tag shop-tag-warn" x-text="ABM.utils.titleCase(p.condition)"></span>
+                    </template>
+                    <template x-if="ABM.db.productType(p) === 'service'">
+                      <span class="shop-tag shop-tag-info">Service</span>
+                    </template>
+                    <template x-if="commerce.show_stock && !SHOP.inStock(p)">
+                      <span class="shop-tag shop-tag-danger">Out of stock</span>
+                    </template>
+                  </div>
+                </a>
+                <div class="shop-product-body">
+                  <div class="shop-product-brand truncate" x-text="ABM.db.brandName(p.brand_id)"></div>
+                  <a :href="'product.html?id=' + p.id" class="shop-product-title hover:underline" x-text="SHOP.title(p)"></a>
+                  <div class="text-[11px] text-slate-500 shop-clamp-2" x-text="specLine(p)" x-show="specLine(p)"></div>
+                  <div class="mt-auto pt-2 flex items-end justify-between gap-2 min-w-0">
+                    <div class="min-w-0">
+                      <div class="shop-price truncate" x-show="commerce.show_prices" x-text="$money(p.retail_price, {decimals:0})"></div>
+                      <div class="text-[11px] font-semibold mt-0.5 truncate" :class="stockClass(p)" x-show="commerce.show_stock" x-text="SHOP.stockLabel(p)"></div>
+                    </div>
+                    <template x-if="ABM.db.productType(p) === 'service'">
+                      <a :href="'repair.html?service=' + p.id" class="shop-btn shop-btn-sm shop-btn-outline flex-none">Book</a>
+                    </template>
+                    <template x-if="ABM.db.productType(p) !== 'service'">
+                      <button type="button" class="shop-icon-btn !w-9 !h-9 flex-none bg-slate-900/5 hover:bg-slate-900/10"
+                              :disabled="!SHOP.maxQty(p) || adding === p.id" @click="add(p)"
+                              :title="SHOP.maxQty(p) ? 'Add to cart' : 'Out of stock'" :aria-label="'Add ' + SHOP.title(p) + ' to cart'">
+                        <span x-html="SHOP.icon(adding === p.id ? 'check' : 'plus','')"></span>
+                      </button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- load more -->
+          <div class="text-center mt-6" x-show="visible.length < filtered.length" x-cloak>
+            <button type="button" class="shop-btn shop-btn-outline" @click="limit += 12">
+              <span x-html="SHOP.icon('refresh','')"></span>
+              <span x-text="'Load more (' + (filtered.length - visible.length) + ' left)'"></span>
+            </button>
+          </div>
+
+          <!-- empty state -->
+          <div class="shop-card" x-show="!filtered.length" x-cloak>
+            <div class="shop-empty">
+              <span x-html="SHOP.icon('search','')"></span>
+              <div class="shop-empty-title">No products match your filters</div>
+              <p class="text-sm mt-1 max-w-sm mx-auto">Try removing a filter, widening the price range or searching for a different model.</p>
+              <button type="button" class="shop-btn shop-btn-outline shop-btn-sm mt-4" @click="clearAll()">Clear all filters</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopCatalog() {
+      const { db, utils } = ABM;
+      return {
+        all: [], catGroups: [], brandList: [], commerce: {}, branchName: '',
+        f: { q: '', category: '', brand: '', type: '', device: '', condition: '', min: '', max: '', inStock: false },
+        sort: 'featured', limit: 12, drawer: false, adding: 0, featuredIds: [],
+        sorts: [
+          { key: 'featured', label: 'Featured' },
+          { key: 'price_asc', label: 'Price: low to high' },
+          { key: 'price_desc', label: 'Price: high to low' },
+          { key: 'newest', label: 'Newest first' },
+          { key: 'name', label: 'Name A–Z' },
+        ],
+        deviceTypes: ['mobile', 'tablet', 'smartwatch', 'laptop', 'desktop'],
+        productTypes: ['device', 'accessory', 'part', 'service'],
+        typePlural: { device: 'Devices', accessory: 'Accessories', part: 'Spare parts', service: 'Repair services' },
+        conditions: ['new', 'used', 'refurbished'],
+        priceBands: [
+          { label: 'Under 10k', min: '', max: 10000 },
+          { label: '10k – 50k', min: 10000, max: 50000 },
+          { label: '50k – 150k', min: 50000, max: 150000 },
+          { label: '150k +', min: 150000, max: '' },
+        ],
+
+        init() {
+          this.commerce = SHOP.commerce();
+          this.branchName = (SHOP.branch() || {}).name || 'our store';
+          this.featuredIds = (SHOP.site().featured_product_ids || []).map(Number);
+          this.all = SHOP.products();
+
+          // filters from the URL (?category=&brand=&q=&type=&device=&sort=&condition=&min=&max=)
+          this.f.q = utils.qs('q') || '';
+          this.f.category = utils.qs('category') || '';
+          this.f.brand = utils.qs('brand') || '';
+          this.f.type = utils.qs('type') || '';
+          this.f.device = utils.qs('device') || '';
+          this.f.condition = utils.qs('condition') || '';
+          this.f.min = utils.qs('min') || '';
+          this.f.max = utils.qs('max') || '';
+          this.f.inStock = utils.qs('stock') === '1';
+          const s = utils.qs('sort');
+          if (s && this.sorts.some((x) => x.key === s)) this.sort = s;
+
+          // category list grouped by product type
+          const cats = SHOP.categories();
+          this.catGroups = this.productTypes
+            .map((t) => ({ key: t, label: this.typePlural[t] || db.productTypeLabel(t), items: cats.filter((c) => c.product_type === t) }))
+            .filter((g) => g.items.length);
+          this.brandList = SHOP.brands();
+        },
+
+        get heading() {
+          if (this.f.category) return db.categoryName(this.f.category);
+          if (this.f.device) return db.deviceTypeLabel(this.f.device) + 's';
+          if (this.f.type) return this.typePlural[this.f.type] || db.productTypeLabel(this.f.type);
+          if (this.f.q) return 'Search results';
+          return 'All products';
+        },
+        get priceError() {
+          const lo = Number(this.f.min), hi = Number(this.f.max);
+          return (this.f.min !== '' && this.f.max !== '' && lo > hi) ? 'Minimum price is higher than the maximum.' : '';
+        },
+        get filtered() {
+          const f = this.f;
+          const lo = f.min === '' ? null : Number(f.min);
+          const hi = f.max === '' ? null : Number(f.max);
+          let rows = this.all.filter((p) => {
+            if (f.category && p.category_id != f.category) return false;
+            if (f.brand && p.brand_id != f.brand) return false;
+            if (f.type && db.productType(p) !== f.type) return false;
+            if (f.device && p.device_type !== f.device) return false;
+            if (f.condition && (p.condition || 'new') !== f.condition) return false;
+            const price = SHOP.priceOf(p);
+            if (lo !== null && price < lo) return false;
+            if (hi !== null && hi > 0 && price > hi) return false;
+            if (f.inStock && !SHOP.inStock(p)) return false;
+            return SHOP.matches(p, f.q);
+          });
+          const featured = this.featuredIds;
+          switch (this.sort) {
+            case 'price_asc': rows = utils.sortBy(rows, (p) => SHOP.priceOf(p)); break;
+            case 'price_desc': rows = utils.sortBy(rows, (p) => SHOP.priceOf(p), 'desc'); break;
+            case 'newest': rows = utils.sortBy(rows, 'created_at', 'desc'); break;
+            case 'name': rows = utils.sortBy(rows, (p) => String(p.name).toLowerCase()); break;
+            default:
+              rows = utils.sortBy(rows, (p) => {
+                const i = featured.indexOf(Number(p.id));
+                return (i >= 0 ? i : 500) + (SHOP.inStock(p) ? 0 : 1000);
+              });
+          }
+          return rows;
+        },
+        get visible() { return this.filtered.slice(0, this.limit); },
+        get activeChips() {
+          const f = this.f, out = [];
+          if (f.q) out.push({ key: 'q', label: '“' + f.q + '”' });
+          if (f.category) out.push({ key: 'category', label: db.categoryName(f.category) });
+          if (f.brand) out.push({ key: 'brand', label: db.brandName(f.brand) });
+          if (f.type) out.push({ key: 'type', label: db.productTypeLabel(f.type) });
+          if (f.device) out.push({ key: 'device', label: db.deviceTypeLabel(f.device) });
+          if (f.condition) out.push({ key: 'condition', label: utils.titleCase(f.condition) });
+          if (f.min !== '' || f.max !== '') {
+            out.push({ key: 'price', label: 'Rs. ' + (f.min !== '' ? utils.num(f.min) : '0') + ' – ' + (f.max !== '' ? utils.num(f.max) : 'any') });
+          }
+          if (f.inStock) out.push({ key: 'inStock', label: 'In stock only' });
+          return out;
+        },
+
+        reset() { this.limit = 12; this.syncUrl(); },
+        clearOne(key) {
+          if (key === 'price') { this.f.min = ''; this.f.max = ''; }
+          else if (key === 'inStock') this.f.inStock = false;
+          else this.f[key] = '';
+          this.reset();
+        },
+        clearAll() {
+          this.f = { q: '', category: '', brand: '', type: '', device: '', condition: '', min: '', max: '', inStock: false };
+          this.sort = 'featured';
+          this.reset();
+        },
+        syncUrl() {
+          const f = this.f, q = new URLSearchParams();
+          if (f.q) q.set('q', f.q);
+          if (f.category) q.set('category', f.category);
+          if (f.brand) q.set('brand', f.brand);
+          if (f.type) q.set('type', f.type);
+          if (f.device) q.set('device', f.device);
+          if (f.condition) q.set('condition', f.condition);
+          if (f.min !== '') q.set('min', f.min);
+          if (f.max !== '') q.set('max', f.max);
+          if (f.inStock) q.set('stock', '1');
+          if (this.sort !== 'featured') q.set('sort', this.sort);
+          const s = q.toString();
+          try { history.replaceState(null, '', location.pathname + (s ? '?' + s : '')); } catch (e) { /* ignore */ }
+        },
+
+        specLine(p) {
+          const s = p.specs || {};
+          const parts = [s.processor, s.ram, s.storage, s.screen].filter(Boolean);
+          return parts.length ? parts.join(' · ') : (p.model && p.model !== p.name ? p.model : '');
+        },
+        stockClass(p) {
+          if (!SHOP.inStock(p)) return SHOP.commerce().allow_backorder ? 'text-amber-600' : 'text-rose-600';
+          const q = SHOP.stockOf(p);
+          return q > 0 && q <= 3 ? 'text-amber-600' : 'text-emerald-600';
+        },
+        add(p) {
+          try {
+            SHOP.cart.add(p.id, 1);
+            this.adding = p.id;
+            SHOP.toast(SHOP.title(p) + ' added to your cart.', 'success');
+            setTimeout(() => { if (this.adding === p.id) this.adding = 0; }, 1400);
+          } catch (e) {
+            SHOP.toast(e.message, 'error');
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

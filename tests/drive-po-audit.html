@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Audit: PO state machine + arithmetic</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async (o) => { log('   CONFIRM: ' + (o && o.title)); return true; };
+      ui.toast = (m, t) => log('   TOAST[' + t + '] ' + m);
+
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        if (!body) throw new Error('no ' + fnName);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+      let seq = 0;
+      const luhn = (d14) => { let s = 0; for (let i = 0; i < 14; i++) { let d = +d14[i]; if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; } s += d; } return String((10 - (s % 10)) % 10); };
+      const unit = (product) => { seq++; if (db.serialType(product) === 'serial') return 'AUD' + String(seq).padStart(5, '0'); const base = '35' + String(700000000000 + seq).slice(0, 12); return base + luhn(base); };
+      const fillSerials = (page) => page.lines.filter((l) => l.serialized).forEach((l) => {
+        const p = db.find('products', l.product_id);
+        l.unitsText = Array.from({ length: Number(l.expected) || 0 }, () => unit(p)).join('\n');
+        page.revalidate();
+      });
+
+      await source('purchase-orders.html', 'purchaseOrdersPage');
+      await source('purchase-order-create.html', 'purchaseOrderCreatePage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+      await source('purchase-create.html', 'purchaseCreatePage');
+      await source('purchase-view.html', 'purchaseViewPage');
+
+      const admin = db.all('users').find((u) => u.username === 'admin');
+      session.logout(); session.login(admin);
+
+      /* ============ A. a delivery with NO order line flips the PO to partial ============ */
+      log('=== A: receive against a PO but deliver only off-order goods');
+      const poA = db.all('purchase_orders').find((p) => p.status === 'ordered');
+      const poAProductIds = db.where('purchase_order_items', { po_id: poA.id }).map((i) => String(i.product_id));
+      log('   PO ' + poA.po_no + ' status=' + poA.status + ' lines=' + poAProductIds.join(','));
+      let rec = mk(purchaseCreatePage, '?po=' + poA.id);
+      eq(!!rec.po, true, 'A: the receiving page picked the order up');
+      while (rec.lines.length) rec.removeLine(0);                        // delete every pre-filled line
+      const offOrder = rec.products.find((p) => !p.serialized && !poAProductIds.includes(String(p.id)));
+      rec.addLine(offOrder.id);                                          // a product that is NOT on the order
+      eq(rec.lines[0].po_item_id, null, 'A: that line is not tied to any order line');
+      rec.form.pay_amount = 0;
+      noNav(() => rec.save());
+      const poAAfter = db.find('purchase_orders', poA.id);
+      const recvA = db.where('purchase_order_items', { po_id: poA.id }).reduce((a, i) => a + (Number(i.received_quantity) || 0), 0);
+      eq(recvA, 0, 'A: nothing was actually received against the order');
+      eq(poAAfter.status, 'ordered', 'A: >>> the order must still be "ordered"');
+      const vA = mk(purchaseOrderViewPage, '?id=' + poA.id);
+      eq(vA.canEdit, true, 'A: >>> with nothing received the order must still be editable');
+      const eA = mk(purchaseOrderCreatePage, '?id=' + poA.id);
+      eq(eA.blocked, null, 'A: >>> the edit page must not be blocked');
+      log('   -> view says received=' + vA.received + '/' + vA.ordered + ', deliveries listed=' + vA.receipts.length + ', status=' + poAAfter.status);
+
+      /* ============ B. close short leaves the order "outstanding" for ever ============ */
+      log('=== B: close a partial order short');
+      const poB = db.all('purchase_orders').find((p) => p.status === 'partial');
+      let vB = mk(purchaseOrderViewPage, '?id=' + poB.id);
+      const shortUnits = vB.pendingUnits, shortValue = vB.pendingValue;
+      log('   ' + poB.po_no + ': ' + shortUnits + ' units / ' + utils.money(shortValue) + ' outstanding before closing short');
+      await noNavAsync(() => vB.closeShort());
+      eq(db.find('purchase_orders', poB.id).status, 'completed', 'B: closing short completes the order');
+      vB = mk(purchaseOrderViewPage, '?id=' + poB.id);
+      eq(vB.pendingUnits, 0, 'B: >>> a closed-short order must have nothing "still to come"');
+      eq(vB.pendingValue, 0, 'B: >>> and no outstanding value');
+      const listB = mk(purchaseOrdersPage, '?range=all');
+      listB.f.branch = String(poB.branch_id);
+      const rowB = listB.rows.find((r) => String(r.id) === String(poB.id));
+      if (rowB) {
+        eq(rowB.pendingUnits, 0, 'B: >>> the list row must not still count the written-off units');
+        eq(rowB.pendingValue, 0, 'B: >>> nor their value (shows in the table + the CSV export)');
+      } else { log('   (list row for ' + poB.po_no + ' not in this branch view)'); }
+
+      /* ============ C. editing an order silently deletes lines of de-activated products ============ */
+      log('=== C: edit a draft whose product was de-activated');
+      const poC = db.all('purchase_orders').find((p) => p.status === 'draft');
+      const itemsC = db.where('purchase_order_items', { po_id: poC.id });
+      const victim = itemsC[0];
+      const subBeforeC = Number(poC.subtotal), totBeforeC = Number(poC.total);
+      db.update('products', victim.product_id, { is_active: 0 });
+      log('   ' + poC.po_no + ' has ' + itemsC.length + ' lines; product ' + victim.product_id + ' (' + db.productLabel(victim.product_id) + ') de-activated');
+      const eC = mk(purchaseOrderCreatePage, '?id=' + poC.id);
+      eq(eC.lines.length, itemsC.length, 'C: >>> every stored line must be loaded into the editor');
+      noNav(() => eC.save(false));
+      const itemsCAfter = db.where('purchase_order_items', { po_id: poC.id });
+      eq(itemsCAfter.length, itemsC.length, 'C: >>> saving must not drop the line');
+      eq(itemsCAfter.some((i) => String(i.product_id) === String(victim.product_id)), true, 'C: >>> the de-activated product is still on the order');
+      log('   -> stored subtotal ' + subBeforeC + ' -> ' + db.find('purchase_orders', poC.id).subtotal + ', total ' + totBeforeC + ' -> ' + db.find('purchase_orders', poC.id).total + ' (lost line: ' + victim.quantity + ' x ' + victim.unit_cost + ' = ' + victim.total + ')');
+      db.update('products', victim.product_id, { is_active: 1 });
+
+      /* ============ D. outstanding value ignores the order discount ============ */
+      log('=== D: an order with a discount');
+      let cre = mk(purchaseOrderCreatePage, '');
+      cre.selectSupplier(db.all('suppliers').find((s) => s.is_active));
+      const bulk = cre.products.find((p) => !p.serialized);
+      cre.addLine(bulk.id);
+      cre.lines[0].qty = 10; cre.lines[0].unit_cost = 1000; cre.recalc();
+      cre.form.discount = 2000;
+      noNav(() => cre.save(true));
+      const poD = db.all('purchase_orders').slice(-1)[0];
+      const vD = mk(purchaseOrderViewPage, '?id=' + poD.id);
+      log('   ' + poD.po_no + ': subtotal ' + poD.subtotal + ', discount ' + poD.discount_amount + ', total ' + poD.total);
+      log('   view: outstanding ' + vD.pendingValue + ', received ' + vD.receivedValue + ', order value ' + poD.total);
+      ok(vD.pendingValue <= Number(poD.total), 'D: >>> outstanding value must never exceed the order value (' + vD.pendingValue + ' vs ' + poD.total + ')');
+
+      /* ============ E. over-delivery ============ */
+      log('=== E: receive more than was ordered');
+      let recE = mk(purchaseCreatePage, '?po=' + poD.id);
+      recE.lines[0].qty = 15;                                            // 10 were ordered
+      recE.form.pay_amount = 0;
+      noNav(() => recE.save());
+      const itE = db.where('purchase_order_items', { po_id: poD.id })[0];
+      log('   order line: quantity ' + itE.quantity + ', received_quantity ' + itE.received_quantity);
+      const vE = mk(purchaseOrderViewPage, '?id=' + poD.id);
+      const listE = mk(purchaseOrdersPage, '?range=all');
+      listE.f.branch = String(poD.branch_id);
+      const rowE = listE.rows.find((r) => String(r.id) === String(poD.id));
+      log('   view received=' + vE.received + '  list received=' + (rowE ? rowE.received : 'n/a'));
+      if (rowE) eq(vE.received, rowE.received, 'E: the view and the list agree on how much was received');
+
+      /* ============ F. cancel the over-delivery ============ */
+      log('=== F: cancel that delivery');
+      const grnE = db.all('purchases').slice(-1)[0];
+      const pvE = mk(purchaseViewPage, '?id=' + grnE.id);
+      await noNavAsync(() => pvE.cancelPurchase());
+      const itF = db.where('purchase_order_items', { po_id: poD.id })[0];
+      const poF = db.find('purchase_orders', poD.id);
+      log('   after cancel: received_quantity=' + itF.received_quantity + ' status=' + poF.status + ' closed_at=' + poF.closed_at);
+      eq(itF.received_quantity, 0, 'F: the cancelled units are outstanding again');
+      eq(poF.status, 'ordered', 'F: the order is open again');
+
+      /* ============ G. cancel a delivery of off-order goods ============ */
+      log('=== G: cancel the purchase from test A (nothing of it was on the order)');
+      const grnA = db.all('purchases').find((p) => String(p.purchase_order_id) === String(poA.id) && p.status === 'received');
+      if (grnA) {
+        const before = db.where('purchase_order_items', { po_id: poA.id }).map((i) => i.received_quantity).join(',');
+        const pvA = mk(purchaseViewPage, '?id=' + grnA.id);
+        await noNavAsync(() => pvA.cancelPurchase());
+        const after = db.where('purchase_order_items', { po_id: poA.id }).map((i) => i.received_quantity).join(',');
+        const poAF = db.find('purchase_orders', poA.id);
+        log('   received_quantity ' + before + ' -> ' + after + ', order status ' + poAF.status);
+      }
+
+      /* ============ H. a cancelled order that still has a live delivery ============ */
+      log('=== H: cancel an order that has already been part-delivered, then cancel the delivery');
+      // build: fresh order, send, part-receive, cancel order, cancel delivery
+      let cH = mk(purchaseOrderCreatePage, '');
+      cH.selectSupplier(db.all('suppliers').find((s) => s.is_active));
+      cH.addLine(bulk.id); cH.lines[0].qty = 10; cH.lines[0].unit_cost = 500; cH.recalc();
+      noNav(() => cH.save(true));
+      const poH = db.all('purchase_orders').slice(-1)[0];
+      let recH = mk(purchaseCreatePage, '?po=' + poH.id);
+      recH.lines[0].qty = 4; recH.form.pay_amount = 0;
+      noNav(() => recH.save());
+      const grnH = db.all('purchases').slice(-1)[0];
+      let vH = mk(purchaseOrderViewPage, '?id=' + poH.id);
+      await noNavAsync(() => vH.cancelOrder());
+      const poHc = db.find('purchase_orders', poH.id);
+      log('   order cancelled: status=' + poHc.status + ' cancelled_at=' + poHc.cancelled_at + ' closed_at=' + poHc.closed_at);
+      const pvH = mk(purchaseViewPage, '?id=' + grnH.id);
+      await noNavAsync(() => pvH.cancelPurchase());
+      const poHf = db.find('purchase_orders', poH.id);
+      const itH = db.where('purchase_order_items', { po_id: poH.id })[0];
+      log('   delivery cancelled: status=' + poHf.status + ' received_quantity=' + itH.received_quantity);
+      const vHf = mk(purchaseOrderViewPage, '?id=' + poH.id);
+      log('   view: received=' + vHf.received + ' pendingUnits=' + vHf.pendingUnits + ' steps[2]=' + JSON.stringify(vHf.steps[2].detail) + ' state=' + vHf.steps[2].state);
+
+      /* ============ I. close short then cancel the delivery ============ */
+      log('=== I: close short, then cancel the delivery that made it partial');
+      let cI = mk(purchaseOrderCreatePage, '');
+      cI.selectSupplier(db.all('suppliers').find((s) => s.is_active));
+      cI.addLine(bulk.id); cI.lines[0].qty = 10; cI.lines[0].unit_cost = 500; cI.recalc();
+      noNav(() => cI.save(true));
+      const poI = db.all('purchase_orders').slice(-1)[0];
+      let recI = mk(purchaseCreatePage, '?po=' + poI.id);
+      recI.lines[0].qty = 4; recI.form.pay_amount = 0;
+      noNav(() => recI.save());
+      const grnI = db.all('purchases').slice(-1)[0];
+      let vI = mk(purchaseOrderViewPage, '?id=' + poI.id);
+      await noNavAsync(() => vI.closeShort());
+      const poIc = db.find('purchase_orders', poI.id);
+      log('   closed short: status=' + poIc.status + ' closed_at=' + poIc.closed_at);
+      const pvI = mk(purchaseViewPage, '?id=' + grnI.id);
+      await noNavAsync(() => pvI.cancelPurchase());
+      const poIf = db.find('purchase_orders', poI.id);
+      log('   delivery cancelled: status=' + poIf.status + ' closed_at=' + poIf.closed_at);
+      eq(poIf.status, 'completed', 'I: an order deliberately closed short should stay closed');
+
+      /* ============ J. stored totals vs stored lines ============ */
+      log('=== J: stored totals vs stored lines, every order');
+      db.all('purchase_orders').forEach((p) => {
+        const its = db.where('purchase_order_items', { po_id: p.id });
+        const lineSum = utils.round2(its.reduce((a, i) => a + (Number(i.total) || 0), 0));
+        if (Math.abs(lineSum - Number(p.subtotal)) > 0.011) { fails++; L.push('FAIL  J: ' + p.po_no + ' subtotal ' + p.subtotal + ' != sum of lines ' + lineSum); }
+        const t = utils.round2(Number(p.subtotal) - Number(p.discount_amount || 0) + Number(p.tax_amount || 0));
+        if (Math.abs(t - Number(p.total)) > 0.011) { fails++; L.push('FAIL  J: ' + p.po_no + ' total ' + p.total + ' != subtotal-disc+tax ' + t); }
+        if (p.status === 'draft' && p.ordered_at) { fails++; L.push('FAIL  J: ' + p.po_no + ' is a draft but carries ordered_at'); }
+        if (p.status === 'completed' && !p.closed_at) { fails++; L.push('FAIL  J: ' + p.po_no + ' is completed but has no closed_at'); }
+        if (p.status !== 'cancelled' && p.cancelled_at) { fails++; L.push('FAIL  J: ' + p.po_no + ' is ' + p.status + ' but carries cancelled_at'); }
+        if (p.status !== 'completed' && p.closed_at) { fails++; L.push('FAIL  J: ' + p.po_no + ' is ' + p.status + ' but carries closed_at'); }
+      });
+      log('   checked ' + db.all('purchase_orders').length + ' orders');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('AUDIT ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

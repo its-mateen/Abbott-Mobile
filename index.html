@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Abbott Mobiles</title>
+  <script>
+    // Entry point. login.html decides where everyone goes: a signed-in user (whether "Keep me signed in" put the
+    // session in localStorage or sessionStorage) goes on to their home — or to the password change first when an
+    // administrator set a temporary one — and a deactivated user, or staff of a deactivated branch, is signed out
+    // and asked to sign in. A ?next=<page>.html link is passed along so it opens after sign-in.
+    (function () {
+      var next = '';
+      try { var n = new URLSearchParams(location.search).get('next'); if (n && /^[a-z0-9-]+\.html(\?.*)?$/i.test(n)) next = '?next=' + encodeURIComponent(n); } catch (e) { /* ignore */ }
+      location.replace('login.html' + next);
+    })();
+  </script>
+  <meta http-equiv="refresh" content="0; url=login.html">
+</head>
+<body style="font-family:system-ui,sans-serif;padding:2rem;color:#334155">
+  Redirecting… <a href="login.html">Continue to sign in</a>
+</body>
+</html>

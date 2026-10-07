@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: money-integrity core</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Service-level proof for the money-integrity core in app.js: non-cash money reaches a bank/wallet account,
+    // cheques settle (and unsettle) exactly the ledger entry they made, bank drops arrive, the drawer tally never
+    // counts a sale payment twice, average cost follows units that leave at their own cost, barcodes match with
+    // or without the EAN check digit, and the seed's settlements tie out.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x !== undefined ? '  [' + x + ']' : '')); };
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+    const throws = (fn, re, m) => { try { fn(); ok(false, m, 'did not throw'); } catch (e) { ok(!re || re.test(e.message), m, e.message); } };
+
+    function main() {
+      const { db, utils, ui, session, bank, ledger, shift, stock } = ABM;
+      db.reset();
+      ui.toast = () => {}; ui.error = () => {}; ui.warn = () => {}; ui.success = () => {};
+      const as = (u) => { session.logout(); session.login(db.all('users').find((x) => x.username === u)); };
+      as('manager');
+      const B = session.branchId();
+
+      /* 1. the seed ties out */
+      log('=== 1. seed settlements');
+      const accs = db.all('bank_accounts');
+      ok(accs.some((a) => a.account_type === 'wallet' && /jazz/i.test(a.name)) && accs.some((a) => a.account_type === 'wallet' && /easy/i.test(a.name)), '1: JazzCash and EasyPaisa merchant wallets exist');
+      ok(accs.every((a) => Math.abs(utils.round2(db.where('bank_transactions', { account_id: a.id }).reduce((s, t) => s + t.signed, 0)) - utils.round2(a.balance)) < 0.01), '1: every account balance equals the sum of its entries');
+      ok(accs.every((a) => { let run = 0, low = 0; utils.sortBy(db.where('bank_transactions', { account_id: a.id }), (t) => t.txn_date + '|' + String(t.id).padStart(8, '0')).forEach((t) => { run += t.signed; low = Math.min(low, run); }); return low > -0.01; }), '1: no account ever dips below zero');
+      const liveSales = new Set(db.all('sales').filter((s) => s.status !== 'void').map((s) => s.id));
+      const nonCashPays = db.all('sale_payments').filter((p) => bank.isNonCash(p.method) && liveSales.has(p.sale_id));
+      ok(nonCashPays.length > 0 && nonCashPays.every((p) => p.bank_txn_id && db.find('bank_transactions', p.bank_txn_id)), '1: every non-cash sale payment points at a bank settlement', nonCashPays.length);
+      ok(db.all('sale_payments').filter((p) => p.method === 'cash').every((p) => !p.bank_txn_id), '1: cash sale payments never do');
+      ok(db.all('supplier_transactions').filter((t) => t.type === 'payment' && bank.isNonCash(t.payment_method)).every((t) => t.bank_txn_id), '1: supplier transfers left a bank account');
+      ok(db.all('expenses').filter((e) => bank.isNonCash(e.payment_method)).every((e) => e.bank_txn_id), '1: expenses paid by transfer left a bank account');
+      const settleTotal = utils.round2(db.all('bank_transactions').filter((t) => t.reference_type === 'settlement').reduce((s, t) => s + t.amount, 0));
+      const sourceTotal = utils.round2(nonCashPays.reduce((s, p) => s + Number(p.amount), 0)
+        + db.all('customer_transactions').filter((t) => t.type === 'payment' && bank.isNonCash(t.payment_method) && !t.sale_payment_id).reduce((s, t) => s + Number(t.credit), 0)
+        + db.all('repair_payments').filter((p) => bank.isNonCash(p.method)).reduce((s, p) => s + Number(p.amount), 0));
+      near(settleTotal, sourceTotal, '1: settlements add up to exactly the non-cash money taken');
+      ok(db.all('products').filter((p) => p.barcode).every((p) => /^\d{13}$/.test(p.barcode) && utils.eanCheck(p.barcode.slice(0, 12)) === p.barcode[12]), '1: every seeded barcode is a full, valid EAN-13');
+
+      /* 2. routing */
+      log('=== 2. where non-cash money lands');
+      const walletJ = accs.find((a) => /jazz/i.test(a.name)), cur1 = accs.find((a) => a.branch_id === 1 && a.account_type === 'current');
+      ok(String(bank.accountFor('jazzcash', 1)) === String(walletJ.id), '2: JazzCash → the JazzCash wallet');
+      ok(String(bank.accountFor('card', 1)) === String(cur1.id), '2: card → the branch current account');
+      ok(bank.receive('cash', 500, { branchId: 1 }) === null && bank.receive('store_credit', 500, { branchId: 1 }) === null, '2: cash and store credit never touch a bank');
+      const before = bank.balance(walletJ.id);
+      const r = bank.receive('jazzcash', 1234, { branchId: 1, reference: 'TID-1', ref: { type: 'sale_payment', id: 999 } });
+      near(bank.balance(walletJ.id), before + 1234, '2: a JazzCash receipt raises the wallet');
+      ok(r.type === 'receipt' && r.reference_type === 'sale_payment', '2: as a receipt linked to its document');
+      bank.undo(r.id, 'voided');
+      near(bank.balance(walletJ.id), before, '2: undo puts it back');
+      ok(bank.undo(r.id) === null, '2: undoing twice does nothing');
+      db.setSetting('payment_accounts', { 1: { card: walletJ.id } });
+      ok(String(bank.accountFor('card', 1)) === String(walletJ.id), '2: the saved mapping wins over the fallback');
+      db.update('bank_accounts', walletJ.id, { is_active: 0 });
+      ok(String(bank.accountFor('card', 1)) === String(cur1.id), '2: a closed mapped account falls back to the branch account');
+      db.update('bank_accounts', walletJ.id, { is_active: 1 });
+      throws(() => bank.pay('bank_transfer', 999999999, { branchId: 1 }), /overdraw/, '2: paying more than the account holds is refused');
+
+      /* 3. cheques and ledgers */
+      log('=== 3. cheques settle exactly what they recorded');
+      const cust = db.all('customers').find((c) => !c.is_walkin && c.balance > 20000);
+      const bal0 = cust.balance;
+      const linked = bank.cheque.receive({ cheque_no: 'T-1', amount: 20000, party_type: 'customer', party_id: cust.id, party_name: cust.name, branch_id: B, postLedger: true });
+      near(db.find('customers', cust.id).balance, bal0 - 20000, '3: a khata cheque lowers the balance when recorded');
+      ok(!!linked.ledger_txn_id && db.find('customer_transactions', linked.ledger_txn_id).cheque_id === linked.id, '3: the ledger row and the cheque point at each other');
+      bank.cheque.bounce(linked.id, 'Insufficient funds');
+      near(db.find('customers', cust.id).balance, bal0, '3: a bounce puts back exactly that amount');
+      bank.cheque.cancel(linked.id, 'returned to customer');
+      near(db.find('customers', cust.id).balance, bal0, '3: cancelling after a bounce changes nothing more');
+      throws(() => bank.cheque.bounce(linked.id), /cancelled/, '3: a cancelled cheque cannot bounce');
+      const loose = bank.cheque.receive({ cheque_no: 'T-2', amount: 7000, party_type: 'customer', party_id: cust.id, party_name: cust.name, branch_id: B });
+      bank.cheque.bounce(loose.id, 'Signature mismatch');
+      near(db.find('customers', cust.id).balance, bal0, '3: a cheque that never touched the ledger does not change it when it bounces');
+      const sup = db.all('suppliers').find((x) => x.balance > 10000);
+      const sbal = sup.balance;
+      const iss = bank.cheque.issue({ cheque_no: 'OUT-9', amount: 10000, account_id: cur1.id, party_type: 'supplier', party_id: sup.id, party_name: sup.name, branch_id: B, postLedger: true });
+      near(db.find('suppliers', sup.id).balance, sbal - 10000, '3: a supplier cheque lowers what we owe');
+      bank.cheque.cancel(iss.id, 'wrong amount');
+      near(db.find('suppliers', sup.id).balance, sbal, '3: cancelling it puts the payable back');
+
+      /* 4. drawer */
+      log('=== 4. the drawer');
+      as('cashier');
+      const me = session.user();
+      let sh = shift.current(me.id, B) || shift.open({ branchId: B, userId: me.id, float: 5000 });
+      const drop0 = bank.balance(cur1.id);
+      const mv = shift.movement(sh.id, 'pay_in', 20000, 'top up');
+      const drop = shift.movement(sh.id, 'bank_drop', 15000, 'midday drop', { accountId: cur1.id, reference: 'SLIP-7' });
+      near(bank.balance(cur1.id), drop0 + 15000, '4: a bank drop arrives in the account');
+      ok(!!drop.bank_txn_id && db.find('bank_transactions', drop.bank_txn_id).reference_type === 'cash_movement', '4: linked to its cash movement');
+      throws(() => shift.movement(sh.id, 'bank_drop', 10, 'x', { accountId: 999 }), /open bank account/, '4: a bank drop needs a real account');
+      // a sale payment mirrored on the ledger is counted once
+      const t0 = shift.tally(sh.id).expected;
+      const sale = db.insert('sales', { invoice_no: 'T-INV', branch_id: B, customer_id: cust.id, user_id: me.id, shift_id: sh.id, sale_date: utils.now(), subtotal: 3000, total: 3000, paid_amount: 3000, due_amount: 0, status: 'completed' });
+      const sp = db.insert('sale_payments', { sale_id: sale.id, method: 'cash', amount: 3000 });
+      ledger.customer(cust.id, B, 'payment', 0, 3000, { paymentMethod: 'cash', referenceType: 'sale', referenceId: sale.id, salePaymentId: sp.id });
+      near(shift.tally(sh.id).expected, t0 + 3000, '4: cash taken once is counted once (the mirrored ledger credit is skipped)');
+      // repair refund and supplier refund
+      const job = db.all('repair_jobs').find((j) => String(j.branch_id) === String(B));
+      const t1 = shift.tally(sh.id).expected;
+      db.insert('repair_payments', { job_id: job.id, method: 'cash', amount: 800, kind: 'refund', shift_id: sh.id, created_by: me.id });
+      near(shift.tally(sh.id).expected, t1 - 800, '4: a cash repair refund leaves the drawer');
+      db.insert('supplier_transactions', { supplier_id: sup.id, branch_id: B, type: 'refund', debit: 0, credit: 1200, payment_method: 'cash', created_by: me.id });
+      near(shift.tally(sh.id).expected, t1 - 800 + 1200, '4: a supplier cash refund comes into it');
+      ok(shift.tally(sh.id).lines.some((l) => l.key === 'repair_refunds') && shift.tally(sh.id).lines.some((l) => l.key === 'supplier_refunds'), '4: both show as their own lines');
+
+      /* 5. stock */
+      log('=== 5. average cost follows serialized units');
+      as('manager');
+      const p = db.all('products').find((x) => x.is_serialized && x.is_active);
+      const row = stock.row(B, p.id);
+      const q0 = row.quantity;
+      const u1 = stock.addImeis(B, p.id, ['35' + String(Date.now()).slice(-13)], 1000, 'purchase')[0];
+      const u2 = stock.addImeis(B, p.id, ['86' + String(Date.now() + 7).slice(-13)], 3000, 'purchase')[0];
+      const valueBefore = utils.round2(stock.row(B, p.id).avg_cost * stock.row(B, p.id).quantity);
+      stock.remove(B, p.id, 1, 'sale', {}, { imeiId: u2.id, unitCost: 3000 });
+      const r2 = stock.row(B, p.id);
+      ok(Math.abs(utils.round2(r2.avg_cost * r2.quantity) - (valueBefore - 3000)) <= 0.01 * r2.quantity + 0.01, '5: the shelf loses exactly the unit\'s own cost (to the paisa of a rounded average)', utils.round2(r2.avg_cost * r2.quantity) + ' vs ' + (valueBefore - 3000));
+      ok(r2.quantity === q0 + 1, '5: one unit left of the two added');
+
+      /* 6. barcodes */
+      log('=== 6. barcodes');
+      const code12 = '880100007919';
+      const code13 = utils.toEan13(code12);
+      ok(code13.length === 13 && utils.sameBarcode(code12, code13) && utils.sameBarcode(code13, code12), '6: a 12-digit code and its EAN-13 match both ways');
+      ok(!utils.sameBarcode(code12, code12.slice(0, 11) + '9' + '0'), '6: a different code does not');
+      ok(!utils.sameBarcode(code12, code12 + '0') || utils.eanCheck(code12) === '0', '6: a wrong check digit does not');
+
+      /* 7. two tabs */
+      log('=== 7. two tabs');
+      const snapshot = JSON.parse(localStorage.getItem('abm.db.v1'));
+      snapshot.customers[0].name = 'Changed In Tab 2';
+      const adopted = db.adopt(JSON.stringify(snapshot));
+      const seen = (db.find('customers', snapshot.customers[0].id) || {}).name;
+      ok(adopted && seen === 'Changed In Tab 2', '7: another tab\'s save is adopted before the next write', 'adopted=' + adopted + ' version=' + snapshot.__version + ' healthy=' + db.isHealthy(snapshot) + ' saw=' + seen);
+      ok(!db.adopt('{"broken'), '7: a half-written copy is ignored');
+    }
+
+    setTimeout(() => {
+      try { main(); } catch (e) { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach((l) => console.log('DRIVE ' + l));
+    }, 600);
+  </script>
+</body>
+</html>

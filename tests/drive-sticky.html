@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: sticky header + cart drawer</title>
+  <style>body{font:14px/1.5 system-ui;margin:0;padding:12px} iframe{width:1100px;height:700px;border:1px solid #ccc}</style>
+</head>
+<body>
+  <pre id="out">running…</pre>
+  <iframe id="f" src="../shop/index.html"></iframe>
+  <script>
+    // Loads the storefront, scrolls it, and checks the header stays pinned at the top.
+    var L = [], fails = 0;
+    function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+    var f = document.getElementById('f');
+    f.addEventListener('load', function () {
+      setTimeout(function () {
+        try {
+          var w = f.contentWindow, d = f.contentDocument;
+          var header = d.querySelector('.shop-header');
+          ok('header exists', !!header);
+          var cs = w.getComputedStyle(header);
+          ok('header is sticky', cs.position === 'sticky', cs.position);
+          ok('header pinned to top:0', cs.top === '0px', cs.top);
+          ok('body overflow-x does not break sticky',
+            ['clip', 'visible'].indexOf(w.getComputedStyle(d.body).overflowX) >= 0,
+            w.getComputedStyle(d.body).overflowX);
+
+          // the sticky parent must be the page, not the small injected wrapper
+          var wrap = header.parentElement;
+          var wrapDisplay = w.getComputedStyle(wrap).display;
+          var stickyParentHeight = wrapDisplay === 'contents' ? d.body.scrollHeight : wrap.getBoundingClientRect().height;
+          ok('sticky containing block spans the page', stickyParentHeight > 1500,
+            'display=' + wrapDisplay + ' height=' + Math.round(stickyParentHeight));
+
+          var before = header.getBoundingClientRect().top;
+          d.documentElement.scrollTop = 1200; w.scrollTo(0, 1200);
+          setTimeout(function () {
+            var y = w.scrollY || d.documentElement.scrollTop || 0;
+            var after = header.getBoundingClientRect().top;
+            ok('header stays pinned after scrolling', y < 50 || (after >= -1 && after <= 2),
+              'before=' + Math.round(before) + ' after=' + Math.round(after) + ' scrollY=' + Math.round(y));
+
+            // header no longer carries a WhatsApp button, and search is an icon
+            ok('no WhatsApp button in the header', !header.querySelector('.shop-wa'));
+            ok('search is an icon button', !!header.querySelector('button[aria-label="Search products"]'));
+            ok('search bar hidden until opened', !!d.querySelector('.shop-searchbar[style*="display: none"], .shop-searchbar[hidden]') || !d.querySelector('.shop-searchbar'));
+
+            // cart drawer
+            var cartBtn = header.querySelector('button[aria-label="Your cart"]');
+            ok('cart is a button (opens a drawer)', !!cartBtn);
+            if (cartBtn) {
+              cartBtn.click();
+              // the drawer slides in (CSS transition); poll until it has settled instead of sampling once
+              var tries = 0;
+              var check = function () {
+                var drawer = d.querySelector('.shop-cart-drawer');
+                var r = drawer ? drawer.getBoundingClientRect() : null;
+                var settled = r && Math.abs(r.right - w.innerWidth) < 30;
+                if (!settled && ++tries < 40) { setTimeout(check, 50); return; }
+                var visible = drawer && w.getComputedStyle(drawer).display !== 'none';
+                ok('cart drawer opens on the right', !!visible);
+                if (drawer) ok('drawer is anchored to the right edge', !!settled, 'right=' + Math.round(r.right) + ' vw=' + w.innerWidth + ' after ' + (tries * 50) + 'ms');
+                finish();
+              };
+              setTimeout(check, 250);
+            } else { finish(); }
+          }, 250);
+        } catch (e) { fails++; L.push('FAIL  threw: ' + e.message); finish(); }
+      }, 1400);
+    });
+    function finish() {
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }
+  </script>
+</body>
+</html>

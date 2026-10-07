@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE · online orders admin</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/shop.js"></script>
+</head>
+<body data-public>
+<pre id="out"></pre>
+<iframe id="frame" style="width:1200px;height:600px;border:1px solid #ccc"></iframe>
+<script>
+(function () {
+  var pass = 0, fail = 0, log = [];
+  function say(m) { log.push(m); console.log('DRIVE ' + m); }
+  function ok(cond, label, extra) {
+    if (cond) { pass++; say('PASS ' + label + (extra ? '  [' + extra + ']' : '')); }
+    else { fail++; say('FAIL ' + label + (extra ? '  [' + extra + ']' : '')); }
+  }
+  function eq(a, b, label) { ok(String(a) === String(b), label, 'got=' + a + ' want=' + b); }
+  function done() {
+    say('TOTAL pass=' + pass + ' fail=' + fail);
+    console.log('RESULT: ' + (fail === 0 ? 'PASS' : 'FAIL'));
+    document.getElementById('out').textContent = log.join('\n') + '\nRESULT: ' + (fail === 0 ? 'PASS' : 'FAIL');
+  }
+
+  /* ---- load a page's inline component factory and run it outside Alpine ---- */
+  function loadComponent(url, fnName, cb) {
+    var x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.onload = function () {
+      var html = x.responseText;
+      var i = html.indexOf('function ' + fnName);
+      if (i < 0) { fail++; say('FAIL could not find ' + fnName + ' in ' + url); return cb(null); }
+      var start = html.lastIndexOf('<script>', i) + '<script>'.length;
+      var end = html.indexOf('<' + '/script>', i);
+      try { (0, eval)(html.slice(start, end)); } catch (e) { fail++; say('FAIL eval ' + fnName + ': ' + e.message); return cb(null); }
+      cb(window[fnName]);
+    };
+    x.onerror = function () { fail++; say('FAIL fetch ' + url); cb(null); };
+    x.send();
+  }
+  /** Give a plain component object the few Alpine magics the page uses. */
+  function alpinify(c) {
+    c.$nextTick = function (fn) { if (fn) fn(); };
+    c.$refs = new Proxy({}, { get: function () { return null; } });
+    c.$watch = function () {};
+    c.$el = document.body;
+    if (typeof c.init === 'function') c.init();
+    return c;
+  }
+
+  var db = ABM.db, utils = ABM.utils;
+  var order, seriaP, plainP, PLAIN_QTY = 2, before = {};
+
+  try {
+    db.reset();
+    var admin = db.all('users').filter(function (u) { return u.username === 'admin'; })[0];
+    ABM.session.login(admin);
+    // every ui.confirm in these flows is the operator clicking "yes"
+    ABM.ui.confirm = function () { return Promise.resolve(true); };
+
+    var bid = SHOP.branchId();
+    say('INFO fulfil branch=' + bid + ' (' + db.branchCode(bid) + ')  user=' + admin.name);
+
+    /* -------------------------------------------- 1. place an order as a customer */
+    seriaP = SHOP.products().filter(function (p) { return db.isSerialized(p) && SHOP.stockOf(p) >= 2; })[0];
+    plainP = SHOP.products().filter(function (p) { return !db.isSerialized(p) && db.isStockTracked(p) && SHOP.stockOf(p) >= 5; })[0];
+    ok(!!seriaP && !!plainP, 'found a serialized + a plain product to order',
+       (seriaP && seriaP.name) + ' / ' + (plainP && plainP.name));
+
+    before.plainQty = ABM.stock.qty(bid, plainP.id);
+    before.units = db.all('product_imeis').filter(function (u) {
+      return Number(u.product_id) === Number(seriaP.id) && Number(u.branch_id) === bid && ABM.stock.SELLABLE.indexOf(u.status) >= 0;
+    }).length;
+    before.serialQty = ABM.stock.qty(bid, seriaP.id);
+    before.movements = db.all('stock_movements').length;
+    say('INFO before: plain qty=' + before.plainQty + ' serialized qty=' + before.serialQty + ' sellable units=' + before.units);
+
+    order = SHOP.placeOrder(
+      { name: 'Admin Drive Customer', phone: '0322-7778889', email: 'drive-admin@example.com',
+        address: 'House 12, Street 4, Johar Town', city: 'Lahore', notes: 'Ring the bell twice' },
+      [{ product_id: seriaP.id, qty: 1 }, { product_id: plainP.id, qty: PLAIN_QTY }], 'cod');
+    say('INFO placed ' + order.order_no + ' total=' + order.total + ' fee=' + order.delivery_fee);
+    eq(order.status, 'pending', 'order starts pending');
+  } catch (e) {
+    fail++; say('FAIL EXCEPTION setup: ' + e.message + '\n' + e.stack);
+    return done();
+  }
+
+  /* ======================================================= 2. the LIST page ===== */
+  loadComponent('../online-orders.html', 'ordersPage', function (factory) {
+    if (!factory) return done();
+    var list;
+    try {
+      list = alpinify(factory());
+      list.range.set('all');
+      list.refresh();
+      var row = list.filtered.filter(function (o) { return o.id === order.id; })[0];
+      ok(!!row, 'online-orders.html lists the new order', row && row.order_no);
+      if (row) {
+        eq(row.itemCount, 1 + PLAIN_QTY, 'list shows the right unit count');
+        eq(row.nextLabel, 'Confirm', 'list offers the next action');
+      }
+      ok(list.counts.pending >= 1, 'pending tab counts it', 'pending=' + list.counts.pending);
+      ok(list.tiles.pending >= 1, 'pending KPI tile counts it', 'tile=' + list.tiles.pending);
+      // export the row for THIS order (the newest row is whatever the demo clock makes it)
+      var mine = list.filtered.filter(function (r) { return r.order_no === order.order_no; });
+      var csv = ABM.utils.toCsv(mine, [{ label: 'Order No', key: 'order_no' }]);
+      ok(mine.length === 1 && csv.indexOf(order.order_no) > 0, 'CSV export contains the order number');
+    } catch (e) { fail++; say('FAIL EXCEPTION list page: ' + e.message + '\n' + e.stack); }
+
+    /* =================================================== 3. the DETAIL page ===== */
+    loadComponent('../online-order-view.html', 'orderViewPage', function (vf) {
+      if (!vf) return done();
+      var v;
+      try {
+        v = vf();
+        v.requestedId = order.id;
+        alpinify(v);
+        eq(v.state, 'ok', 'order-view loads the order');
+        eq(v.lines.length, 2, 'order-view builds 2 item lines');
+        ok(v.allInStock, 'order-view reports all items in stock');
+        eq(v.canInvoice, false, 'cannot invoice a pending order');
+        eq(v.itemCount, 1 + PLAIN_QTY, 'order-view unit count');
+
+        /* ---- status workflow: pending -> confirmed -> packed -> out_for_delivery */
+        var flow = ['confirmed', 'packed', 'out_for_delivery'];
+        var chain = Promise.resolve();
+        flow.forEach(function (want) {
+          chain = chain.then(function () {
+            v.statusNote = 'note for ' + want;
+            return v.advance();
+          }).then(function () {
+            var rec = db.find('online_orders', order.id);
+            eq(rec.status, want, 'status advanced to ' + want);
+            var last = rec.status_log[rec.status_log.length - 1];
+            eq(last.status, want, 'status_log row written for ' + want);
+            eq(last.notes, 'note for ' + want, 'status_log row carries the note');
+            ok(last.by === ABM.session.user().id, 'status_log row records the user', 'by=' + last.by);
+            ok(!!last.at, 'status_log row has a timestamp');
+          });
+        });
+
+        chain.then(function () {
+          var rec = db.find('online_orders', order.id);
+          eq(rec.status_log.length, 4, 'status_log has pending + 3 updates');
+          eq(v.canInvoice, true, 'can invoice once confirmed');
+
+          /* -------------------------------------------- 4. CREATE THE INVOICE */
+          v.openInvoice();
+          ok(v.inv.open, 'invoice modal opens');
+          var sLine = v.inv.lines.filter(function (l) { return l.stock.kind === 'serialized'; })[0];
+          var pLine = v.inv.lines.filter(function (l) { return l.stock.kind === 'stock'; })[0];
+          ok(!!sLine && !!pLine, 'invoice modal classifies serialized vs plain lines');
+          eq(sLine.picks.length, 1, 'serialized line asks for 1 unit');
+          ok(sLine.units.length >= 2, 'serialized line offers the sellable units', 'n=' + sLine.units.length);
+          eq(sLine.picks[0], '', 'unit is NOT pre-picked when more units than needed exist');
+          eq(v.unitOptions(sLine, 0).length, sLine.units.length, 'unitOptions offers every free unit');
+
+          // submitting with no unit picked must be refused
+          var errBefore = db.all('sales').length;
+          v.createInvoice();
+          ok(!!v.inv.error, 'refuses to invoice without picking a unit', v.inv.error);
+          eq(db.all('sales').length, errBefore, 'no sale row written on the refused attempt');
+
+          // pick a unit and go
+          var unit = sLine.units[0];
+          sLine.picks[0] = String(unit.id);
+          v.inv.note = 'Packed by drive test';
+          v.createInvoice();
+          ok(!v.inv.error, 'createInvoice succeeded', v.inv.error || '');
+
+          var rec2 = db.find('online_orders', order.id);
+          ok(!!rec2.sale_id, 'order links sale_id', 'sale_id=' + rec2.sale_id);
+          var sale = db.find('sales', rec2.sale_id);
+          ok(!!sale, 'sale row created');
+          ok(/^INV-/.test(sale.invoice_no), 'invoice numbered via db.nextNumber', sale.invoice_no);
+          eq(sale.branch_id, SHOP.branchId(), 'sale booked at the fulfil branch');
+          eq(sale.total, order.total, 'sale total = order total (subtotal - discount + delivery)');
+          eq(sale.subtotal, order.subtotal, 'sale subtotal = order subtotal');
+          eq(sale.online_order_id, order.id, 'sale points back at the order');
+          eq(sale.source, 'online', 'sale marked as an online sale');
+
+          var items = db.where('sale_items', { sale_id: sale.id });
+          eq(items.length, 2, 'two sale_items written');
+          var si = items.filter(function (i) { return Number(i.product_id) === Number(seriaP.id); })[0];
+          var pi = items.filter(function (i) { return Number(i.product_id) === Number(plainP.id); })[0];
+          eq(si.imei_id, unit.id, 'serialized sale_item carries the picked unit');
+          eq(si.imei, unit.imei, 'serialized sale_item carries the serial/IMEI string');
+          eq(si.quantity, 1, 'serialized sale_item qty 1');
+          ok(si.unit_cost > 0, 'serialized sale_item picked up the unit cost', 'cost=' + si.unit_cost);
+          eq(pi.quantity, PLAIN_QTY, 'plain sale_item qty');
+          ok(pi.unit_cost > 0, 'plain sale_item picked up the average cost', 'cost=' + pi.unit_cost);
+          eq(utils.round2(items.reduce(function (s, i) { return s + i.total; }, 0)), order.subtotal, 'sale_items sum to the order subtotal');
+
+          // stock really moved
+          var u2 = db.find('product_imeis', unit.id);
+          eq(u2.status, 'sold', 'picked unit is now sold');
+          eq(u2.sale_item_id, si.id, 'picked unit links the sale_item');
+          eq(ABM.stock.qty(SHOP.branchId(), seriaP.id), before.serialQty - 1, 'serialized stock -1');
+          eq(ABM.stock.qty(SHOP.branchId(), plainP.id), before.plainQty - PLAIN_QTY, 'plain stock -' + PLAIN_QTY);
+          var mv = db.all('stock_movements').filter(function (m) { return m.reference_type === 'sale' && Number(m.reference_id) === Number(sale.id); });
+          eq(mv.length, 2, 'two stock_movements rows reference the sale');
+          ok(mv.every(function (m) { return m.movement_type === 'sale' && m.quantity < 0; }), 'movements are negative sale rows');
+
+          // unpaid COD -> balance due on the invoice + customer ledger debit
+          eq(sale.due_amount, order.total, 'unpaid COD invoice carries the balance due');
+          eq(sale.paid_amount, 0, 'nothing paid yet');
+          var cust = db.find('customers', sale.customer_id);
+          ok(cust && !cust.is_walkin, 'invoice went to a real customer record', cust && cust.name);
+          var ledger = db.where('customer_transactions', { customer_id: cust.id });
+          var saleTx = ledger.filter(function (t) { return t.type === 'sale' && Number(t.reference_id) === Number(sale.id); })[0];
+          ok(!!saleTx, 'customer ledger has the sale debit');
+          if (saleTx) eq(saleTx.debit, order.total, 'ledger debit = invoice total');
+          eq(db.find('customers', cust.id).balance, order.total, 'customer balance = amount owed');
+
+          // audit
+          ok(db.all('audit_logs').some(function (a) { return a.action === 'order.invoice' && a.entity_id === order.id; }), 'order.invoice audited');
+          ok(db.all('audit_logs').some(function (a) { return a.action === 'sale.create' && a.entity_id === sale.id; }), 'sale.create audited');
+
+          v.load();
+          eq(v.canInvoice, false, 'cannot invoice the same order twice');
+          ok(v.lines.every(function (l) { return l.stock.kind === 'invoiced'; }), 'lines now read "Deducted on invoice"');
+
+          /* ------------------------------------ 5. deliver -> COD cash collected */
+          return v.advance().then(function () {
+            var rec3 = db.find('online_orders', order.id);
+            eq(rec3.status, 'delivered', 'order delivered');
+            eq(rec3.payment_status, 'paid', 'COD marked paid on delivery');
+            var s2 = db.find('sales', rec3.sale_id);
+            eq(s2.due_amount, 0, 'invoice balance settled');
+            eq(s2.paid_amount, order.total, 'invoice fully paid');
+            var pays = db.where('sale_payments', { sale_id: s2.id });
+            eq(pays.length, 1, 'one sale_payment row');
+            eq(pays[0].method, 'cash', 'COD recorded as cash');
+            eq(pays[0].amount, order.total, 'payment amount = total');
+            eq(db.find('customers', s2.customer_id).balance, 0, 'customer ledger cleared');
+            var payTx = db.where('customer_transactions', { customer_id: s2.customer_id })
+              .filter(function (t) { return t.type === 'payment'; })[0];
+            ok(!!payTx, 'customer ledger has the payment credit');
+            if (payTx) eq(payTx.credit, order.total, 'ledger credit = total');
+            eq(db.find('online_orders', order.id).status_log.length, 5, 'status_log has all 5 rows');
+            return s2;
+          });
+        }).then(function (sale) {
+          /* -------------------------- 6. the invoice page really opens for it */
+          var f = document.getElementById('frame');
+          f.src = '../invoice.html?id=' + sale.id;
+          return new Promise(function (res) {
+            f.onload = function () { setTimeout(function () { res(sale); }, 1200); };
+            setTimeout(function () { res(sale); }, 4000);
+          });
+        }).then(function (sale) {
+          try {
+            var d = document.getElementById('frame').contentDocument;
+            var txt = d.body ? d.body.innerText : '';
+            ok(txt.indexOf(sale.invoice_no) >= 0, 'invoice.html renders the invoice number', sale.invoice_no);
+            ok(txt.indexOf(order.order_no) >= 0, 'invoice.html mentions the online order');
+            var unitRow = db.where('sale_items', { sale_id: sale.id }).filter(function (i) { return i.imei; })[0];
+            ok(txt.indexOf(unitRow.imei) >= 0, 'invoice.html prints the serial/IMEI of the picked unit', unitRow.imei);
+            var money = ABM.utils.money(sale.total);
+            ok(txt.indexOf(money) >= 0, 'invoice.html prints the grand total ' + money,
+               'total=' + money + ' delivery=' + sale.delivery_fee);
+            ok(sale.delivery_fee > 0 ? /delivery/i.test(txt) : !/^\s*Delivery\s*$/m.test(txt),
+               'invoice.html shows a Delivery row only when there is a fee', 'fee=' + sale.delivery_fee);
+          } catch (e) { fail++; say('FAIL EXCEPTION invoice frame: ' + e.message); }
+
+          /* ------------------------------ 7. a SECOND order, cancelled, keeps notes */
+          try {
+            var o2 = SHOP.placeOrder(
+              { name: 'Cancel Me', phone: '0300-1231234', address: 'Flat 9, Garden Town', city: 'Lahore', notes: 'Leave with the guard' },
+              [{ product_id: plainP.id, qty: 1 }], 'cod');
+            var v2 = vf(); v2.requestedId = o2.id; alpinify(v2);
+            v2.openCancel();
+            v2.cancel.reason = 'Customer changed mind';
+            v2.confirmCancel();
+            var r2 = db.find('online_orders', o2.id);
+            eq(r2.status, 'cancelled', 'second order cancelled');
+            eq(r2.cancel_reason, 'Customer changed mind', 'cancel reason stored');
+            eq(r2.customer.notes, 'Leave with the guard', 'cancelling does NOT overwrite the customer delivery note');
+            eq(ABM.stock.qty(SHOP.branchId(), plainP.id), before.plainQty - PLAIN_QTY, 'cancelling deducted no stock');
+          } catch (e) { fail++; say('FAIL EXCEPTION cancel flow: ' + e.message); }
+
+          /* ---------------- 8. an order WITH a delivery fee: does the invoice foot? */
+          var o3, s3;
+          try {
+            var c = SHOP.commerce();
+            var cheap = SHOP.products().filter(function (p) {
+              var pr = SHOP.priceOf(p);
+              return db.isStockTracked(p) && !db.isSerialized(p) && SHOP.stockOf(p) >= 2 &&
+                     pr >= c.min_order && pr < c.free_delivery_above;
+            })[0];
+            ok(!!cheap, 'found a product under the free-delivery threshold', cheap && cheap.name + ' @' + SHOP.priceOf(cheap));
+            o3 = SHOP.placeOrder({ name: 'Fee Payer', phone: '0311-4445556', address: 'Street 7, Wapda Town', city: 'Lahore' },
+                                 [{ product_id: cheap.id, qty: 1 }], 'cod');
+            ok(o3.delivery_fee > 0, 'this order really carries a delivery fee', 'fee=' + o3.delivery_fee);
+            eq(o3.total, utils.round2(o3.subtotal + o3.delivery_fee), 'order total includes the fee');
+            var v3 = vf(); v3.requestedId = o3.id; alpinify(v3);
+            return v3.advance().then(function () {
+              v3.openInvoice();
+              v3.inv.receive = true;
+              v3.createInvoice();
+              ok(!v3.inv.error, 'invoiced the fee-bearing order', v3.inv.error || '');
+              s3 = db.find('sales', db.find('online_orders', o3.id).sale_id);
+              eq(s3.total, o3.total, 'sale total includes the delivery fee');
+              eq(s3.delivery_fee, o3.delivery_fee, 'sale carries delivery_fee');
+              var f2 = document.getElementById('frame');
+              f2.src = '../invoice.html?id=' + s3.id;
+              return new Promise(function (res) {
+                f2.onload = function () { setTimeout(res, 1200); };
+                setTimeout(res, 4000);
+              });
+            }).then(function () {
+              var d = document.getElementById('frame').contentDocument;
+              var txt = (d.body ? d.body.innerText : '').replace(/\s+/g, ' ');
+              say('INFO invoice totals text: ' + txt.slice(Math.max(0, txt.indexOf('Subtotal')), txt.indexOf('Subtotal') + 200));
+              ok(txt.indexOf(utils.money(s3.subtotal)) >= 0, 'invoice prints the subtotal', utils.money(s3.subtotal));
+              ok(txt.indexOf(utils.money(s3.total)) >= 0, 'invoice prints the grand total', utils.money(s3.total));
+              ok(/deliver/i.test(txt), 'invoice explains the delivery fee (subtotal + delivery = total)',
+                 'subtotal=' + s3.subtotal + ' fee=' + s3.delivery_fee + ' total=' + s3.total);
+              done();
+            });
+          } catch (e) { fail++; say('FAIL EXCEPTION fee order: ' + e.message + '\n' + e.stack); done(); }
+        }).catch(function (e) {
+          fail++; say('FAIL EXCEPTION flow: ' + (e && e.message) + '\n' + (e && e.stack));
+          done();
+        });
+      } catch (e) {
+        fail++; say('FAIL EXCEPTION detail page: ' + e.message + '\n' + e.stack);
+        done();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

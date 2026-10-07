@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>POS Terminal · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    /* POS-only layout helpers — theme-token based so they follow dark mode and accent presets. */
+    .pos-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.25rem, 1fr)); gap: .75rem; }
+    .pos-card { display: flex; flex-direction: column; gap: .625rem; width: 100%; min-width: 0; text-align: left; padding: .75rem; background: rgb(var(--surface)); border: 1px solid rgb(var(--slate-200)); border-radius: var(--radius); box-shadow: 0 1px 2px rgb(var(--shadow-color) / .04), 0 8px 24px -14px rgb(var(--shadow-color) / .12); cursor: pointer; transition: transform .12s, box-shadow .15s, border-color .15s; }
+    .pos-card:hover:not(:disabled) { transform: translateY(-1px); border-color: rgb(var(--navy-500) / .5); box-shadow: 0 2px 4px rgb(var(--shadow-color) / .05), 0 14px 30px -16px rgb(var(--shadow-color) / .25); }
+    .pos-card:focus-visible { outline: 2px solid rgb(var(--ring)); outline-offset: 2px; }
+    .pos-card:disabled { opacity: .55; cursor: not-allowed; }
+    .pos-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .3rem .7rem; border-radius: 999px; font-size: .75rem; font-weight: 600; line-height: 1rem; border: 1px solid rgb(var(--slate-300)); background: rgb(var(--surface)); color: rgb(var(--slate-600)); white-space: nowrap; cursor: pointer; flex: none; transition: background-color .12s, color .12s, border-color .12s; }
+    .pos-chip:hover { border-color: rgb(var(--navy-500)); color: rgb(var(--navy-700)); }
+    .pos-chip.active { background: rgb(var(--navy-800)); border-color: rgb(var(--navy-800)); color: #fff; }
+    .pos-chip .count { font-size: .6875rem; opacity: .7; }
+    .pos-cart { display: none; }
+    .pos-cart-inner { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+    @media (max-width: 1023.98px) {
+      .pos-cart.open { display: flex; flex-direction: column; position: fixed; inset: 0; z-index: 55; background: rgb(var(--surface)); }
+      .pos-cart.open > .pos-cart-inner { border: 0; border-radius: 0; box-shadow: none; }
+    }
+    @media (min-width: 1024px) {
+      .pos-cart { display: flex; flex-direction: column; position: sticky; top: 5rem; width: 26rem; flex: none; max-height: calc(100vh - 6rem); }
+    }
+    .pos-line { padding: .625rem 1rem; border-bottom: 1px solid rgb(var(--slate-200) / .7); }
+    .pos-line:last-child { border-bottom: 0; }
+    .pos-total-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; font-size: .875rem; color: rgb(var(--slate-600)); }
+    .pos-total-row b { color: rgb(var(--slate-900)); font-variant-numeric: tabular-nums; }
+    .pos-stepper { display: inline-flex; align-items: center; border: 1px solid rgb(var(--slate-300)); border-radius: .55rem; overflow: hidden; background: rgb(var(--surface)); flex: none; }
+    .pos-stepper button { width: 1.75rem; height: 1.9rem; display: inline-flex; align-items: center; justify-content: center; color: rgb(var(--slate-600)); background: transparent; border: 0; cursor: pointer; }
+    .pos-stepper button:hover { background: rgb(var(--navy-500) / .1); color: rgb(var(--navy-700)); }
+    .pos-stepper input { width: 2.25rem; height: 1.9rem; text-align: center; border: 0; border-left: 1px solid rgb(var(--slate-200)); border-right: 1px solid rgb(var(--slate-200)); background: transparent; font-size: .8125rem; font-weight: 600; color: rgb(var(--slate-900)); -moz-appearance: textfield; }
+    .pos-stepper input::-webkit-outer-spin-button, .pos-stepper input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .pos-stepper input:focus { outline: none; background: rgb(var(--navy-500) / .08); }
+    .pos-paytile { border: 1px solid rgb(var(--slate-200)); border-radius: .8rem; padding: .5rem .75rem; background: rgb(var(--surface)); min-width: 0; }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="assets/js/pages/pos.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="pos" data-title="POS Terminal" data-perm="pos.view">
+  <main x-data="posPage()" @keydown.escape.window="onEscape()">
+
+    <!-- Header strip: branch · cashier · my sales today (link) · clock · shortcuts -->
+    <div class="card mb-4">
+      <div class="px-4 py-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="chip chip-navy !w-8 !h-8" x-html="ABM.icon('building','w-4 h-4')"></span>
+          <div class="min-w-0">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Branch</div>
+            <div class="text-sm font-semibold text-slate-900 truncate"><span x-text="branch.name"></span> <span class="badge badge-slate align-middle" x-text="branch.code"></span></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="avatar w-8 h-8 text-xs" x-text="ABM.utils.initials(user.name)"></span>
+          <div class="min-w-0">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Cashier</div>
+            <div class="text-sm font-semibold text-slate-900 truncate"><span x-text="user.name"></span> <span class="text-xs font-normal text-slate-500" x-text="'· ' + roleLabel"></span></div>
+          </div>
+        </div>
+        <a href="sales.html?range=today" class="stat !py-1.5 !pl-3 !pr-10 !rounded-xl !shadow-none inline-flex items-center gap-2 min-w-0" title="Open today's sales">
+          <span class="chip chip-money !w-8 !h-8" x-html="ABM.icon('receipt','w-4 h-4')"></span>
+          <span class="min-w-0">
+            <span class="block text-[10px] font-bold uppercase tracking-wider text-slate-500">My sales today</span>
+            <span class="block text-sm font-extrabold text-slate-900 truncate tabular"><span x-text="$money(today.total, {decimals:0})"></span> <span class="text-xs font-medium text-slate-500" x-text="'· ' + today.count + ' invoice' + (today.count === 1 ? '' : 's')"></span></span>
+          </span>
+          <span class="stat-arrow !right-2 !bottom-auto !top-1/2 !-translate-y-1/2" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <div class="flex items-center gap-2 min-w-0 sm:ml-auto">
+          <span class="chip chip-slate !w-8 !h-8" x-html="ABM.icon('clock','w-4 h-4')"></span>
+          <div class="min-w-0">
+            <div class="text-sm font-bold text-slate-900 tabular" x-text="clock"></div>
+            <div class="text-[11px] text-slate-500 truncate" x-text="clockDate"></div>
+          </div>
+        </div>
+        <div class="hidden md:flex items-center gap-3 text-[11px] text-slate-500">
+          <span><span class="kbd">F2</span> Search</span>
+          <span><span class="kbd">F9</span> Checkout</span>
+          <span><span class="kbd">Esc</span> Close</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-col lg:flex-row lg:items-start gap-4">
+      <!-- ============================== LEFT: product finder ============================== -->
+      <section class="flex-1 min-w-0 pb-24 lg:pb-0" aria-label="Product finder">
+        <div class="card">
+          <div class="p-3 sm:p-4 space-y-3">
+            <div class="input-icon">
+              <span x-html="ABM.icon('scan')"></span>
+              <input x-ref="search" type="search" class="input input-lg" placeholder="Scan barcode / IMEI / serial or search name, model, SKU" x-model="q" @keydown.enter.prevent="scanEnter()" autofocus autocomplete="off" spellcheck="false" aria-label="Scan or search products">
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="tabs-pill">
+                <template x-for="t in typeChips" :key="t.key">
+                  <button type="button" class="tab" :class="type === t.key && 'active'" @click="type = t.key"><span x-text="t.label"></span> <span class="text-[11px] opacity-60" x-text="typeCounts[t.key] || 0"></span></button>
+                </template>
+              </div>
+              <select class="select input-sm !w-auto pr-8" x-model="brand" aria-label="Brand">
+                <option value="">All brands</option>
+                <template x-for="b in brands" :key="b.id"><option :value="b.id" x-text="b.name"></option></template>
+              </select>
+              <span class="text-xs text-slate-500 ml-auto whitespace-nowrap"><b class="text-slate-800" x-text="filtered.length"></b> product<span x-text="filtered.length === 1 ? '' : 's'"></span></span>
+              <button type="button" class="btn btn-ghost btn-sm" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+            </div>
+            <div class="flex gap-1.5 overflow-x-auto pb-1 -mb-1 scroll-thin" aria-label="Categories">
+              <button type="button" class="pos-chip" :class="!category && 'active'" @click="category = ''">All categories</button>
+              <template x-for="c in categoryChips" :key="c.id">
+                <button type="button" class="pos-chip" :class="String(category) === String(c.id) && 'active'" @click="category = String(category) === String(c.id) ? '' : c.id"><span x-text="c.name"></span><span class="count" x-text="c.count"></span></button>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Product grid -->
+        <div class="pos-grid mt-3" x-show="pager.items.length">
+          <template x-for="p in pager.items" :key="p.id">
+            <button type="button" class="pos-card" :data-add="p.id" :disabled="!p.sellable" :title="p.sellable ? (p.serialized ? 'Pick a unit' : 'Add to cart') : 'Out of stock'" @click="pick(p)">
+              <div class="flex items-start gap-2.5 min-w-0">
+                <span class="chip !w-9 !h-9 !rounded-lg" :class="p.type === 'service' ? 'chip-info' : p.type === 'part' ? 'chip-warning' : p.serialized ? 'chip-navy' : 'chip-slate'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-semibold text-slate-900 leading-snug truncate" x-text="p.name"></div>
+                  <div class="text-xs text-slate-500 truncate" x-text="[p.sub, p.brand].filter(Boolean).join(' · ')"></div>
+                </div>
+              </div>
+              <div class="flex items-end justify-between gap-2 mt-auto min-w-0">
+                <div class="min-w-0">
+                  <div class="text-sm font-extrabold text-slate-900 tabular truncate" x-text="$money(priceFor(p), {decimals:0})"></div>
+                  <div class="text-[10px] text-slate-400 leading-tight" x-text="cart.price_mode === 'wholesale' ? 'wholesale' : (p.serialized ? p.serial_label + ' tracked' : (p.tracked ? 'per pc' : 'per job'))"></div>
+                </div>
+                <div class="flex flex-wrap justify-end gap-1 min-w-0">
+                  <span x-html="stockBadge(p)"></span>
+                  <span x-show="p.open_box > 0" x-html="$badge('returned', 'Open box ×' + p.open_box)"></span>
+                  <span x-show="p.condition !== 'new'" x-html="$badge(p.condition)"></span>
+                </div>
+              </div>
+            </button>
+          </template>
+        </div>
+        <div class="card mt-3" x-show="!pager.items.length">
+          <div class="empty">
+            <span x-html="ABM.icon('search')"></span>
+            <div class="empty-title">No products match</div>
+            <div class="text-sm mt-1" x-text="products.length ? 'Try another search, scan a barcode / IMEI, or clear the filters.' : 'No active products in the catalog yet.'"></div>
+            <div class="mt-4 flex justify-center gap-2">
+              <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+              <a href="products.html" class="btn btn-primary btn-sm" x-show="canViewProducts">Open catalog</a>
+            </div>
+          </div>
+        </div>
+        <div class="card mt-3" x-show="pager.pages > 1">
+          <div class="pagination !border-t-0">
+            <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <template x-for="n in pageNumbers" :key="n">
+                <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+              </template>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================== RIGHT: cart (sticky on lg, full-screen drawer on mobile) ============================== -->
+      <aside class="pos-cart" :class="cartOpen && 'open'" aria-label="Cart">
+        <div class="card pos-cart-inner">
+          <!-- cart header -->
+          <div class="flex items-center gap-2 px-4 py-3 border-b border-slate-200">
+            <span class="chip chip-money !w-8 !h-8" x-html="ABM.icon('cart','w-4 h-4')"></span>
+            <div class="min-w-0 flex-1">
+              <div class="font-bold text-slate-900 leading-tight">Cart</div>
+              <div class="text-xs text-slate-500" x-text="totals.count + ' item' + (totals.count === 1 ? '' : 's') + ' · ' + cart.lines.length + ' line' + (cart.lines.length === 1 ? '' : 's')"></div>
+            </div>
+            <div class="btn-group" title="Price list">
+              <button type="button" class="btn btn-sm" :class="cart.price_mode === 'retail' && 'active'" @click="setPriceMode('retail')">Retail</button>
+              <button type="button" class="btn btn-sm" :class="cart.price_mode === 'wholesale' && 'active'" @click="setPriceMode('wholesale')">Wholesale</button>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon lg:hidden" @click="cartOpen = false" aria-label="Close cart" x-html="ABM.icon('x')"></button>
+          </div>
+
+          <!-- drawer / shift bar -->
+          <div class="flex items-center gap-2 px-4 py-2 border-b border-slate-200 text-xs" :class="shift.open ? 'bg-emerald-50/70' : 'bg-amber-50/70'" x-cloak>
+            <span class="flex-none" :class="shift.open ? 'text-emerald-700' : 'text-amber-700'" x-html="ABM.icon('wallet','w-4 h-4')"></span>
+            <template x-if="shift.open">
+              <span class="min-w-0 flex-1 truncate text-emerald-900">Drawer <b class="mono" x-text="shift.row.shift_no"></b> open · in drawer <b x-text="$money(shift.expected, {decimals:0})"></b></span>
+            </template>
+            <template x-if="!shift.open">
+              <span class="min-w-0 flex-1 truncate text-amber-900">No open drawer — sales will not be counted in a shift.</span>
+            </template>
+            <a :href="shift.open ? 'shift-view.html?id=' + shift.row.id : 'shifts.html?new=1'" x-show="shift.open ? $can('shifts.view') : $can('shifts.add')" class="btn btn-ghost btn-sm flex-none !py-1" x-text="shift.open ? 'Open' : 'Start shift'"></a>
+          </div>
+
+          <!-- customer bar -->
+          <button type="button" class="w-full flex items-center gap-3 px-4 py-2.5 border-b border-slate-200 hover:bg-slate-50 text-left" @click="openCustomer()" data-customer title="Change customer">
+            <span class="avatar w-9 h-9 text-xs" :class="customer.is_walkin && '!bg-none !bg-slate-400'" x-text="ABM.utils.initials(customer.name)"></span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-sm font-semibold text-slate-900 truncate" x-text="customer.name"></span>
+              <span class="block text-xs text-slate-500 truncate" x-text="customer.is_walkin ? 'No account · cash sale' : (customer.phone || 'No phone on file')"></span>
+            </span>
+            <span x-html="balanceChip(customer)"></span>
+            <span class="text-xs font-semibold text-navy-700 whitespace-nowrap">Change</span>
+          </button>
+
+          <!-- lines -->
+          <div class="flex-1 min-h-0 overflow-y-auto scroll-thin">
+            <template x-for="l in cart.lines" :key="l.key">
+              <div class="pos-line">
+                <div class="flex items-start gap-2.5 min-w-0">
+                  <span class="chip !w-8 !h-8 !rounded-lg flex-none" :class="l.type === 'service' ? 'chip-info' : l.type === 'part' ? 'chip-warning' : l.serialized ? 'chip-navy' : 'chip-slate'" x-html="ABM.icon(l.icon,'w-4 h-4')"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-slate-900 leading-snug truncate" x-text="l.name"></div>
+                    <div class="text-xs text-slate-500 truncate" x-text="[l.sub, l.brand].filter(Boolean).join(' · ')"></div>
+                    <div class="flex flex-wrap items-center gap-1.5 mt-1" x-show="l.serialized || l.warranty_months > 0 || l.override || l.condition !== 'new'">
+                      <span class="mono text-[11px] text-slate-700 bg-slate-100 rounded px-1.5 py-0.5" x-show="l.serialized" x-text="l.serial_label + ' ' + l.imei"></span>
+                      <span x-show="l.open_box" x-html="$badge('returned', 'Open box')"></span>
+                      <span x-show="l.condition !== 'new'" x-html="$badge(l.condition)"></span>
+                      <span class="badge badge-slate" x-show="l.warranty_months > 0"><span x-html="ABM.icon('shield-check','w-3 h-3')"></span><span x-text="l.warranty_months + ' mo warranty'"></span></span>
+                      <span x-show="l.override" x-html="$badge('urgent', 'Price override')"></span>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600 -mr-2 -mt-1" @click="removeLine(l)" :aria-label="'Remove ' + l.name" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 mt-2">
+                  <template x-if="!l.serialized">
+                    <div class="pos-stepper" title="Quantity">
+                      <button type="button" @click="incQty(l, -1)" aria-label="Decrease quantity" x-html="ABM.icon('minus','w-3.5 h-3.5')"></button>
+                      <input type="number" min="1" step="1" :value="l.qty" @change="setQty(l, $event.target)" aria-label="Quantity">
+                      <button type="button" @click="incQty(l, 1)" aria-label="Increase quantity" x-html="ABM.icon('plus','w-3.5 h-3.5')"></button>
+                    </div>
+                  </template>
+                  <template x-if="l.serialized"><span class="text-xs font-semibold text-slate-500 px-1">1 unit</span></template>
+                  <!-- money fields must show the whole amount: device prices run to 7 digits (Rs. 1,250,000) -->
+                  <div class="input-group w-36" title="Unit price"><span class="addon addon-left !px-2">Rs.</span><input type="number" min="0" step="1" class="input input-sm input-money !px-2" :value="l.unit_price" @change="setPrice(l, $event.target)" aria-label="Unit price"></div>
+                  <div class="input-group w-28" title="Line discount"><span class="addon addon-left !px-2">−</span><input type="number" min="0" step="1" class="input input-sm input-money !px-2" :value="l.discount" @change="setLineDiscount(l, $event.target)" aria-label="Line discount" placeholder="0"></div>
+                  <div class="ml-auto text-right min-w-0">
+                    <div class="text-sm font-bold text-slate-900 tabular" x-text="$money(lineTotal(l))"></div>
+                    <div class="text-[10px] text-slate-400" x-show="l.discount > 0" x-text="'after ' + $money(l.discount, {decimals:0}) + ' off'"></div>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div class="empty py-10" x-show="!cart.lines.length">
+              <span x-html="ABM.icon('cart')"></span>
+              <div class="empty-title">Cart is empty</div>
+              <div class="text-sm mt-1">Scan a barcode / IMEI / serial or tap a product to add it.</div>
+              <button type="button" class="btn btn-secondary btn-sm mt-4 lg:hidden" @click="cartOpen = false">Browse products</button>
+            </div>
+          </div>
+
+          <!-- adjustments, totals, actions -->
+          <div class="border-t border-slate-200 bg-slate-50 px-4 py-3 space-y-2.5">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-semibold text-slate-500 w-14 flex-none">Discount</span>
+              <select class="select input-sm !w-[4.6rem] pr-7 flex-none" x-model="cart.discount_type" @change="normalizeDiscount(); guardInvoiceDiscount()" aria-label="Discount type"><option value="percent">%</option><option value="fixed">Rs.</option></select>
+              <input type="number" min="0" step="1" class="input input-sm input-money !px-2 flex-1 min-w-[4.5rem]" x-model.number="cart.discount_value" @change="normalizeDiscount($event.target); guardInvoiceDiscount()" aria-label="Invoice discount" placeholder="0">
+              <!-- label + field stay together when the row wraps at phone width -->
+              <span class="flex items-center gap-2 flex-none ml-auto">
+                <span class="text-xs font-semibold text-slate-500" x-text="taxLabel"></span>
+                <span class="input-group !w-[5.25rem] flex-none"><input type="number" min="0" max="100" step="0.5" class="input input-sm input-money" x-model.number="cart.tax_rate" @change="normalizeTax($event.target)" aria-label="Tax percent"><span class="addon !px-2">%</span></span>
+              </span>
+            </div>
+            <!-- the invoice discount is shared across the lines: none may end up under its minimum price without approval -->
+            <div class="flex items-start gap-1.5 text-xs font-semibold text-rose-600" x-show="belowFloor.length" x-cloak data-floor-warning>
+              <span class="flex-none mt-px" x-html="ABM.icon('warning','w-3.5 h-3.5')"></span>
+              <span class="min-w-0" x-text="belowFloor.map((l) => l.name).join(', ') + (belowFloor.length === 1 ? ' is' : ' are') + ' below the minimum sale price' + (totals.invoiceDisc > 0 ? ' after the invoice discount' : '') + (canOverride ? ' — you will be asked to approve at checkout.' : ' — a manager must approve.')"></span>
+            </div>
+            <div>
+              <button type="button" class="text-xs font-semibold text-navy-700 hover:underline" @click="showNotes = !showNotes" x-text="showNotes ? 'Hide note' : (cart.notes ? 'Edit note' : '+ Add invoice note')"></button>
+              <textarea class="textarea !min-h-[3.5rem] mt-1.5" rows="2" x-show="showNotes" x-model="cart.notes" placeholder="Note printed on the invoice" maxlength="300"></textarea>
+            </div>
+            <div class="space-y-1 pt-1 border-t border-slate-200">
+              <div class="pos-total-row"><span>Subtotal</span><b x-text="$money(totals.gross)"></b></div>
+              <div class="pos-total-row" x-show="totals.lineDisc > 0"><span>Line discounts</span><b class="!text-rose-600" x-text="'− ' + $money(totals.lineDisc)"></b></div>
+              <div class="pos-total-row" x-show="totals.invoiceDisc > 0"><span>Invoice discount <span class="text-xs" x-show="cart.discount_type === 'percent'" x-text="'(' + cart.discount_value + '%)'"></span></span><b class="!text-rose-600" x-text="'− ' + $money(totals.invoiceDisc)"></b></div>
+              <div class="pos-total-row" x-show="totals.rate > 0"><span><span x-text="taxLabel"></span> <span class="text-xs" x-text="'(' + totals.rate + '%)'"></span></span><b x-text="$money(totals.tax)"></b></div>
+              <div class="flex items-end justify-between gap-3 pt-1">
+                <span class="text-xs font-bold uppercase tracking-wider text-slate-500">Total</span>
+                <b class="text-2xl font-extrabold text-slate-900 tabular tracking-tight truncate" x-text="$money(totals.total)"></b>
+              </div>
+            </div>
+            <div class="grid grid-cols-3 gap-2 pt-1">
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="!cart.lines.length" @click="holdCart()" title="Park this cart and start another"><span x-html="ABM.icon('clock','w-4 h-4')"></span>Hold</button>
+              <button type="button" class="btn btn-secondary btn-sm" :disabled="!held.length" @click="recallModal.open = true" data-recall><span x-html="ABM.icon('archive','w-4 h-4')"></span>Recall<span class="badge badge-navy" x-show="held.length" x-text="held.length"></span></button>
+              <button type="button" class="btn btn-secondary btn-sm text-rose-600" :disabled="!cart.lines.length && !cart.notes" @click="clearCart()"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Clear</button>
+            </div>
+            <button type="button" class="btn btn-money btn-xl btn-block !justify-between" data-checkout :disabled="!cart.lines.length" @click="openCheckout()">
+              <span class="inline-flex items-center gap-2"><span x-html="ABM.icon('banknotes')"></span>Checkout</span>
+              <span class="inline-flex items-center gap-2 min-w-0"><span class="truncate" x-text="$money(totals.total, {decimals:0})"></span><span class="kbd !text-white !bg-white/15 !border-white/30 hidden sm:inline-block">F9</span></span>
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Mobile sticky bottom bar -->
+    <div class="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur px-4 py-3 flex items-center gap-3" x-show="!cartOpen">
+      <div class="min-w-0 flex-1">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500" x-text="totals.count + ' item' + (totals.count === 1 ? '' : 's')"></div>
+        <div class="text-lg font-extrabold text-slate-900 tabular truncate" x-text="$money(totals.total)"></div>
+      </div>
+      <button type="button" class="btn btn-money btn-lg flex-none" data-view-cart @click="cartOpen = true"><span x-html="ABM.icon('cart')"></span>View cart<span class="badge !bg-white/20 !text-white" x-show="cart.lines.length" x-text="cart.lines.length"></span></button>
+    </div>
+
+    <!-- ============================== Checkout modal (split payments) ============================== -->
+    <div x-show="checkout.open" x-cloak class="modal-backdrop" @click.self="if (!checkout.busy) checkout.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="checkoutTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title" id="checkoutTitle">Checkout</div>
+            <div class="text-xs text-slate-500 truncate"><span x-text="totals.count"></span> item(s) · <span x-text="customer.name"></span> · <span x-text="branch.code"></span></div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="checkout.open = false" :disabled="checkout.busy" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-4">
+          <!-- amount due + tiles -->
+          <div class="rounded-xl bg-navy-800 text-white px-4 py-3 flex items-center justify-between gap-3">
+            <div><div class="text-[11px] font-bold uppercase tracking-wider text-white/60">Amount due</div><div class="text-2xl font-extrabold tabular tracking-tight" x-text="$money(pay.total)"></div></div>
+            <div class="text-right text-xs text-white/70 min-w-0">
+              <div class="truncate" x-text="customer.name"></div>
+              <button type="button" class="font-semibold text-white underline underline-offset-2" @click="openCustomer()">Change customer</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="pos-paytile"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Paid</div><div class="text-sm sm:text-base font-bold text-slate-900 tabular truncate" x-text="$money(pay.paid)"></div></div>
+            <div class="pos-paytile" :class="pay.change > 0 && 'border-emerald-200'"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Change</div><div class="text-sm sm:text-base font-bold tabular truncate" :class="pay.change > 0 ? 'text-emerald-700' : 'text-slate-900'" x-text="$money(pay.change)"></div></div>
+            <div class="pos-paytile" :class="pay.remaining > 0 && 'border-rose-200'"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Remaining</div><div class="text-sm sm:text-base font-bold tabular truncate" :class="pay.remaining > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(pay.remaining)"></div></div>
+          </div>
+
+          <!-- payment lines -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="label !mb-0">Payments</div>
+              <button type="button" class="btn btn-soft btn-sm" @click="addPayment()"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add payment</button>
+            </div>
+            <template x-for="(r, i) in checkout.payments" :key="r.key">
+              <div class="grid grid-cols-2 sm:grid-cols-[10rem_9rem_1fr] gap-2 items-start">
+                <select class="select input-sm" x-model="r.method" @change="onMethodChange(r)" aria-label="Payment method">
+                  <template x-for="m in methodOptions" :key="m.key"><option :value="m.key" x-text="m.label + (m.key === 'store_credit' ? ' (' + $money(storeCredit, {decimals:0}) + ')' : '')"></option></template>
+                </select>
+                <div class="input-group"><span class="addon addon-left !px-2">Rs.</span><input type="number" min="0" step="1" class="input input-sm input-money !pl-2" x-model.number="r.amount" :x-ref="'payAmount' + i" aria-label="Amount" placeholder="0"></div>
+                <div class="col-span-2 sm:col-span-1 flex gap-2">
+                  <input type="text" class="input input-sm flex-1 min-w-0" :class="needsRef(r.method) && !String(r.reference || '').trim() && 'is-invalid'" x-model="r.reference" :placeholder="needsRef(r.method) ? 'Reference / transaction ID (required)' : (r.method === 'store_credit' ? 'Applied from customer credit' : 'Note (optional)')" :disabled="r.method === 'store_credit'" maxlength="60" aria-label="Payment reference">
+                  <button type="button" class="btn btn-secondary btn-sm btn-icon flex-none" :disabled="checkout.payments.length <= 1" @click="removePayment(r)" aria-label="Remove payment" x-html="ABM.icon('x','w-4 h-4')"></button>
+                </div>
+                <!-- card / wallet / transfer money lands in a bank or wallet account, never the drawer -->
+                <div class="col-span-2 sm:col-span-3 flex items-center gap-2 min-w-0" x-show="isBank(r.method)">
+                  <span class="text-xs text-slate-500 flex-none" x-html="ABM.icon('building','w-3.5 h-3.5')"></span>
+                  <span class="text-xs text-slate-500 flex-none">Into</span>
+                  <select class="select input-sm flex-1 min-w-0" x-model="r.account_id" :class="isBank(r.method) && !rowAccount(r) && 'is-invalid'" aria-label="Account the payment lands in">
+                    <option value="" x-show="!bankAccounts.length">No account set up</option>
+                    <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" :selected="String(a.id) === String(rowAccount(r) || '')" x-text="a.name"></option></template>
+                  </select>
+                </div>
+              </div>
+            </template>
+            <div class="flex flex-wrap items-center gap-1.5" x-show="cashSuggestions.length">
+              <span class="text-[11px] font-semibold text-slate-500 mr-1">Quick cash:</span>
+              <template x-for="(v, i) in cashSuggestions" :key="v">
+                <button type="button" class="btn btn-secondary btn-sm" @click="setCash(v)" x-text="(i === 0 ? 'Exact ' : '') + $money(v, {decimals:0})"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Khata (customer ledger) -->
+          <div class="alert alert-warning !items-start" x-show="pay.remaining > 0">
+            <span x-html="ABM.icon('users')"></span>
+            <div class="min-w-0 flex-1 space-y-2">
+              <div class="flex items-start gap-3">
+                <button type="button" class="switch mt-0.5" :class="checkout.khata && 'on'" role="switch" :aria-checked="checkout.khata ? 'true' : 'false'" :disabled="customer.is_walkin" @click="if (!customer.is_walkin) checkout.khata = !checkout.khata"></button>
+                <div class="min-w-0">
+                  <div class="font-semibold">Put <span x-text="$money(pay.remaining)"></span> on customer ledger (Khata)</div>
+                  <div class="text-xs mt-0.5" x-show="customer.is_walkin">Credit needs a registered customer. <button type="button" class="font-semibold underline underline-offset-2" @click="openCustomer()">Select or add a customer</button>.</div>
+                  <div class="text-xs mt-0.5" x-show="!customer.is_walkin">
+                    <span x-text="customer.name"></span> · balance <b x-text="$money(creditCheck.balance || 0)"></b> → <b x-text="$money(creditCheck.newBalance || 0)"></b> · limit <b x-text="(creditCheck.limit || 0) > 0 ? $money(creditCheck.limit) : 'none'"></b>
+                    <a :href="'customer-view.html?id=' + customer.id" class="font-semibold underline underline-offset-2 ml-1" target="_blank" rel="noopener" x-show="canViewCustomers">Ledger</a>
+                  </div>
+                  <div class="text-xs mt-1 font-semibold" x-show="!customer.is_walkin && checkout.khata && !creditCheck.ok" x-text="canOverride ? 'Beyond credit limit — you will be asked to approve as ' + roleLabel + '.' : 'Beyond credit limit — a manager or admin must approve this sale.'"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- validation summary -->
+          <div class="alert alert-danger" x-show="checkout.errors.length">
+            <span x-html="ABM.icon('warning')"></span>
+            <ul class="list-disc pl-4 space-y-0.5 text-xs"><template x-for="(e, i) in checkout.errors" :key="i"><li x-text="e"></li></template></ul>
+          </div>
+        </div>
+        <div class="modal-footer !flex-wrap">
+          <div class="text-xs text-slate-500 mr-auto min-w-0" x-show="paymentErrors.length" x-text="paymentErrors[0]"></div>
+          <button type="button" class="btn btn-secondary" @click="checkout.open = false" :disabled="checkout.busy">Back</button>
+          <button type="button" class="btn btn-money btn-lg" data-complete :disabled="!canComplete" @click="completeSale()"><span x-html="ABM.icon('check-circle')"></span><span x-text="checkout.busy ? 'Saving…' : 'Complete Sale'"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================== Success modal ============================== -->
+    <div x-show="success.open" x-cloak class="modal-backdrop" @click.self="newSale()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="successTitle">
+        <template x-if="success.sale">
+          <div>
+            <div class="modal-body text-center">
+              <div class="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center mb-3" x-html="ABM.icon('check-circle','w-8 h-8')"></div>
+              <h3 class="text-lg font-bold text-slate-900" id="successTitle">Sale completed</h3>
+              <div class="mono text-navy-700 font-bold mt-1" x-text="success.sale.invoice_no"></div>
+              <div class="grid grid-cols-3 gap-2 mt-4 text-left">
+                <div class="pos-paytile"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total</div><div class="text-sm font-bold text-slate-900 tabular truncate" x-text="$money(success.sale.total)"></div></div>
+                <div class="pos-paytile"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Change</div><div class="text-sm font-bold tabular truncate" :class="success.change > 0 ? 'text-emerald-700' : 'text-slate-900'" x-text="$money(success.change)"></div></div>
+                <div class="pos-paytile"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500" x-text="success.sale.due_amount > 0 ? 'On ledger' : 'Paid'"></div><div class="text-sm font-bold tabular truncate" :class="success.sale.due_amount > 0 ? 'text-amber-700' : 'text-slate-900'" x-text="$money(success.sale.due_amount > 0 ? success.sale.due_amount : success.sale.paid_amount)"></div></div>
+              </div>
+              <div class="text-xs text-slate-500 mt-3" x-text="ABM.db.customerName(success.sale.customer_id) + ' · ' + ABM.utils.datetime(success.sale.sale_date)"></div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">
+                <a :href="'invoice.html?id=' + success.sale.id + '&layout=thermal&autoprint=1'" target="_blank" rel="noopener" class="btn btn-primary"><span x-html="ABM.icon('printer')"></span>Print Thermal</a>
+                <a :href="'invoice.html?id=' + success.sale.id + '&layout=a4&autoprint=1'" target="_blank" rel="noopener" class="btn btn-secondary"><span x-html="ABM.icon('document')"></span>Print A4</a>
+                <a :href="'sale-view.html?id=' + success.sale.id" class="btn btn-secondary"><span x-html="ABM.icon('eye')"></span>View invoice</a>
+                <button type="button" class="btn btn-money" @click="newSale()"><span x-html="ABM.icon('cart')"></span>New Sale</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ============================== Unit picker (serialized products) ============================== -->
+    <div x-show="unitModal.open" x-cloak class="modal-backdrop" @click.self="unitModal.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="unitTitle">
+        <div class="modal-header">
+          <div class="min-w-0">
+            <div class="modal-title truncate" id="unitTitle" x-text="unitModal.product ? 'Pick a unit · ' + unitModal.product.name : 'Pick a unit'"></div>
+            <div class="text-xs text-slate-500 truncate" x-text="unitModal.product ? [unitModal.product.sub, unitModal.product.brand, unitList.length + ' sellable at ' + branch.name].filter(Boolean).join(' · ') : ''"></div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="unitModal.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body !p-0">
+          <div class="p-4 border-b border-slate-200">
+            <div class="input-icon">
+              <span x-html="ABM.icon('qr')"></span>
+              <input x-ref="unitSearch" type="search" class="input" :placeholder="'Scan or type ' + (unitModal.product ? unitModal.product.serial_label : 'IMEI') + '…'" x-model="unitModal.q" @keydown.enter.prevent="unitEnter()" autocomplete="off" spellcheck="false" aria-label="Search units">
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table table-compact">
+              <thead><tr><th x-text="unitModal.product ? unitModal.product.serial_label : 'IMEI'"></th><th>Status</th><th class="hidden md:table-cell">In stock since</th><th class="num">Price</th><th class="actions"></th></tr></thead>
+              <tbody>
+                <template x-for="u in unitPager.items" :key="u.id">
+                  <tr class="cursor-pointer" @click="chooseUnit(u)">
+                    <td><div class="mono font-semibold text-slate-900" x-text="u.imei"></div><div class="mono text-[11px] text-slate-400" x-show="u.imei2" x-text="'IMEI 2: ' + u.imei2"></div></td>
+                    <td><span x-html="u.status === 'returned' ? $badge('returned', 'Open box') : $badge('available')"></span><div class="text-[11px] text-slate-400 truncate max-w-[12rem]" x-show="u.notes" x-text="u.notes"></div></td>
+                    <td class="hidden md:table-cell text-slate-500" x-text="$date(u.created_at)"></td>
+                    <td class="num font-semibold whitespace-nowrap" x-text="unitModal.product ? $money(priceFor(unitModal.product), {decimals:0}) : ''"></td>
+                    <td class="actions"><button type="button" class="btn btn-primary btn-sm" @click.stop="chooseUnit(u)"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add</button></td>
+                  </tr>
+                </template>
+                <template x-if="!unitPager.items.length">
+                  <tr><td colspan="5"><div class="empty py-8"><span x-html="ABM.icon('qr')"></span><div class="empty-title" x-text="unitModal.q ? 'No unit matches' : 'No sellable units here'"></div><div class="text-sm mt-1" x-text="unitModal.q ? 'Check the number or clear the search.' : 'All units of this product are sold, in transit or already in the cart.'"></div></div></td></tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" x-show="unitPager.pages > 1">
+            <div>Showing <b class="text-slate-800" x-text="unitPager.from"></b>–<b class="text-slate-800" x-text="unitPager.to"></b> of <b class="text-slate-800" x-text="unitPager.total"></b></div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="unitPager.page <= 1" @click="unitModal.page = unitPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+              <span class="text-xs px-2" x-text="unitPager.page + ' / ' + unitPager.pages"></span>
+              <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="unitPager.page >= unitPager.pages" @click="unitModal.page = unitPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a :href="'product-view.html?id=' + (unitModal.product ? unitModal.product.id : '')" class="btn btn-ghost btn-sm mr-auto" x-show="canViewProducts && unitModal.product"><span x-html="ABM.icon('eye','w-4 h-4')"></span>Product details</a>
+          <button type="button" class="btn btn-secondary" @click="unitModal.open = false">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================== Recall held carts ============================== -->
+    <div x-show="recallModal.open" x-cloak class="modal-backdrop" @click.self="recallModal.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="recallTitle">
+        <div class="modal-header">
+          <div><div class="modal-title" id="recallTitle">Held carts</div><div class="text-xs text-slate-500" x-text="held.length + ' parked at ' + branch.name"></div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="recallModal.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body !p-0">
+          <ul class="divide-y divide-slate-200">
+            <template x-for="h in held" :key="h.id">
+              <li class="px-4 py-3 flex items-center gap-3">
+                <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('clock','w-4 h-4')"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-semibold text-slate-900 truncate" x-text="h.customer"></div>
+                  <div class="text-xs text-slate-500 truncate" x-text="h.count + ' item(s) · ' + ABM.utils.money(h.total) + ' · ' + ABM.utils.timeAgo(h.at) + (h.by ? ' · ' + h.by : '')"></div>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm" @click="recall(h)">Recall</button>
+                <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" @click="deleteHeld(h)" aria-label="Delete held cart" x-html="ABM.icon('trash','w-4 h-4')"></button>
+              </li>
+            </template>
+            <template x-if="!held.length"><li><div class="empty py-8"><span x-html="ABM.icon('archive')"></span><div class="empty-title">No held carts</div><div class="text-sm mt-1">Use Hold to park a cart while serving another customer.</div></div></li></template>
+          </ul>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="recallModal.open = false">Close</button></div>
+      </div>
+    </div>
+
+    <!-- ============================== Customer modal (find / quick add) ============================== -->
+    <div x-show="customerModal.open" x-cloak class="modal-backdrop" @click.self="customerModal.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="customerTitle">
+        <div class="modal-header">
+          <div><div class="modal-title" id="customerTitle">Customer</div><div class="text-xs text-slate-500">Select who this sale is for</div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="customerModal.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="tabs px-4">
+          <button type="button" class="tab" :class="customerModal.tab === 'find' && 'active'" @click="customerModal.tab = 'find'; $nextTick(() => $refs.custSearch && $refs.custSearch.focus())">Find customer</button>
+          <button type="button" class="tab" :class="customerModal.tab === 'add' && 'active'" @click="customerModal.tab = 'add'; $nextTick(() => $refs.custName && $refs.custName.focus())">Quick add</button>
+        </div>
+        <!-- find -->
+        <div x-show="customerModal.tab === 'find'">
+          <div class="modal-body !p-0">
+            <div class="p-4 border-b border-slate-200 flex flex-col sm:flex-row gap-2">
+              <div class="input-icon flex-1">
+                <span x-html="ABM.icon('search')"></span>
+                <input x-ref="custSearch" type="search" class="input" placeholder="Search name, phone or CNIC…" x-model="customerModal.q" @keydown.enter.prevent="customerEnter()" autocomplete="off" aria-label="Search customers">
+              </div>
+              <button type="button" class="btn btn-secondary flex-none" :class="customer.is_walkin && 'ring-2 ring-navy-500/40'" @click="setCustomer(ABM.db.setting('default_customer_id') || 1)"><span x-html="ABM.icon('user','w-4 h-4')"></span>Walk-in</button>
+            </div>
+            <ul class="divide-y divide-slate-200 max-h-[50vh] overflow-y-auto scroll-thin">
+              <template x-for="c in customerPager.items" :key="c.id">
+                <li class="px-4 py-2.5 flex items-center gap-3 hover:bg-slate-50 cursor-pointer" :class="String(c.id) === String(cart.customer_id) && 'bg-navy-50'" @click="setCustomer(c.id)">
+                  <span class="avatar w-9 h-9 text-xs" x-text="ABM.utils.initials(c.name)"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-slate-900 truncate" x-text="c.name"></div>
+                    <div class="text-xs text-slate-500 truncate" x-text="[c.phone, c.address].filter(Boolean).join(' · ') || 'No phone'"></div>
+                  </div>
+                  <div class="hidden sm:flex flex-col items-end gap-0.5 text-[11px] text-slate-400"><span x-show="c.credit_limit > 0" x-text="'Limit ' + $money(c.credit_limit, {decimals:0})"></span></div>
+                  <span x-html="balanceChip(c)"></span>
+                  <span class="btn btn-primary btn-sm">Select</span>
+                </li>
+              </template>
+              <template x-if="!customerPager.items.length">
+                <li><div class="empty py-8"><span x-html="ABM.icon('users')"></span><div class="empty-title">No customers match</div><div class="text-sm mt-1">Try another name or phone, or add the customer.</div><button type="button" class="btn btn-primary btn-sm mt-4" @click="customerModal.tab = 'add'; customerModal.form.name = /^[0-9+\-\s]+$/.test(customerModal.q) ? '' : customerModal.q; customerModal.form.phone = /^[0-9+\-\s]+$/.test(customerModal.q) ? customerModal.q : ''; $nextTick(() => $refs.custName && $refs.custName.focus())">Quick add</button></div></li>
+              </template>
+            </ul>
+            <div class="pagination" x-show="customerPager.pages > 1">
+              <div>Showing <b class="text-slate-800" x-text="customerPager.from"></b>–<b class="text-slate-800" x-text="customerPager.to"></b> of <b class="text-slate-800" x-text="customerPager.total"></b></div>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="customerPager.page <= 1" @click="customerModal.page = customerPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+                <span class="text-xs px-2" x-text="customerPager.page + ' / ' + customerPager.pages"></span>
+                <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="customerPager.page >= customerPager.pages" @click="customerModal.page = customerPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <a href="customers.html" class="btn btn-ghost btn-sm mr-auto" x-show="canViewCustomers"><span x-html="ABM.icon('users','w-4 h-4')"></span>All customers</a>
+            <button type="button" class="btn btn-secondary" @click="customerModal.open = false">Close</button>
+          </div>
+        </div>
+        <!-- quick add -->
+        <form x-show="customerModal.tab === 'add'" @submit.prevent="saveCustomer()" novalidate>
+          <div class="modal-body">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="cf-name">Name <span class="req">*</span></label>
+                <input id="cf-name" x-ref="custName" type="text" class="input" x-model="customerModal.form.name" :class="customerModal.errors.name && 'is-invalid'" placeholder="Customer name" maxlength="80">
+                <p class="field-error" x-show="customerModal.errors.name" x-text="customerModal.errors.name"></p>
+              </div>
+              <div>
+                <label class="label" for="cf-phone">Phone <span class="req">*</span></label>
+                <input id="cf-phone" type="tel" class="input" x-model="customerModal.form.phone" :class="customerModal.errors.phone && 'is-invalid'" placeholder="0300-1234567" maxlength="20">
+                <p class="field-error" x-show="customerModal.errors.phone" x-text="customerModal.errors.phone"></p>
+              </div>
+              <div>
+                <label class="label" for="cf-address">Address</label>
+                <input id="cf-address" type="text" class="input" x-model="customerModal.form.address" placeholder="Area, city" maxlength="120">
+              </div>
+              <div>
+                <label class="label" for="cf-cnic">CNIC</label>
+                <input id="cf-cnic" type="text" class="input mono" x-model="customerModal.form.cnic" :class="customerModal.errors.cnic && 'is-invalid'" placeholder="35202-1234567-1" maxlength="15">
+                <p class="field-error" x-show="customerModal.errors.cnic" x-text="customerModal.errors.cnic"></p>
+                <p class="help" x-show="!customerModal.errors.cnic">Needed for credit (Khata) customers and warranty claims.</p>
+              </div>
+            </div>
+            <p class="help mt-3">The customer is created with no credit limit. A manager can set a limit from the Customers page.</p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="customerModal.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="customerModal.busy"><span x-html="ABM.icon('check')"></span>Add &amp; select</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Shift · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .denom-row { display: grid; grid-template-columns: 5rem 1fr 6.5rem; align-items: center; gap: .5rem; }
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block; }
+      .no-print { display: none !important; }
+      .shift-doc table { border-collapse: collapse; width: 100%; }
+      .shift-doc th, .shift-doc td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; }
+      .shift-doc th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="shift-view" data-title="Cashier Shift" data-perm="shifts.view">
+  <main x-data="shiftViewPage()" @keydown.escape.window="closeModals()">
+    <!-- Not found -->
+    <template x-if="!shift">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('wallet','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900" x-text="denied ? 'That drawer belongs to someone else' : 'Shift not found'"></h2>
+          <p class="text-sm text-slate-600 mt-2"><span x-show="!denied">No shift matches id <span class="mono" x-text="requestedId || '(none)'"></span>.</span><span x-show="denied">You can only open your own shifts.</span></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap"><a href="shifts.html" class="btn btn-primary">Back to shifts</a><a href="pos.html" class="btn btn-secondary">POS</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="shift">
+      <div>
+        <div class="no-print">
+          <!-- Header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="shifts.html" class="hover:text-navy-700">Cashier shifts</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="isOpen ? 'Open drawer' : 'Shift report'"></span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title mono truncate" x-text="shift.shift_no"></h2>
+                <span x-html="$badge(shift.status, isOpen ? 'Open' : 'Closed')"></span>
+                <template x-if="!isOpen"><span x-html="$badge(varianceKey, varianceLabel)"></span></template>
+              </div>
+              <p class="page-subtitle"><b x-text="ABM.db.userName(shift.user_id)"></b> · <span x-text="branchName"></span> · opened <b x-text="ABM.utils.datetime(shift.opened_at)"></b><span x-show="shift.closed_at"> · closed <b x-text="ABM.utils.datetime(shift.closed_at)"></b></span></p>
+            </div>
+            <div class="page-actions">
+              <template x-if="canEdit && isOpen">
+                <button type="button" class="btn btn-money" @click="openClose()"><span x-html="ABM.icon('lock')"></span>Count &amp; close</button>
+              </template>
+              <template x-if="canEdit && isOpen">
+                <button type="button" class="btn btn-secondary" @click="openCash('pay_in')"><span x-html="ABM.icon('plus')"></span>Cash in</button>
+              </template>
+              <template x-if="canEdit && isOpen">
+                <button type="button" class="btn btn-secondary" @click="openCash('pay_out')"><span x-html="ABM.icon('minus')"></span>Cash out</button>
+              </template>
+              <template x-if="canEdit && isOpen">
+                <button type="button" class="btn btn-secondary" @click="openCash('bank_drop')"><span x-html="ABM.icon('building')"></span>Bank drop</button>
+              </template>
+              <button type="button" class="btn btn-secondary" @click="print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+              <a href="pos.html" class="btn btn-ghost" x-show="isOpen && canEdit"><span x-html="ABM.icon('cart')"></span>POS</a>
+            </div>
+          </div>
+
+          <div class="alert alert-info mb-4" x-show="isOpen"><span x-html="ABM.icon('info')"></span><span>This drawer is <b>open</b>. Every cash sale, khata receipt, repair payment, refund and expense <b x-text="ABM.db.userName(shift.user_id)"></b> handles at <span x-text="branchName"></span> counts here until it is closed.</span></div>
+          <div class="alert mb-4" :class="shift.variance === 0 ? 'alert-success' : shift.variance < 0 ? 'alert-danger' : 'alert-warning'" x-show="!isOpen">
+            <span x-html="ABM.icon(shift.variance === 0 ? 'check-circle' : 'warning')"></span>
+            <span>
+              Closed by <b x-text="ABM.db.userName(shift.closed_by)"></b> — expected <b x-text="$money(shift.expected_cash)"></b>, counted <b x-text="$money(shift.counted_cash)"></b>
+              <span x-show="shift.variance !== 0">, <b x-text="(shift.variance < 0 ? 'short ' : 'over ') + $money(Math.abs(shift.variance))"></b></span><span x-show="shift.variance === 0">, <b>balanced exactly</b></span>.
+              <span x-show="shift.handover_amount > 0"> <b x-text="$money(shift.handover_amount)"></b> handed to <b x-text="ABM.db.userName(shift.handover_to)"></b>.</span>
+              <span x-show="shift.banked_amount > 0"> <b x-text="$money(shift.banked_amount)"></b> banked.</span>
+            </span>
+          </div>
+
+          <!-- Tiles -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <div class="stat stat-accent">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label" x-text="isOpen ? 'In the drawer now' : 'Expected at close'"></div><div class="stat-value" x-text="$money(expected, {decimals:0})"></div></div>
+                <span class="chip chip-navy" x-html="ABM.icon('wallet')"></span>
+              </div>
+              <div class="stat-meta">float <span x-text="$money(shift.opening_float, {decimals:0})"></span> + takings − payouts</div>
+            </div>
+            <a href="#breakdown" class="stat stat-money" title="Jump to the cash breakdown">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Cash taken</div><div class="stat-value" x-text="$money(takings, {decimals:0})"></div></div>
+                <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+              </div>
+              <div class="stat-meta"><span x-text="ABM.utils.num(tally.totals.invoices)"></span> cash invoice<span x-text="tally.totals.invoices === 1 ? '' : 's'"></span> · khata &amp; repairs included</div>
+              <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+            </a>
+            <a href="#breakdown" class="stat stat-warning" title="Jump to what left the drawer">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Paid out</div><div class="stat-value text-amber-700" x-text="$money(payouts, {decimals:0})"></div></div>
+                <span class="chip chip-warning" x-html="ABM.icon('trend-down')"></span>
+              </div>
+              <div class="stat-meta">refunds, expenses, supplier cash &amp; bank drops</div>
+              <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+            </a>
+            <div class="stat" :class="!isOpen && shift.variance < 0 ? 'stat-danger' : !isOpen && shift.variance > 0 ? 'stat-warning' : 'stat-money'">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="stat-label" x-text="isOpen ? 'Counted' : 'Variance'"></div>
+                  <div class="stat-value" :class="!isOpen && shift.variance < 0 ? 'text-rose-600' : !isOpen && shift.variance > 0 ? 'text-amber-700' : 'text-emerald-700'" x-text="isOpen ? 'Not counted' : ABM.utils.money(shift.variance, {decimals:0})"></div>
+                </div>
+                <span class="chip" :class="!isOpen && shift.variance !== 0 ? 'chip-warning' : 'chip-money'" x-html="ABM.icon('scale')"></span>
+              </div>
+              <div class="stat-meta" x-text="isOpen ? 'Count the drawer when the shift ends' : (shift.variance === 0 ? 'Drawer balanced exactly' : shift.variance < 0 ? 'Less cash than expected' : 'More cash than expected')"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+            <!-- Breakdown -->
+            <div class="lg:col-span-2 min-w-0">
+              <div class="card" id="breakdown">
+                <div class="card-header">
+                  <div><div class="card-title">Cash through this drawer</div><div class="card-subtitle">Click a line to see the entries behind it</div></div>
+                  <span class="text-xs text-slate-500 hidden sm:block" x-text="ABM.utils.time(tally.from) + ' → ' + (shift.closed_at ? ABM.utils.time(shift.closed_at) : 'now')"></span>
+                </div>
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Line</th>
+                        <th class="num hidden sm:table-cell">Entries</th>
+                        <th class="num">Amount</th>
+                        <th class="w-10"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td class="font-semibold text-slate-800">Opening float</td>
+                        <td class="num hidden sm:table-cell text-slate-400">—</td>
+                        <td class="num font-semibold tabular whitespace-nowrap" x-text="$money(shift.opening_float)"></td>
+                        <td></td>
+                      </tr>
+                      <template x-for="line in tally.lines" :key="line.key">
+                        <tr :class="!line.count && 'opacity-60'">
+                          <td>
+                            <button type="button" class="flex items-center gap-2 text-left min-w-0" :disabled="!line.count" @click="toggle(line.key)">
+                              <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center" :class="line.sign > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'" x-html="ABM.icon(line.icon,'w-4 h-4')"></span>
+                              <span class="min-w-0">
+                                <span class="font-medium text-slate-800 block truncate" x-text="line.label"></span>
+                                <span class="text-[11px] text-slate-400 sm:hidden" x-text="line.count + ' entr' + (line.count === 1 ? 'y' : 'ies')"></span>
+                              </span>
+                            </button>
+                          </td>
+                          <td class="num hidden sm:table-cell text-slate-600" x-text="line.count || '—'"></td>
+                          <td class="num tabular font-semibold whitespace-nowrap" :class="line.sign > 0 ? 'text-emerald-700' : 'text-amber-700'" x-text="(line.amount ? (line.sign > 0 ? '+ ' : '− ') : '') + $money(line.amount)"></td>
+                          <td class="actions">
+                            <button type="button" class="btn btn-ghost btn-sm btn-icon" x-show="line.count" @click="toggle(line.key)" :aria-label="'Show ' + line.label" x-html="ABM.icon(expanded[line.key] ? 'chevron-up' : 'chevron-down','w-4 h-4')"></button>
+                          </td>
+                        </tr>
+                      </template>
+                      <template x-for="line in tally.lines.filter(l => expanded[l.key] && l.count)" :key="'x' + line.key">
+                        <tr>
+                          <td colspan="4" class="!bg-slate-50 !py-3">
+                            <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2" x-text="line.label"></div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                              <template x-for="e in line.items" :key="e.id">
+                                <div class="flex items-center justify-between gap-2 rounded-lg bg-white border border-slate-200 px-2.5 py-1.5 min-w-0">
+                                  <span class="min-w-0">
+                                    <template x-if="e.href"><a :href="e.href" class="font-medium text-navy-700 hover:underline block truncate" x-text="e.label"></a></template>
+                                    <template x-if="!e.href"><span class="font-medium text-slate-800 block truncate" x-text="e.label"></span></template>
+                                    <span class="text-[11px] text-slate-500 block truncate" x-text="[ABM.utils.time(e.at), e.sub].filter(Boolean).join(' · ')"></span>
+                                  </span>
+                                  <b class="tabular flex-none" :class="line.sign > 0 ? 'text-emerald-700' : 'text-amber-700'" x-text="$money(e.amount, {decimals:0})"></b>
+                                </div>
+                              </template>
+                            </div>
+                          </td>
+                        </tr>
+                      </template>
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td x-text="isOpen ? 'Should be in the drawer' : 'Expected at close'"></td>
+                        <td class="hidden sm:table-cell"></td>
+                        <td class="num tabular text-base" x-text="$money(expected)"></td>
+                        <td></td>
+                      </tr>
+                      <tr x-show="!isOpen">
+                        <td>Counted</td>
+                        <td class="hidden sm:table-cell"></td>
+                        <td class="num tabular text-base" x-text="$money(shift.counted_cash)"></td>
+                        <td></td>
+                      </tr>
+                      <tr x-show="!isOpen">
+                        <td>Variance</td>
+                        <td class="hidden sm:table-cell"></td>
+                        <td class="num tabular text-base" :class="shift.variance < 0 ? 'text-rose-600' : shift.variance > 0 ? 'text-amber-700' : 'text-emerald-700'" x-text="ABM.utils.money(shift.variance)"></td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+
+              <!-- Movements -->
+              <div class="card mt-4">
+                <div class="card-header">
+                  <div><div class="card-title">Cash in and out of the drawer</div><div class="card-subtitle">Money that no sale or expense records — float top-ups, petty pay-outs, bank drops</div></div>
+                  <template x-if="canEdit && isOpen"><button type="button" class="btn btn-secondary btn-sm" @click="openCash('pay_out')"><span x-html="ABM.icon('plus')"></span>Record</button></template>
+                </div>
+                <div class="table-wrap">
+                  <table class="table">
+                    <thead>
+                      <tr><th>Type</th><th>Reason</th><th class="hidden sm:table-cell">By</th><th class="hidden sm:table-cell">Time</th><th class="num">Amount</th></tr>
+                    </thead>
+                    <tbody>
+                      <template x-for="m in movements" :key="m.id">
+                        <tr>
+                          <td><span x-html="$badge(m.type)"></span></td>
+                          <td class="text-slate-700 truncate max-w-[12rem]" x-text="m.reason || '—'"></td>
+                          <td class="hidden sm:table-cell text-slate-600" x-text="ABM.db.userName(m.created_by)"></td>
+                          <td class="hidden sm:table-cell text-slate-500 whitespace-nowrap" x-text="ABM.utils.time(m.created_at)"></td>
+                          <td class="num tabular font-semibold whitespace-nowrap" :class="m.type === 'pay_in' ? 'text-emerald-700' : 'text-amber-700'" x-text="(m.type === 'pay_in' ? '+ ' : '− ') + $money(m.amount)"></td>
+                        </tr>
+                      </template>
+                      <template x-if="!movements.length">
+                        <tr><td colspan="5" class="empty py-6 text-sm">Nothing went in or out of the drawer outside the normal takings.</td></tr>
+                      </template>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <!-- Side -->
+            <div class="space-y-4 min-w-0">
+              <div class="card">
+                <div class="card-header"><div class="card-title">Shift</div></div>
+                <div class="card-body">
+                  <dl class="text-sm space-y-2">
+                    <div class="flex justify-between gap-3"><dt class="text-slate-500">Shift no.</dt><dd class="mono text-slate-800" x-text="shift.shift_no"></dd></div>
+                    <div class="flex justify-between gap-3"><dt class="text-slate-500">Cashier</dt><dd class="font-medium text-slate-800" x-text="ABM.db.userName(shift.user_id)"></dd></div>
+                    <div class="flex justify-between gap-3"><dt class="text-slate-500">Branch</dt><dd class="font-medium text-slate-800 text-right"><span class="badge badge-slate mr-1" x-text="branchCode"></span><span x-text="branchName"></span></dd></div>
+                    <div class="flex justify-between gap-3"><dt class="text-slate-500">Opened</dt><dd class="text-slate-800" x-text="ABM.utils.datetime(shift.opened_at)"></dd></div>
+                    <div class="flex justify-between gap-3" x-show="shift.closed_at"><dt class="text-slate-500">Closed</dt><dd class="text-slate-800" x-text="ABM.utils.datetime(shift.closed_at)"></dd></div>
+                    <div class="flex justify-between gap-3"><dt class="text-slate-500">Length</dt><dd class="text-slate-800" x-text="lengthLabel"></dd></div>
+                    <div class="flex justify-between gap-3" x-show="!isOpen && shift.handover_to"><dt class="text-slate-500">Handed to</dt><dd class="font-medium text-slate-800" x-text="ABM.db.userName(shift.handover_to)"></dd></div>
+                    <div class="flex justify-between gap-3" x-show="!isOpen && shift.handover_amount > 0"><dt class="text-slate-500">Handover</dt><dd class="font-semibold tabular" x-text="$money(shift.handover_amount)"></dd></div>
+                    <div class="flex justify-between gap-3" x-show="!isOpen && shift.banked_amount > 0"><dt class="text-slate-500">Banked</dt><dd class="font-semibold tabular" x-text="$money(shift.banked_amount)"></dd></div>
+                  </dl>
+                  <div class="mt-3 pt-3 border-t border-slate-200" x-show="shift.notes"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Notes</div><p class="text-sm text-slate-700 whitespace-pre-line" x-text="shift.notes"></p></div>
+                </div>
+              </div>
+
+              <div class="card" x-show="!isOpen && denomRows.length">
+                <div class="card-header"><div class="card-title">Counted denominations</div></div>
+                <div class="card-body">
+                  <div class="divide-y divide-slate-100 text-sm">
+                    <template x-for="d in denomRows" :key="d.label">
+                      <div class="flex items-center justify-between gap-3 py-1.5">
+                        <span class="text-slate-600" x-text="d.label"></span>
+                        <span class="text-slate-400 text-xs" x-text="d.count !== null ? '× ' + d.count : ''"></span>
+                        <b class="tabular text-slate-800" x-text="$money(d.amount, {decimals:0})"></b>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" x-show="isOpen && canEdit">
+                <div class="card-header"><div class="card-title">Ending the shift</div></div>
+                <div class="card-body space-y-3">
+                  <p class="text-sm text-slate-600">Count the cash in the drawer, note what you hand to the next cashier and what goes to the bank. The difference against <b x-text="$money(expected)"></b> is recorded either way.</p>
+                  <button type="button" class="btn btn-money btn-block" @click="openClose()"><span x-html="ABM.icon('lock')"></span>Count &amp; close the drawer</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Cash in / out modal -->
+        <div x-show="cash.open" x-cloak class="modal-backdrop no-print" @click.self="cash.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="cashTitle">
+            <form @submit.prevent="saveCash()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="cashTitle" x-text="cash.type === 'pay_in' ? 'Cash into the drawer' : cash.type === 'pay_out' ? 'Cash out of the drawer' : 'Bank drop'"></div>
+                  <div class="text-xs text-slate-500" x-text="cash.type === 'pay_in' ? 'A float top-up or change brought from the safe.' : cash.type === 'pay_out' ? 'Petty cash that is not an expense record.' : 'Cash sent to the bank during the shift.'"></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="cash.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="btn-group w-full">
+                  <button type="button" class="btn btn-sm flex-1" :class="cash.type === 'pay_in' && 'active'" @click="cash.type = 'pay_in'">Cash in</button>
+                  <button type="button" class="btn btn-sm flex-1" :class="cash.type === 'pay_out' && 'active'" @click="cash.type = 'pay_out'">Cash out</button>
+                  <button type="button" class="btn btn-sm flex-1" :class="cash.type === 'bank_drop' && 'active'" @click="cash.type = 'bank_drop'">Bank drop</button>
+                </div>
+                <div>
+                  <label class="label" for="cash-amount">Amount <span class="req">*</span></label>
+                  <div class="input-group"><input id="cash-amount" x-ref="cashAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="cash.amount" :class="cash.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="cash.errors.amount" x-text="cash.errors.amount"></p>
+                  <p class="help" x-show="!cash.errors.amount && cash.type !== 'pay_in'">In the drawer right now: <b x-text="$money(expected)"></b>.</p>
+                </div>
+                <div>
+                  <label class="label" for="cash-reason">Reason <span class="req">*</span></label>
+                  <input id="cash-reason" type="text" class="input" x-model="cash.reason" :class="cash.errors.reason && 'is-invalid'" :placeholder="cash.type === 'bank_drop' ? 'Deposit slip number' : 'e.g. tea and lunch, change from the safe'" maxlength="140">
+                  <p class="field-error" x-show="cash.errors.reason" x-text="cash.errors.reason"></p>
+                </div>
+                <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><span>This is not an expense — it only moves cash. Record a real cost in <a href="expenses.html" class="font-semibold underline">Expenses</a> so it reaches the accounts.</span></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="cash.open = false">Cancel</button>
+                <button type="submit" class="btn btn-primary" :disabled="cash.busy"><span x-html="ABM.icon('check')"></span>Record</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Close shift modal -->
+        <div x-show="close.open" x-cloak class="modal-backdrop no-print" @click.self="close.open = false">
+          <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="closeTitle">
+            <form @submit.prevent="saveClose()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="closeTitle">Count the drawer and close</div>
+                  <div class="text-xs text-slate-500">Count the cash first, then say what happens to it.</div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="close.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div>
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="label !mb-0">Cash count</div>
+                      <div class="btn-group">
+                        <button type="button" class="btn btn-sm" :class="close.mode === 'count' && 'active'" @click="close.mode = 'count'">By note</button>
+                        <button type="button" class="btn btn-sm" :class="close.mode === 'total' && 'active'" @click="close.mode = 'total'">Total only</button>
+                      </div>
+                    </div>
+                    <div class="mt-2 space-y-1.5" x-show="close.mode === 'count'">
+                      <template x-for="d in denoms" :key="d">
+                        <div class="denom-row">
+                          <span class="text-sm font-semibold text-slate-600" x-text="'Rs. ' + ABM.utils.num(d)"></span>
+                          <input type="number" min="0" step="1" class="input input-sm text-right" x-model.number="close.counts[d]" :aria-label="'Number of Rs ' + d + ' notes'" placeholder="0">
+                          <span class="text-sm tabular text-right text-slate-700" x-text="$money((Number(close.counts[d]) || 0) * d, {decimals:0})"></span>
+                        </div>
+                      </template>
+                      <div class="denom-row">
+                        <span class="text-sm font-semibold text-slate-600">Coins</span>
+                        <input type="number" min="0" step="0.01" class="input input-sm text-right" x-model.number="close.coins" aria-label="Coins total" placeholder="0">
+                        <span class="text-sm tabular text-right text-slate-700" x-text="$money(Number(close.coins) || 0, {decimals:0})"></span>
+                      </div>
+                    </div>
+                    <div class="mt-2" x-show="close.mode === 'total'">
+                      <div class="input-group"><input type="number" min="0" step="0.01" class="input input-money" x-model.number="close.total" aria-label="Counted cash"><span class="addon">Rs.</span></div>
+                    </div>
+                    <p class="field-error" x-show="close.errors.counted" x-text="close.errors.counted"></p>
+                  </div>
+
+                  <div class="space-y-3">
+                    <div class="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                      <div class="flex items-center justify-between gap-3 px-3 py-2 text-sm"><span class="text-slate-500">Expected</span><b class="tabular text-slate-800" x-text="$money(expected)"></b></div>
+                      <div class="flex items-center justify-between gap-3 px-3 py-2 text-sm"><span class="text-slate-500">Counted</span><b class="tabular text-slate-800" x-text="$money(counted)"></b></div>
+                      <div class="flex items-center justify-between gap-3 px-3 py-2" :class="varPreview === 0 ? 'bg-emerald-50' : varPreview < 0 ? 'bg-rose-50' : 'bg-amber-50'">
+                        <span class="text-sm font-semibold" :class="varPreview === 0 ? 'text-emerald-700' : varPreview < 0 ? 'text-rose-700' : 'text-amber-700'" x-text="varPreview === 0 ? 'Balanced' : varPreview < 0 ? 'Short' : 'Over'"></span>
+                        <b class="tabular" :class="varPreview === 0 ? 'text-emerald-700' : varPreview < 0 ? 'text-rose-700' : 'text-amber-700'" x-text="ABM.utils.money(varPreview)"></b>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="label" for="cl-handto">Hand the drawer to</label>
+                      <select id="cl-handto" class="select" x-model="close.handoverTo">
+                        <option value="">Nobody — drawer is emptied</option>
+                        <template x-for="u in branchStaff" :key="u.id"><option :value="String(u.id)" x-text="u.name"></option></template>
+                      </select>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label class="label" for="cl-handover">Left in the drawer</label>
+                        <div class="input-group"><input id="cl-handover" type="number" min="0" step="0.01" class="input input-money" x-model.number="close.handover" :class="close.errors.handover && 'is-invalid'"><span class="addon">Rs.</span></div>
+                      </div>
+                      <div>
+                        <label class="label" for="cl-banked">Sent to the bank</label>
+                        <div class="input-group"><input id="cl-banked" type="number" min="0" step="0.01" class="input input-money" x-model.number="close.banked" :class="close.errors.handover && 'is-invalid'"><span class="addon">Rs.</span></div>
+                      </div>
+                      <div class="sm:col-span-2" x-show="Number(close.banked) > 0">
+                        <label class="label" for="cl-bank">Into which account</label>
+                        <select id="cl-bank" class="select" x-model="close.bankAccountId" :disabled="!bankAccounts.length">
+                          <option value="">Do not record it in the bank</option>
+                          <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="a.name"></option></template>
+                        </select>
+                        <p class="help" x-show="!bankAccounts.length">No bank account yet — <a href="banking.html?new=1" class="font-semibold text-navy-700 hover:underline">add one</a> so banked cash is tracked.</p>
+                      </div>
+                    </div>
+                    <p class="field-error" x-show="close.errors.handover" x-text="close.errors.handover"></p>
+                    <p class="help" x-show="!close.errors.handover">Left + banked must not exceed the counted cash. <button type="button" class="text-navy-700 font-semibold hover:underline" @click="close.banked = ABM.utils.round2(Math.max(0, counted - (Number(close.handover) || 0)))">Bank the rest</button></p>
+                  </div>
+                </div>
+                <div>
+                  <label class="label" for="cl-notes">Notes</label>
+                  <input id="cl-notes" type="text" class="input" x-model="close.notes" placeholder="Anything worth recording about the variance or the handover" maxlength="200">
+                </div>
+                <div class="alert alert-warning" x-show="varPreview !== 0"><span x-html="ABM.icon('warning')"></span><span>The drawer is <b x-text="(varPreview < 0 ? 'short ' : 'over ') + $money(Math.abs(varPreview))"></b>. Recount before closing — the difference is recorded against <b x-text="ABM.db.userName(shift.user_id)"></b>.</span></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="close.open = false">Keep counting</button>
+                <button type="submit" class="btn btn-money" :disabled="close.busy"><span x-html="ABM.icon('lock')"></span>Close the shift</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- ================= PRINT: shift report ================= -->
+        <div class="print-only print-area shift-doc text-slate-900">
+          <div class="flex justify-between items-start gap-6 border-b-2 border-slate-900 pb-3">
+            <div class="min-w-0">
+              <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[16mm] w-auto" onerror="ABM.brand.onError(this)">
+              <div class="text-2xl font-extrabold" x-text="settings.company_name || 'Abbott Mobiles'"></div>
+              <div class="text-xs mt-1"><b x-text="branchName"></b><span x-show="branch && branch.address"> · <span x-text="branch ? branch.address : ''"></span></span></div>
+            </div>
+            <div class="text-right flex-none">
+              <div class="text-lg font-extrabold uppercase tracking-wide">Cashier Shift Report</div>
+              <div class="mono text-base font-semibold" x-text="shift.shift_no"></div>
+              <div class="text-xs">Cashier: <b x-text="ABM.db.userName(shift.user_id)"></b></div>
+              <div class="text-xs" x-text="ABM.utils.datetime(shift.opened_at) + ' → ' + (shift.closed_at ? ABM.utils.datetime(shift.closed_at) : 'open')"></div>
+            </div>
+          </div>
+          <table class="mt-4">
+            <thead><tr><th>Line</th><th class="!text-right" style="width:14%">Entries</th><th class="!text-right" style="width:22%">Amount</th></tr></thead>
+            <tbody>
+              <tr><td>Opening float</td><td class="!text-right">—</td><td class="!text-right" x-text="$money(shift.opening_float)"></td></tr>
+              <template x-for="line in tally.lines" :key="'p' + line.key">
+                <tr><td x-text="line.label"></td><td class="!text-right" x-text="line.count || '—'"></td><td class="!text-right" x-text="(line.amount ? (line.sign > 0 ? '+ ' : '− ') : '') + $money(line.amount)"></td></tr>
+              </template>
+            </tbody>
+            <tfoot>
+              <tr><td colspan="2" class="!text-right font-bold" x-text="isOpen ? 'Should be in the drawer' : 'Expected'"></td><td class="!text-right font-extrabold" x-text="$money(expected)"></td></tr>
+              <tr x-show="!isOpen"><td colspan="2" class="!text-right font-bold">Counted</td><td class="!text-right font-extrabold" x-text="$money(shift.counted_cash)"></td></tr>
+              <tr x-show="!isOpen"><td colspan="2" class="!text-right font-bold">Variance</td><td class="!text-right font-extrabold" x-text="ABM.utils.money(shift.variance)"></td></tr>
+            </tfoot>
+          </table>
+          <table class="mt-4" x-show="denomRows.length">
+            <thead><tr><th>Denomination</th><th class="!text-right" style="width:14%">Count</th><th class="!text-right" style="width:22%">Amount</th></tr></thead>
+            <tbody>
+              <template x-for="d in denomRows" :key="'d' + d.label">
+                <tr><td x-text="d.label"></td><td class="!text-right" x-text="d.count === null ? '—' : d.count"></td><td class="!text-right" x-text="$money(d.amount)"></td></tr>
+              </template>
+            </tbody>
+          </table>
+          <div class="text-xs mt-3" x-show="!isOpen">
+            Handed over: <b x-text="$money(shift.handover_amount)"></b><span x-show="shift.handover_to"> to <b x-text="ABM.db.userName(shift.handover_to)"></b></span> ·
+            Banked: <b x-text="$money(shift.banked_amount)"></b>
+          </div>
+          <div class="text-xs mt-1" x-show="shift.notes"><b>Notes:</b> <span x-text="shift.notes"></span></div>
+          <div class="grid grid-cols-1 print:grid-cols-3 gap-8 mt-12 text-xs">
+            <div class="border-t border-slate-900 pt-1">Cashier</div>
+            <div class="border-t border-slate-900 pt-1">Received by</div>
+            <div class="border-t border-slate-900 pt-1">Manager</div>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-6">Printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="ABM.session.user() ? ABM.session.user().name : ''"></span></div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function shiftViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const DENOMS = [5000, 1000, 500, 100, 50, 20, 10];
+      const blankCounts = () => { const c = {}; DENOMS.forEach((d) => { c[d] = ''; }); return c; };
+      return {
+        requestedId: utils.qs('id'),
+        isSuperAdmin: session.isSuperAdmin(),
+        me: (session.user() || {}).id || null,
+        ownOnly: !session.can('shifts.all'),
+        settings: db.settings(),
+        denoms: DENOMS,
+        shift: null, branch: null, tally: { lines: [], totals: {}, from: '', expected: 0 }, movements: [],
+        denied: false, expanded: {}, busy: false,
+        cash: { open: false, type: 'pay_out', amount: '', reason: '', errors: {}, busy: false },
+        close: { open: false, mode: 'count', counts: blankCounts(), coins: '', total: '', handoverTo: '', handover: '', banked: '', bankAccountId: '', notes: '', errors: {}, busy: false },
+
+        get isOpen() { return !!this.shift && this.shift.status === 'open'; },
+        get branchName() { return this.shift ? db.branchName(this.shift.branch_id) : ''; },
+        get branchCode() { return this.shift ? db.branchCode(this.shift.branch_id) : ''; },
+        get canEdit() {
+          if (!this.shift || !session.can('shifts.edit')) return false;
+          if (this.ownOnly) return String(this.shift.user_id) === String(this.me);
+          return this.isSuperAdmin || String(this.shift.branch_id) === String(session.branchId());
+        },
+        get expected() { return this.isOpen ? this.tally.expected : (Number(this.shift.expected_cash) || 0); },
+        get takings() { return utils.round2(this.tally.lines.filter((l) => l.sign > 0).reduce((a, l) => a + l.amount, 0)); },
+        get payouts() { return utils.round2(this.tally.lines.filter((l) => l.sign < 0).reduce((a, l) => a + l.amount, 0)); },
+        get varianceKey() { const v = utils.round2(this.shift.variance); return v === 0 ? 'balanced' : v < 0 ? 'short' : 'over'; },
+        get varianceLabel() { const v = utils.round2(this.shift.variance); return v === 0 ? 'Balanced' : (v < 0 ? 'Short ' : 'Over ') + utils.money(Math.abs(v), { decimals: 0 }); },
+        get lengthLabel() {
+          const a = utils.parseDate(this.shift.opened_at), b = utils.parseDate(this.shift.closed_at || utils.now());
+          if (!a || !b) return '—';
+          const mins = Math.max(0, Math.round((b - a) / 60000));
+          return Math.floor(mins / 60) + 'h ' + String(mins % 60).padStart(2, '0') + 'm' + (this.isOpen ? ' so far' : '');
+        },
+        get bankAccounts() { return this.shift ? ABM.bank.accounts(this.shift.branch_id).filter(function (a) { return a.is_active; }) : []; },
+        get branchStaff() { return utils.sortBy(db.all('users').filter((u) => u.is_active && String(u.branch_id) === String(this.shift.branch_id) && String(u.id) !== String(this.shift.user_id)), 'name'); },
+        get denomRows() {
+          const d = this.shift && this.shift.denominations;
+          if (!d) return [];
+          const out = DENOMS.filter((n) => Number(d[n]) > 0).map((n) => ({ label: 'Rs. ' + utils.num(n) + ' notes', count: Number(d[n]), amount: Number(d[n]) * n }));
+          if (Number(d.coins) > 0) out.push({ label: 'Coins', count: null, amount: Number(d.coins) });
+          return out;
+        },
+        get counted() {
+          if (this.close.mode === 'total') return utils.round2(Number(this.close.total) || 0);
+          const notes = DENOMS.reduce((a, d) => a + (Number(this.close.counts[d]) || 0) * d, 0);
+          return utils.round2(notes + (Number(this.close.coins) || 0));
+        },
+        get varPreview() { return utils.round2(this.counted - this.expected); },
+
+        init() {
+          this.load();
+          if (this.shift && utils.qs('print') === '1') setTimeout(() => this.print(), 900);
+        },
+        load() {
+          const s = db.find('cashier_shifts', this.requestedId);
+          if (!s) { this.shift = null; return; }
+          if (this.ownOnly && String(s.user_id) !== String(this.me)) { this.shift = null; this.denied = true; return; }
+          if (!this.isSuperAdmin && String(s.branch_id) !== String(session.branchId())) { this.shift = null; this.denied = true; return; }
+          this.shift = { ...s };
+          this.branch = db.find('branches', s.branch_id);
+          this.tally = ABM.shift.tally(s);
+          this.movements = utils.sortBy(db.where('cash_movements', { shift_id: s.id }), 'created_at', 'desc');
+        },
+        toggle(key) { this.expanded[key] = !this.expanded[key]; },
+        closeModals() { this.cash.open = false; this.close.open = false; },
+        print() { ui.print(); },
+
+        /* ------------------------------------------------------- cash in/out */
+        openCash(type) {
+          if (!this.canEdit || !this.isOpen) { ui.warn('This drawer is closed.'); return; }
+          this.cash = { open: true, type, amount: '', reason: '', errors: {}, busy: false };
+          this.$nextTick(() => { if (this.$refs.cashAmount) this.$refs.cashAmount.focus(); });
+        },
+        saveCash() {
+          const c = this.cash, e = {};
+          const amt = Number(c.amount);
+          if (c.amount === '' || c.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          else if (c.type !== 'pay_in' && amt > this.expected + 0.005) e.amount = 'Only ' + utils.money(this.expected) + ' is in the drawer.';
+          if (!String(c.reason || '').trim()) e.reason = 'Say what this cash is for — it has to be explainable at close.';
+          c.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          c.busy = true;
+          try {
+            ABM.shift.movement(this.shift.id, c.type, amt, c.reason);
+            ui.success(ui.statusLabel(c.type) + ' of ' + utils.money(amt) + ' recorded.');
+            c.open = false;
+          } catch (err) { ui.error(err.message || 'Could not record the cash movement.'); }
+          finally { c.busy = false; this.load(); }
+        },
+
+        /* ---------------------------------------------------------- closing */
+        openClose() {
+          if (!this.canEdit || !this.isOpen) { ui.warn('This drawer is already closed.'); return; }
+          this.load();
+          this.close = {
+            open: true, mode: 'count', counts: blankCounts(), coins: '', total: '',
+            handoverTo: '', handover: '', banked: '',
+            bankAccountId: this.bankAccounts.length ? String(this.bankAccounts[0].id) : '',
+            notes: '', errors: {}, busy: false,
+          };
+        },
+        saveClose() {
+          const c = this.close, e = {};
+          const counted = this.counted;
+          if (!(counted >= 0)) e.counted = 'Count the cash in the drawer.';
+          if (c.mode === 'total' && (c.total === '' || c.total === null)) e.counted = 'Enter the total counted.';
+          const handover = Number(c.handover) || 0, banked = Number(c.banked) || 0;
+          if (handover < 0 || banked < 0) e.handover = 'Amounts cannot be negative.';
+          else if (utils.round2(handover + banked) > counted + 0.005) e.handover = 'Left (' + utils.money(handover) + ') and banked (' + utils.money(banked) + ') are more than the ' + utils.money(counted) + ' counted.';
+          if (handover > 0 && !c.handoverTo) e.handover = 'Say who is taking the cash left in the drawer.';
+          c.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          c.busy = true;
+          try {
+            const denominations = c.mode === 'count'
+              ? Object.assign({ coins: Number(c.coins) || 0 }, DENOMS.reduce((acc, d) => { acc[d] = Number(c.counts[d]) || 0; return acc; }, {}))
+              : null;
+            const row = ABM.shift.close(this.shift.id, {
+              counted, denominations, handoverTo: c.handoverTo || null,
+              handoverAmount: handover, bankedAmount: banked, notes: c.notes,
+            });
+            // the cash the shift sent to the bank has to land in an account
+            let bankedNote = '';
+            if (banked > 0 && c.bankAccountId) {
+              try {
+                ABM.bank.deposit(c.bankAccountId, banked, {
+                  date: utils.today(), reference: this.shift.shift_no, notes: 'Banked at shift close',
+                  ref: { type: 'cashier_shift', id: this.shift.id }, branchId: this.shift.branch_id,
+                });
+                bankedNote = ' ' + utils.money(banked) + ' deposited into ' + db.find('bank_accounts', c.bankAccountId).name + '.';
+              } catch (bankErr) { ui.warn('The shift is closed, but the deposit could not be booked to the bank: ' + bankErr.message); }
+            }
+            ui.success('Shift closed — ' + (row.variance === 0 ? 'the drawer balanced.' : (row.variance < 0 ? 'short ' : 'over ') + utils.money(Math.abs(row.variance)) + '.') + bankedNote);
+            c.open = false;
+          } catch (err) { ui.error(err.message || 'Could not close the shift.'); }
+          finally { c.busy = false; this.load(); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

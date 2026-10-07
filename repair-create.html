@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>New Job Card · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .chip-btn { display: inline-flex; align-items: center; gap: .375rem; padding: .375rem .75rem; border-radius: .65rem; border: 1px solid rgb(var(--slate-300)); background: rgb(var(--surface)); color: rgb(var(--slate-700)); font-size: .8125rem; font-weight: 600; cursor: pointer; transition: background .12s, border-color .12s, color .12s; }
+    .chip-btn:hover { border-color: rgb(var(--navy-500)); }
+    .chip-btn.on { background: rgb(var(--navy-800)); border-color: rgb(var(--navy-800)); color: #fff; }
+    .chip-btn svg { width: 1rem; height: 1rem; }
+    .section-num { display: inline-flex; align-items: center; justify-content: center; width: 1.75rem; height: 1.75rem; border-radius: 999px; background: rgb(var(--navy-500) / .14); color: rgb(var(--navy-700)); font-size: .75rem; font-weight: 800; flex: none; }
+    html[data-theme="dark"] .section-num { color: rgb(var(--navy-300)); }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="repair-create" data-title="New Job Card" data-perm="repairs.add">
+  <main x-data="repairCreatePage()" @keydown.escape.window="closeModals()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="repairs.html" class="hover:text-navy-700">Repair Jobs</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>New job card</span></div>
+        <h2 class="page-title">New Job Card</h2>
+        <p class="page-subtitle">Device intake at <b x-text="ABM.db.branchName(form.branch_id)"></b> · next number <span class="mono" x-text="nextNoPreview"></span></p>
+      </div>
+      <div class="page-actions">
+        <a href="repairs.html" class="btn btn-secondary"><span x-html="ABM.icon('arrow-left')"></span>Back to jobs</a>
+      </div>
+    </div>
+
+    <!-- Website request banner -->
+    <template x-if="request">
+      <div class="alert alert-info mb-4">
+        <span x-html="ABM.icon('globe')"></span>
+        <div class="min-w-0 flex-1">
+          <b>Prefilled from website request</b> by <span x-text="request.name"></span> (<span class="mono" x-text="request.phone"></span>) — <span x-text="request.problem"></span>
+          <template x-if="request.status === 'converted'"><div class="mt-1">This request was already converted to <a :href="'repair-view.html?id=' + request.job_id" class="font-semibold underline">a job card</a>. Saving will create another job.</div></template>
+        </div>
+      </div>
+    </template>
+
+    <form @submit.prevent="save()" novalidate>
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div class="xl:col-span-2 space-y-4 min-w-0">
+
+          <!-- 1. Customer -->
+          <div class="card">
+            <div class="card-header">
+              <div class="flex items-center gap-3"><span class="section-num">1</span><div><div class="card-title">Customer</div><div class="card-subtitle">Who is leaving the device</div></div></div>
+              <button type="button" class="btn btn-secondary btn-sm" data-quick-add @click="openQuickAdd()"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Quick add</button>
+            </div>
+            <div class="card-body">
+              <template x-if="!customer">
+                <div>
+                  <label class="label" for="cust-q">Search by name or phone <span class="req">*</span></label>
+                  <div class="relative">
+                    <div class="input-icon">
+                      <span x-html="ABM.icon('search')"></span>
+                      <input id="cust-q" type="search" class="input" :class="errors.customer && 'is-invalid'" x-model.debounce.150ms="custQ" x-ref="custQ" placeholder="Start typing a name or phone number…" autocomplete="off" @keydown.enter.prevent="custResults.length && selectCustomer(custResults[0])">
+                    </div>
+                    <div class="dropdown left-0 right-0 mt-1" x-show="custQ.trim().length >= 2" x-cloak @click.outside="custQ = ''">
+                      <template x-for="c in custResults" :key="c.id">
+                        <button type="button" class="dropdown-item" @click="selectCustomer(c)">
+                          <span class="avatar w-8 h-8 text-xs" x-text="ABM.utils.initials(c.name)"></span>
+                          <span class="flex-1 min-w-0"><span class="block font-medium text-slate-800 truncate" x-text="c.name"></span><span class="block text-xs text-slate-500 mono" x-text="c.phone || 'no phone'"></span></span>
+                          <span class="badge" :class="c.balance > 0 ? 'badge-amber' : c.balance < 0 ? 'badge-purple' : 'badge-slate'" x-text="c.balance > 0 ? 'Owes ' + $money(c.balance,{decimals:0}) : c.balance < 0 ? 'Credit ' + $money(-c.balance,{decimals:0}) : 'Clear'"></span>
+                        </button>
+                      </template>
+                      <template x-if="!custResults.length"><div class="px-2.5 py-2 text-sm text-slate-500">No customer matches. <button type="button" class="font-semibold text-navy-700 hover:underline" @click="openQuickAdd(custQ)">Quick add “<span x-text="custQ"></span>”</button></div></template>
+                    </div>
+                  </div>
+                  <p class="field-error" x-show="errors.customer" x-text="errors.customer"></p>
+                  <p class="help" x-show="!errors.customer">Walk-in customers need at least a name and phone so we can call when the device is ready.</p>
+                </div>
+              </template>
+              <template x-if="customer">
+                <div class="flex flex-wrap items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <span class="avatar w-10 h-10 text-sm" x-text="ABM.utils.initials(customer.name)"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="font-semibold text-slate-900 truncate" x-text="customer.name"></div>
+                    <div class="text-xs text-slate-600 flex flex-wrap gap-x-3"><span class="mono" x-text="customer.phone || 'no phone'"></span><span x-show="customer.address" x-text="customer.address"></span></div>
+                    <div class="text-xs mt-0.5" x-show="customer.balance" :class="customer.balance > 0 ? 'text-amber-700' : 'text-purple-700'" x-text="customer.balance > 0 ? 'Khata balance ' + $money(customer.balance) : 'Store credit ' + $money(-customer.balance)"></div>
+                  </div>
+                  <div class="flex items-center gap-1">
+                    <a :href="'customer-view.html?id=' + customer.id" class="btn btn-ghost btn-sm" target="_blank" rel="noopener"><span x-html="ABM.icon('eye','w-4 h-4')"></span>Profile</a>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="customer = null; $nextTick(() => $refs.custQ && $refs.custQ.focus())">Change</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- 2. Device -->
+          <div class="card">
+            <div class="card-header">
+              <div class="flex items-center gap-3"><span class="section-num">2</span><div><div class="card-title">Device</div><div class="card-subtitle">Identify the unit and record its condition</div></div></div>
+            </div>
+            <div class="card-body space-y-4">
+              <div>
+                <label class="label">Device type <span class="req">*</span></label>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="d in deviceTypes" :key="d.key">
+                    <button type="button" class="chip-btn" :class="form.device_type === d.key && 'on'" @click="setDeviceType(d.key)"><span x-html="ABM.icon(d.icon)"></span><span x-text="d.label"></span></button>
+                  </template>
+                </div>
+                <p class="field-error" x-show="errors.device_type" x-text="errors.device_type"></p>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label" for="dv-brand">Brand <span class="req">*</span></label>
+                  <select id="dv-brand" class="select" x-model="form.brand_sel" :class="errors.brand && 'is-invalid'">
+                    <option value="">Select brand…</option>
+                    <template x-for="b in brands" :key="b.id"><option :value="b.name" :selected="form.brand_sel === b.name" x-text="b.name"></option></template>
+                    <option value="__other" :selected="form.brand_sel === '__other'">Other (type below)</option>
+                  </select>
+                  <input type="text" class="input mt-2" x-show="form.brand_sel === '__other'" x-model="form.brand_other" placeholder="Brand name" maxlength="40">
+                  <p class="field-error" x-show="errors.brand" x-text="errors.brand"></p>
+                </div>
+                <div>
+                  <label class="label" for="dv-model">Model <span class="req">*</span></label>
+                  <input id="dv-model" type="text" class="input" x-model="form.model" :class="errors.model && 'is-invalid'" placeholder="e.g. iPhone 13, Latitude 5420" maxlength="80">
+                  <p class="field-error" x-show="errors.model" x-text="errors.model"></p>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="label" for="dv-serial"><span x-text="serialLabel"></span> <span class="text-slate-400 font-normal">(scan or type · optional)</span></label>
+                  <div class="flex gap-2">
+                    <div class="input-icon flex-1 min-w-0">
+                      <span x-html="ABM.icon('scan')"></span>
+                      <input id="dv-serial" type="text" class="input mono" x-model="form.serial" :class="errors.serial && 'is-invalid'" :placeholder="'Scan ' + serialLabel + ' or type it'" :inputmode="serialType === 'imei' ? 'numeric' : 'text'" maxlength="40" @keydown.enter.prevent="lookupUnit()" @input="unit = null">
+                    </div>
+                    <button type="button" class="btn btn-secondary flex-none" @click="lookupUnit()" :disabled="!form.serial.trim()"><span x-html="ABM.icon('search','w-4 h-4')"></span><span class="hidden sm:inline">Lookup</span></button>
+                  </div>
+                  <p class="field-error" x-show="errors.serial" x-text="errors.serial"></p>
+                  <p class="help" x-show="!errors.serial && !unit">Looks up units we sold: prefills brand / model and shows purchase &amp; warranty history.</p>
+                  <!-- lookup result -->
+                  <template x-if="unit && unit.found">
+                    <div class="mt-3 rounded-xl border border-navy-200 bg-navy-50 p-3 text-sm space-y-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="chip chip-navy !w-8 !h-8" x-html="ABM.icon('shield-check','w-4 h-4')"></span>
+                        <div class="min-w-0 flex-1"><div class="font-semibold text-slate-900 truncate" x-text="unit.label"></div><div class="text-xs text-slate-600">Unit registered at <span x-text="ABM.db.branchName(unit.unit.branch_id)"></span> · <span x-html="$badge(unit.unit.status)"></span></div></div>
+                        <span class="badge badge-lg" :class="unit.inWarranty ? 'badge-green' : 'badge-slate'" x-text="unit.warrantyMonths ? (unit.inWarranty ? 'In warranty until ' + $date(unit.warrantyEnd) : 'Warranty expired ' + $date(unit.warrantyEnd)) : 'No warranty record'"></span>
+                      </div>
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-slate-700">
+                        <div class="rounded-lg bg-white/70 p-2"><div class="font-bold uppercase tracking-wider text-[10px] text-slate-500">Sold</div>
+                          <template x-if="unit.sale"><div><a :href="'sale-view.html?id=' + unit.sale.id" class="font-semibold text-navy-700 hover:underline mono" x-text="unit.sale.invoice_no"></a> · <span x-text="$date(unit.sale.sale_date)"></span><div>to <span class="font-medium" x-text="ABM.db.customerName(unit.sale.customer_id)"></span> · <span x-text="$money(unit.saleItem.unit_price,{decimals:0})"></span></div></div></template>
+                          <template x-if="!unit.sale"><div class="text-slate-500">Not sold yet (still in stock)</div></template>
+                        </div>
+                        <div class="rounded-lg bg-white/70 p-2"><div class="font-bold uppercase tracking-wider text-[10px] text-slate-500">Purchased</div>
+                          <template x-if="unit.purchase"><div><a :href="'purchase-view.html?id=' + unit.purchase.id" class="font-semibold text-navy-700 hover:underline mono" x-text="unit.purchase.purchase_no"></a> · <span x-text="$date(unit.purchase.purchase_date)"></span><div>from <span class="font-medium" x-text="ABM.db.supplierName(unit.purchase.supplier_id)"></span></div></div></template>
+                          <template x-if="!unit.purchase"><div class="text-slate-500">No purchase record</div></template>
+                        </div>
+                      </div>
+                      <div class="flex flex-wrap items-center gap-2" x-show="unit.customer && (!customer || customer.id !== unit.customer.id)">
+                        <span class="text-xs text-slate-600">Sold to <b x-text="unit.customer && unit.customer.name"></b> —</span>
+                        <button type="button" class="btn btn-soft btn-sm" @click="selectCustomer(unit.customer)">Use this customer</button>
+                      </div>
+                      <div class="text-xs text-slate-600" x-show="unit.prevJobs.length">Previous repairs on this unit: <template x-for="j in unit.prevJobs" :key="j.id"><a :href="'repair-view.html?id=' + j.id" class="mono font-semibold text-navy-700 hover:underline mr-2" x-text="j.job_no"></a></template></div>
+                    </div>
+                  </template>
+                  <template x-if="unit && !unit.found">
+                    <div class="mt-3 alert alert-warning"><span x-html="ABM.icon('info')"></span><div>No unit with this <span x-text="serialLabel"></span> was sold by us — treating it as an outside device.<span x-show="unit.prevJobs.length"> Previous repairs: <template x-for="j in unit.prevJobs" :key="j.id"><a :href="'repair-view.html?id=' + j.id" class="mono font-semibold underline mr-2" x-text="j.job_no"></a></template></span></div></div>
+                  </template>
+                </div>
+                <div>
+                  <label class="label" for="dv-color">Color</label>
+                  <input id="dv-color" type="text" class="input" x-model="form.color" placeholder="e.g. Midnight Black" maxlength="40">
+                </div>
+                <div>
+                  <label class="label" for="dv-pass">Password / pattern <span class="text-slate-400 font-normal">(for testing)</span></label>
+                  <div class="input-icon input-icon-right">
+                    <span class="!pointer-events-auto cursor-pointer" @click="showPass = !showPass" x-html="ABM.icon(showPass ? 'eye' : 'lock')" title="Show / hide"></span>
+                    <input id="dv-pass" :type="showPass ? 'text' : 'password'" class="input" x-model="form.password_pattern" placeholder="PIN, pattern (e.g. L-shape) or none" maxlength="60" autocomplete="off">
+                  </div>
+                  <p class="help">Stored on the job card only; masked by default.</p>
+                </div>
+              </div>
+              <div>
+                <label class="label">Accessories received</label>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="a in accessoryOptions" :key="a">
+                    <button type="button" class="chip-btn" :class="form.accessories.includes(a) && 'on'" @click="toggleAccessory(a)"><span x-html="ABM.icon(form.accessories.includes(a) ? 'check' : 'plus')"></span><span x-text="a"></span></button>
+                  </template>
+                </div>
+                <input type="text" class="input input-sm mt-2 sm:max-w-md" x-model="form.accessories_other" placeholder="Other items (comma separated)" maxlength="120">
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label">Condition checklist</label>
+                  <div class="rounded-xl border border-slate-200 divide-y divide-slate-200">
+                    <template x-for="c in checklist" :key="c.key">
+                      <div class="flex items-center justify-between gap-3 px-3 py-2">
+                        <div class="min-w-0"><div class="text-sm font-medium text-slate-800" x-text="c.label"></div><div class="text-xs text-slate-500" x-text="c.help"></div></div>
+                        <button type="button" class="switch" :class="form.checklist[c.key] && 'on'" role="switch" :aria-checked="form.checklist[c.key] ? 'true' : 'false'" :aria-label="c.label" @click="form.checklist[c.key] = !form.checklist[c.key]"></button>
+                      </div>
+                    </template>
+                  </div>
+                  <p class="help text-rose-600 font-medium" x-show="form.checklist.water_damage">Water damage: warn the customer that repair success is not guaranteed.</p>
+                </div>
+                <div>
+                  <label class="label" for="dv-cond">Physical condition notes</label>
+                  <textarea id="dv-cond" class="textarea h-[9.5rem]" x-model="form.condition_notes" placeholder="Scratches, dents, cracks, missing parts, previous repairs…" maxlength="500"></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 3. Problem & schedule -->
+          <div class="card">
+            <div class="card-header">
+              <div class="flex items-center gap-3"><span class="section-num">3</span><div><div class="card-title">Problem &amp; schedule</div><div class="card-subtitle">What is wrong, who fixes it and by when</div></div></div>
+            </div>
+            <div class="card-body space-y-4">
+              <div>
+                <label class="label">Category</label>
+                <div class="flex flex-wrap gap-2">
+                  <template x-for="c in categories" :key="c.key">
+                    <button type="button" class="chip-btn" :class="form.category === c.key && 'on'" @click="form.category = form.category === c.key ? '' : c.key"><span x-html="ABM.icon(c.icon)"></span><span x-text="c.label"></span></button>
+                  </template>
+                </div>
+              </div>
+              <div>
+                <label class="label" for="pr-desc">Problem description <span class="req">*</span></label>
+                <textarea id="pr-desc" class="textarea" rows="3" x-model="form.problem_description" :class="errors.problem_description && 'is-invalid'" placeholder="Describe the fault as reported by the customer" maxlength="1000"></textarea>
+                <p class="field-error" x-show="errors.problem_description" x-text="errors.problem_description"></p>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label">Priority</label>
+                  <div class="inline-flex rounded-xl border border-slate-300 bg-white p-0.5 text-sm font-semibold w-full">
+                    <button type="button" class="flex-1 px-3 py-1.5 rounded-lg" :class="form.priority === 'normal' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.priority = 'normal'">Normal</button>
+                    <button type="button" class="flex-1 px-3 py-1.5 rounded-lg" :class="form.priority === 'urgent' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="form.priority = 'urgent'">Urgent</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="label" for="pr-promised">Promised date &amp; time <span class="req">*</span></label>
+                  <input id="pr-promised" type="datetime-local" class="input" x-model="form.promised_at" :class="errors.promised_at && 'is-invalid'">
+                  <div class="mt-1.5 flex flex-wrap gap-1">
+                    <template x-for="q in [[0,'Today'],[1,'Tomorrow'],[2,'+2 days'],[7,'+1 week']]" :key="q[0]">
+                      <button type="button" class="btn btn-ghost btn-sm !px-2 !py-0.5 text-xs" @click="setPromised(q[0])" x-text="q[1]"></button>
+                    </template>
+                  </div>
+                  <p class="field-error" x-show="errors.promised_at" x-text="errors.promised_at"></p>
+                </div>
+                <template x-if="isSuper">
+                  <div>
+                    <label class="label" for="pr-branch">Branch</label>
+                    <select id="pr-branch" class="select" x-model="form.branch_id" @change="onBranchChange()">
+                      <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" :selected="String(form.branch_id) === String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                    </select>
+                  </div>
+                </template>
+                <div>
+                  <label class="label" for="pr-tech">Technician <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <select id="pr-tech" class="select" x-model="form.technician_id">
+                    <option value="">Assign later</option>
+                    <template x-for="t in technicians" :key="t.id"><option :value="String(t.id)" :selected="String(form.technician_id) === String(t.id)" x-text="t.name + (ABM.roles.isBench(t.role) ? '' : ' (' + ABM.roles.label(t.role) + ')')"></option></template>
+                  </select>
+                </div>
+                <div>
+                  <label class="label" for="pr-est">Estimated cost <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <div class="input-group"><input id="pr-est" type="number" min="0" step="1" class="input input-money" x-model.number="form.estimated_cost" :class="errors.estimated_cost && 'is-invalid'" placeholder="0"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="errors.estimated_cost" x-text="errors.estimated_cost"></p>
+                  <div class="mt-1.5 flex flex-wrap gap-1 items-center" x-show="suggestedServices.length">
+                    <span class="text-[11px] text-slate-500">Suggest:</span>
+                    <template x-for="s in suggestedServices" :key="s.id">
+                      <button type="button" class="btn btn-ghost btn-sm !px-2 !py-0.5 text-xs" :title="'Add ' + s.name" @click="addServiceToEstimate(s)"><span x-html="ABM.icon('plus','w-3 h-3')"></span><span class="truncate max-w-[12rem]" x-text="s.name"></span> <span class="text-slate-400" x-text="$money(s.retail_price,{decimals:0})"></span></button>
+                    </template>
+                  </div>
+                </div>
+                <div>
+                  <label class="label" for="pr-warranty">Warranty on repair</label>
+                  <div class="input-group"><input id="pr-warranty" type="number" min="0" step="1" class="input" x-model.number="form.warranty_days" :class="errors.warranty_days && 'is-invalid'"><span class="addon">days</span></div>
+                  <p class="field-error" x-show="errors.warranty_days" x-text="errors.warranty_days"></p>
+                  <p class="help" x-show="!errors.warranty_days">Default from settings · diagnostic fee <span x-text="$money(diagnosticFee,{decimals:0})"></span> applies if the quote is declined.</p>
+                </div>
+              </div>
+              <div>
+                <label class="label" for="pr-notes">Internal notes</label>
+                <input id="pr-notes" type="text" class="input" x-model="form.notes" placeholder="Anything the technician should know (not printed)" maxlength="300">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right column: advance + summary -->
+        <div class="space-y-4 min-w-0">
+          <!-- 4. Advance payment -->
+          <div class="card">
+            <div class="card-header">
+              <div class="flex items-center gap-3"><span class="section-num">4</span><div><div class="card-title">Advance payment</div><div class="card-subtitle">Optional deposit at intake</div></div></div>
+            </div>
+            <div class="card-body space-y-4">
+              <div>
+                <label class="label" for="ad-amount">Amount</label>
+                <div class="input-group"><input id="ad-amount" type="number" min="0" step="1" class="input input-money" x-model.number="form.advance" :class="errors.advance && 'is-invalid'" placeholder="0"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="errors.advance" x-text="errors.advance"></p>
+                <p class="help text-amber-700 font-medium" x-show="!errors.advance && form.advance > 0 && form.estimated_cost > 0 && form.advance > form.estimated_cost">Advance is more than the estimate.</p>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-4">
+                <div>
+                  <label class="label" for="ad-method">Method</label>
+                  <select id="ad-method" class="select" x-model="form.advance_method" :disabled="!(form.advance > 0)" @change="form.advance_account = ''; errors.advance_account = ''">
+                    <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+                  </select>
+                </div>
+                <div x-show="form.advance_method !== 'cash'">
+                  <label class="label" for="ad-ref">Reference</label>
+                  <input id="ad-ref" type="text" class="input mono" x-model="form.advance_reference" :disabled="!(form.advance > 0)" placeholder="TID / auth code" maxlength="40">
+                </div>
+                <div class="sm:col-span-2 xl:col-span-1" x-show="isNonCash(form.advance_method)">
+                  <label class="label" for="ad-account">Lands in account</label>
+                  <select id="ad-account" class="select" x-model="form.advance_account" :disabled="!(form.advance > 0)" :class="errors.advance_account && 'is-invalid'">
+                    <option value="" x-text="defaultAccountLabel(form.advance_method) + ' (default)'"></option>
+                    <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="accountName(a.id)"></option></template>
+                  </select>
+                  <p class="field-error" x-show="errors.advance_account" x-text="errors.advance_account"></p>
+                </div>
+              </div>
+              <div class="text-xs text-slate-500" x-text="isNonCash(form.advance_method) ? 'Recorded as an advance on the job; the ' + ABM.ui.statusLabel(form.advance_method) + ' money is posted to the bank / wallet account above.' : 'Recorded as an advance on the job; cash counts in your open drawer and the day-end. The balance is collected on delivery.'"></div>
+            </div>
+          </div>
+
+          <!-- Summary -->
+          <div class="card xl:sticky xl:top-20">
+            <div class="card-header"><div class="card-title">Summary</div><span class="badge badge-amber badge-dot">Received</span></div>
+            <div class="card-body">
+              <dl class="space-y-2 text-sm">
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Customer</dt><dd class="font-medium text-right truncate min-w-0" :class="!customer && 'text-rose-600'" x-text="customer ? customer.name : 'Not selected'"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Device</dt><dd class="font-medium text-right truncate min-w-0" x-text="deviceSummary || '—'"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500" x-text="serialLabel"></dt><dd class="font-medium text-right mono truncate min-w-0" x-text="form.serial || '—'"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Priority</dt><dd><span x-html="$badge(form.priority)"></span></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Promised</dt><dd class="font-medium text-right" x-text="form.promised_at ? ABM.utils.datetime(form.promised_at) : '—'"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Technician</dt><dd class="font-medium text-right" x-text="form.technician_id ? ABM.db.userName(form.technician_id) : 'Assign later'"></dd></div>
+                <div class="divider !my-3"></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Estimate</dt><dd class="font-semibold text-right tabular" x-text="form.estimated_cost > 0 ? $money(form.estimated_cost) : '—'"></dd></div>
+                <div class="flex justify-between gap-3"><dt class="text-slate-500">Advance</dt><dd class="font-semibold text-right tabular text-emerald-700" x-text="form.advance > 0 ? $money(form.advance) + ' · ' + ABM.ui.statusLabel(form.advance_method) : '—'"></dd></div>
+                <div class="flex justify-between gap-3" x-show="form.estimated_cost > 0"><dt class="text-slate-500">Balance (est.)</dt><dd class="font-bold text-right tabular" x-text="$money(Math.max(0, (form.estimated_cost || 0) - (form.advance || 0)))"></dd></div>
+              </dl>
+              <div class="mt-4 alert alert-danger" x-show="errorCount"><span x-html="ABM.icon('warning')"></span><div><b x-text="errorCount"></b> field<span x-text="errorCount === 1 ? '' : 's'"></span> need attention.</div></div>
+              <button type="submit" class="btn btn-primary btn-block btn-lg mt-4" :disabled="busy"><span x-html="ABM.icon('printer')"></span>Save &amp; print receipt</button>
+              <p class="text-[11px] text-slate-500 text-center mt-2">Creates the job card, logs the intake and opens the customer receipt.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sticky bottom action bar (mobile) -->
+      <div class="xl:hidden sticky bottom-0 z-20 mt-6 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-white/95 backdrop-blur border-t border-slate-200 flex items-center justify-between gap-2">
+        <div class="text-sm min-w-0"><div class="text-xs text-slate-500">Estimate · advance</div><div class="font-semibold truncate" x-text="(form.estimated_cost > 0 ? $money(form.estimated_cost,{decimals:0}) : '—') + ' · ' + (form.advance > 0 ? $money(form.advance,{decimals:0}) : '—')"></div></div>
+        <div class="flex items-center gap-2"><a href="repairs.html" class="btn btn-secondary">Cancel</a><button type="submit" class="btn btn-primary" :disabled="busy"><span x-html="ABM.icon('check')"></span>Save</button></div>
+      </div>
+    </form>
+
+    <!-- Quick add customer modal -->
+    <div x-show="qa.open" x-cloak class="modal-backdrop" @click.self="qa.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="qaTitle">
+        <form @submit.prevent="saveQuickAdd()" novalidate>
+          <div class="modal-header">
+            <div><div class="modal-title" id="qaTitle">Quick add customer</div><div class="text-xs text-slate-500">Only name and phone are required</div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="qa.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="qa-name">Full name <span class="req">*</span></label>
+                <input id="qa-name" type="text" class="input" x-ref="qaName" x-model="qa.form.name" :class="qa.errors.name && 'is-invalid'" maxlength="80">
+                <p class="field-error" x-show="qa.errors.name" x-text="qa.errors.name"></p>
+              </div>
+              <div>
+                <label class="label" for="qa-phone">Phone <span class="req">*</span></label>
+                <input id="qa-phone" type="tel" class="input mono" x-model="qa.form.phone" :class="qa.errors.phone && 'is-invalid'" placeholder="03xx-xxxxxxx" maxlength="20">
+                <p class="field-error" x-show="qa.errors.phone" x-text="qa.errors.phone"></p>
+              </div>
+              <div>
+                <label class="label" for="qa-email">Email</label>
+                <input id="qa-email" type="email" class="input" x-model="qa.form.email" maxlength="80">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="qa-address">Address</label>
+                <input id="qa-address" type="text" class="input" x-model="qa.form.address" maxlength="160">
+              </div>
+              <div>
+                <label class="label" for="qa-cnic">CNIC</label>
+                <input id="qa-cnic" type="text" class="input mono" x-model="qa.form.cnic" placeholder="35202-1234567-1" maxlength="15">
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="qa.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="qa.busy"><span x-html="ABM.icon('check')"></span>Add &amp; select</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function repairCreatePage() {
+      const { db, utils, ui, session } = ABM;
+      const user = session.user() || {};
+      const isSuper = session.isSuperAdmin();
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const toLocalInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      const digits = (s) => String(s || '').replace(/\D/g, '');
+      const promisedDefault = () => { const d = utils.addDays(new Date(), 2); d.setHours(18, 0, 0, 0); return toLocalInput(d); };
+      const CATEGORY_SERVICE_HINTS = { screen: ['screen'], battery: ['battery'], charging: ['charging'], software: ['software', 'flash', 'os'], water_damage: ['motherboard', 'diagnostic'], no_power: ['motherboard', 'diagnostic'], other: ['diagnostic'] };
+      return {
+        isSuper, user,
+        branches: db.all('branches').filter((b) => b.is_active),
+        brands: utils.sortBy(db.all('brands').filter((b) => b.is_active), 'name'),
+        deviceTypes: [{ key: 'mobile', label: 'Mobile', icon: 'phone' }, { key: 'tablet', label: 'Tablet', icon: 'tablet' }, { key: 'smartwatch', label: 'Smartwatch', icon: 'watch' }, { key: 'laptop', label: 'Laptop', icon: 'laptop' }, { key: 'desktop', label: 'Desktop / AIO', icon: 'desktop' }],
+        accessoryOptions: ['Charger', 'Cable', 'Box', 'SIM', 'SIM tray', 'Memory card', 'Case', 'Bag', 'Earphones', 'Stylus'],
+        checklist: [
+          { key: 'screen_ok', label: 'Screen OK', help: 'No cracks, display working' }, { key: 'buttons_ok', label: 'Buttons OK', help: 'Power / volume / keys respond' },
+          { key: 'ports_ok', label: 'Ports OK', help: 'Charging & audio ports intact' }, { key: 'water_damage', label: 'Water damage indicator', help: 'LDI triggered / corrosion seen' },
+        ],
+        categories: [{ key: 'screen', label: 'Screen', icon: 'phone' }, { key: 'battery', label: 'Battery', icon: 'banknotes' }, { key: 'charging', label: 'Charging', icon: 'refresh' }, { key: 'software', label: 'Software', icon: 'cpu' }, { key: 'water_damage', label: 'Water damage', icon: 'warning' }, { key: 'no_power', label: 'No power', icon: 'x-circle' }, { key: 'other', label: 'Other', icon: 'dots' }],
+        methods: ['cash', 'card', 'jazzcash', 'easypaisa', 'bank_transfer'],
+        services: db.all('products').filter((p) => p.is_active && p.product_type === 'service'),
+        diagnosticFee: Number(db.setting('repair_diagnostic_fee')) || 0,
+        customer: null, custQ: '', unit: null, showPass: false, request: null, busy: false, errors: {},
+        form: {
+          branch_id: String(session.branchId() || ''), device_type: 'mobile', brand_sel: '', brand_other: '', model: '', serial: '', color: '', password_pattern: '',
+          accessories: [], accessories_other: '', checklist: { screen_ok: true, buttons_ok: true, ports_ok: true, water_damage: false }, condition_notes: '',
+          category: '', problem_description: '', priority: 'normal', promised_at: promisedDefault(), technician_id: '', estimated_cost: '', warranty_days: Number(db.setting('repair_default_warranty_days')) || 7, notes: '',
+          advance: '', advance_method: 'cash', advance_reference: '', advance_account: '',
+        },
+        qa: { open: false, busy: false, form: { name: '', phone: '', email: '', address: '', cnic: '' }, errors: {} },
+
+        init() {
+          if (ABM.roles.isBench(session.role())) this.form.technician_id = String(user.id);
+          const cid = utils.qs('customer');
+          if (cid) { const c = db.customer(cid); if (c && !c.is_walkin) this.customer = c; }
+          const rid = utils.qs('request');
+          if (rid) this.prefillFromRequest(rid);
+          this.$watch('form.serial', () => { this.errors.serial = ''; });
+          this.$watch('form.estimated_cost', () => { this.errors.estimated_cost = ''; });
+          this.$watch('form.advance', () => { this.errors.advance = ''; });
+          this.$watch('form.problem_description', () => { this.errors.problem_description = ''; });
+          this.$watch('form.model', () => { this.errors.model = ''; });
+          this.$watch('form.brand_sel', () => { this.errors.brand = ''; });
+          this.$watch('form.brand_other', () => { this.errors.brand = ''; });
+          this.$watch('customer', () => { this.errors.customer = ''; });
+          this.$nextTick(() => { if (!this.customer && this.$refs.custQ) this.$refs.custQ.focus(); });
+        },
+
+        /* --------------------------------------------------------- derived */
+        get serialType() { return ['laptop', 'desktop'].includes(this.form.device_type) ? 'serial' : 'imei'; },
+        get serialLabel() { return db.serialLabel({ serial_type: this.serialType, device_type: this.form.device_type }); },
+        get brandName() { return this.form.brand_sel === '__other' ? String(this.form.brand_other || '').trim() : this.form.brand_sel; },
+        get deviceSummary() { return [this.brandName, String(this.form.model || '').trim()].filter(Boolean).join(' '); },
+        get technicians() { return db.technicians(this.form.branch_id ? Number(this.form.branch_id) : null); },
+        get nextNoPreview() { const s = db.load().__sequences || {}; const key = (db.setting('repair_prefix') || 'JOB') + '-' + db.branchCode(this.form.branch_id); return key + '-' + utils.pad((s[key] || this.maxExisting(key)) + 1); },
+        maxExisting(key) { const re = new RegExp('^' + key + '-(\\d+)$'); let max = 0; db.all('repair_jobs').forEach((j) => { const m = String(j.job_no || '').match(re); if (m) max = Math.max(max, +m[1]); }); return max; },
+        get custResults() {
+          const q = this.custQ.trim().toLowerCase(); if (q.length < 2) return [];
+          const qd = digits(q);
+          return db.all('customers').filter((c) => c.is_active && !c.is_walkin && (c.name.toLowerCase().includes(q) || (qd && digits(c.phone).includes(qd)) || String(c.email || '').toLowerCase().includes(q))).slice(0, 8);
+        },
+        get suggestedServices() {
+          const hints = CATEGORY_SERVICE_HINTS[this.form.category]; if (!hints) return [];
+          const dt = this.form.device_type;
+          return this.services.filter((s) => { const n = s.name.toLowerCase(); if (!hints.some((h) => n.includes(h))) return false; if (n.includes('(mobile)') && ['laptop', 'desktop'].includes(dt)) return false; if (n.startsWith('laptop') && !['laptop', 'desktop'].includes(dt)) return false; return true; }).slice(0, 4);
+        },
+        get errorCount() { return Object.values(this.errors).filter(Boolean).length; },
+
+        /* ---------------------------------------------------------- actions */
+        setDeviceType(k) { this.form.device_type = k; this.errors.device_type = ''; },
+        toggleAccessory(a) { const i = this.form.accessories.indexOf(a); if (i >= 0) this.form.accessories.splice(i, 1); else this.form.accessories.push(a); },
+        setPromised(days) { const d = utils.addDays(new Date(), days); d.setHours(18, 0, 0, 0); if (days === 0 && new Date().getHours() >= 18) d.setHours(21, 0, 0, 0); this.form.promised_at = toLocalInput(d); this.errors.promised_at = ''; },
+        onBranchChange() { if (this.form.technician_id && !this.technicians.some((t) => String(t.id) === String(this.form.technician_id))) this.form.technician_id = ''; this.form.advance_account = ''; },
+        /* card / wallet / transfer advances land in a bank account of the job's branch */
+        get jobBranchId() { return Number(this.form.branch_id) || Number(session.branchId()); },
+        isNonCash(m) { return ABM.bank.isNonCash(m); },
+        get bankAccounts() { return ABM.bank.accounts(this.jobBranchId).filter((a) => a.is_active); },
+        accountName(id) { const a = id ? ABM.bank.account(id) : null; return a ? a.name + (a.bank_name && !String(a.name).toLowerCase().includes(String(a.bank_name).toLowerCase()) ? ' · ' + a.bank_name : '') : '—'; },
+        defaultAccountLabel(method) { if (!ABM.bank.isNonCash(method)) return ''; const id = ABM.bank.accountFor(method, this.jobBranchId); return id ? this.accountName(id) : 'no account set up'; },
+        /** The open account the advance settles into (picked, else the Banking mapping), or null for cash. */
+        advanceAccount() {
+          const f = this.form;
+          if (!ABM.bank.isNonCash(f.advance_method)) return null;
+          const id = f.advance_account || ABM.bank.accountFor(f.advance_method, this.jobBranchId);
+          const acc = id ? ABM.bank.account(id) : null;
+          return acc && acc.is_active ? acc : null;
+        },
+        addServiceToEstimate(s) { this.form.estimated_cost = utils.round2((Number(this.form.estimated_cost) || 0) + Number(s.retail_price)); ui.toast('Added ' + s.name + ' to the estimate.', 'info'); },
+        selectCustomer(c) { this.customer = c; this.custQ = ''; this.errors.customer = ''; },
+        openQuickAdd(name = '') {
+          const looksLikePhone = digits(name).length >= 7 && digits(name).length >= name.replace(/\s|-/g, '').length - 1;
+          this.qa = { open: true, busy: false, form: { name: looksLikePhone ? '' : name, phone: looksLikePhone ? name : '', email: '', address: '', cnic: '' }, errors: {} };
+          this.$nextTick(() => this.$refs.qaName && this.$refs.qaName.focus());
+        },
+        saveQuickAdd() {
+          const f = this.qa.form; const e = {};
+          if (!String(f.name || '').trim()) e.name = 'Name is required.';
+          const ph = digits(f.phone);
+          if (!ph) e.phone = 'Phone is required.'; else if (ph.length < 10 || ph.length > 13) e.phone = 'Enter a valid phone number.';
+          else { const dup = db.all('customers').find((c) => digits(c.phone) === ph); if (dup) e.phone = `Phone already belongs to ${dup.name} — search and select them instead.`; }
+          this.qa.errors = e; if (Object.keys(e).length) return;
+          this.qa.busy = true;
+          try {
+            const rec = db.insert('customers', { name: f.name.trim(), phone: f.phone.trim(), email: String(f.email || '').trim(), address: String(f.address || '').trim(), cnic: String(f.cnic || '').trim(), credit_limit: 0, balance: 0, is_walkin: 0, notes: 'Added at repair intake', is_active: 1 });
+            db.audit('customer.create', 'customer', rec.id, `Customer ${rec.name} added at repair intake`);
+            this.selectCustomer(rec);
+            this.qa.open = false;
+            ui.success('Customer added.');
+          } catch (err) { ui.error(err.message || 'Could not add customer.'); }
+          finally { this.qa.busy = false; }
+        },
+        prefillFromRequest(id) {
+          const r = db.find('repair_requests', id); if (!r) { ui.warn('Website request not found.'); return; }
+          this.request = r;
+          if (r.device_type) this.form.device_type = r.device_type;
+          if (r.brand) { this.form.brand_sel = this.brands.some((b) => b.name.toLowerCase() === String(r.brand).toLowerCase()) ? this.brands.find((b) => b.name.toLowerCase() === String(r.brand).toLowerCase()).name : '__other'; if (this.form.brand_sel === '__other') this.form.brand_other = r.brand; }
+          if (r.model) this.form.model = r.model;
+          if (r.problem) this.form.problem_description = r.problem;
+          if (isSuper && r.preferred_branch_id) this.form.branch_id = String(r.preferred_branch_id);
+          if (r.preferred_date && r.preferred_date >= utils.today()) { const d = utils.parseDate(r.preferred_date); d.setHours(18, 0, 0, 0); this.form.promised_at = toLocalInput(d); }
+          const ph = digits(r.phone);
+          const match = ph ? db.all('customers').find((c) => !c.is_walkin && digits(c.phone) === ph) : null;
+          if (match) this.customer = match;
+          else { this.qa = { open: true, busy: false, form: { name: r.name || '', phone: r.phone || '', email: r.email || '', address: '', cnic: '' }, errors: {} }; this.$nextTick(() => this.$refs.qaName && this.$refs.qaName.focus()); }
+        },
+        lookupUnit() {
+          const v = String(this.form.serial || '').trim(); if (!v) return;
+          const prevJobs = db.all('repair_jobs').filter((j) => j.serial && String(j.serial).toUpperCase() === v.toUpperCase());
+          const unit = ABM.stock.findUnit(v);
+          if (!unit) { this.unit = { found: false, prevJobs }; return; }
+          const product = db.product(unit.product_id) || {};
+          const saleItem = unit.sale_item_id ? db.find('sale_items', unit.sale_item_id) : null;
+          const sale = saleItem ? db.find('sales', saleItem.sale_id) : null;
+          const pItem = unit.purchase_item_id ? db.find('purchase_items', unit.purchase_item_id) : null;
+          const purchase = pItem ? db.find('purchases', pItem.purchase_id) : null;
+          const warrantyMonths = Number((saleItem && saleItem.warranty_months) || product.warranty_months || 0);
+          let warrantyEnd = null;
+          if (sale && warrantyMonths) { const d = utils.parseDate(sale.sale_date); d.setMonth(d.getMonth() + warrantyMonths); warrantyEnd = d; }
+          this.unit = { found: true, unit, product, label: db.productLabel(product.id), sale, saleItem, purchase, warrantyMonths, warrantyEnd, inWarranty: !!(warrantyEnd && warrantyEnd >= new Date()), customer: sale && sale.customer_id !== 1 ? db.customer(sale.customer_id) : null, prevJobs };
+          // prefill device identity from the catalog
+          if (product.id) {
+            if (product.device_type) this.form.device_type = product.device_type;
+            const bn = db.brandName(product.brand_id);
+            if (this.brands.some((b) => b.name === bn)) this.form.brand_sel = bn; else { this.form.brand_sel = '__other'; this.form.brand_other = bn; }
+            this.form.model = [product.name, product.variant].filter(Boolean).join(' ');
+            if (product.color && !this.form.color) this.form.color = product.color;
+            this.form.serial = unit.imei;
+            ui.success('Unit found — device details prefilled.');
+          }
+        },
+
+        /* ------------------------------------------------------------- save */
+        validate() {
+          const f = this.form; const e = {};
+          if (!this.customer) e.customer = 'Select or add the customer.';
+          if (!f.device_type) e.device_type = 'Choose the device type.';
+          if (!this.brandName) e.brand = 'Select a brand or type one.';
+          if (!String(f.model || '').trim()) e.model = 'Model is required.';
+          const s = String(f.serial || '').trim();
+          if (s && this.serialType === 'imei' && !/^\d{15}$/.test(s.replace(/\s+/g, ''))) e.serial = 'IMEI must be exactly 15 digits — leave empty if it cannot be read.';
+          if (s && this.serialType === 'serial' && !/^[A-Za-z0-9][A-Za-z0-9._\/-]{2,39}$/.test(s)) e.serial = 'Serial number must be 3–40 letters, digits or - _ . /';
+          if (!String(f.problem_description || '').trim()) e.problem_description = 'Describe the problem.';
+          const p = utils.parseDate(f.promised_at);
+          if (!p) e.promised_at = 'Enter a valid date and time.'; else if (p < utils.addDays(new Date(), -1)) e.promised_at = 'Promised time cannot be in the past.';
+          const est = f.estimated_cost === '' || f.estimated_cost === null ? 0 : Number(f.estimated_cost);
+          if (isNaN(est) || est < 0) e.estimated_cost = 'Enter an amount of 0 or more.';
+          const adv = f.advance === '' || f.advance === null ? 0 : Number(f.advance);
+          if (isNaN(adv) || adv < 0) e.advance = 'Enter an amount of 0 or more.';
+          else if (adv > 0 && ABM.bank.isNonCash(f.advance_method) && !this.advanceAccount()) e.advance_account = 'No open bank or wallet account is set up for ' + ui.statusLabel(f.advance_method) + ' — add one under Bank Accounts, or take the advance in cash.';
+          const w = Number(f.warranty_days); if (f.warranty_days === '' || !Number.isInteger(w) || w < 0 || w > 365) e.warranty_days = 'Enter whole days between 0 and 365.';
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        save() {
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); const first = document.querySelector('.is-invalid'); if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+          this.busy = true;
+          try {
+            const f = this.form;
+            const branchId = Number(f.branch_id) || Number(session.branchId());
+            const code = db.branchCode(branchId);
+            const jobNo = db.nextNumber(db.setting('repair_prefix') || 'JOB', code);
+            const accessories = f.accessories.concat(String(f.accessories_other || '').split(',').map((x) => x.trim()).filter(Boolean));
+            const serial = this.serialType === 'imei' ? String(f.serial || '').replace(/\s+/g, '') : String(f.serial || '').trim().toUpperCase();
+            const advance = utils.round2(f.advance || 0);
+            // a card / wallet / transfer advance lands in its bank account first: if that posting is refused, nothing is saved
+            const acc = advance > 0 ? this.advanceAccount() : null;
+            const advRef = f.advance_method === 'cash' ? null : (String(f.advance_reference || '').trim() || null);
+            const txn = acc ? ABM.bank.receive(f.advance_method, advance, { accountId: acc.id, branchId, reference: advRef || jobNo, party: this.customer.name, notes: 'Repair advance · ' + jobNo, ref: { type: 'repair_payment', id: null } }) : null;
+            const rec = db.insert('repair_jobs', {
+              job_no: jobNo, branch_id: branchId, customer_id: this.customer.id,
+              device_type: f.device_type, brand: this.brandName, model: String(f.model).trim(), serial, serial_type: this.serialType, color: String(f.color || '').trim(),
+              password_pattern: String(f.password_pattern || '').trim(), accessories_received: accessories.join(', ') || 'Device only',
+              condition_checklist: { ...f.checklist }, condition_notes: String(f.condition_notes || '').trim(),
+              problem_category: f.category || null, problem_description: String(f.problem_description).trim(), diagnosis: '',
+              status: 'received', priority: f.priority, technician_id: f.technician_id ? Number(f.technician_id) : null,
+              estimated_cost: utils.round2(f.estimated_cost || 0), quoted_at: null, approved_by_customer: 0,
+              total_parts: 0, total_labor: 0, discount: 0, total: 0, paid_amount: advance, due_amount: 0, warranty_days: Number(f.warranty_days) || 0,
+              promised_at: utils.parseDate(f.promised_at).toISOString(), received_at: utils.now(), completed_at: null, delivered_at: null,
+              cancel_reason: '', notes: String(f.notes || '').trim(), created_by: user.id || null, unit_sold_by_us: !!(this.unit && this.unit.found),
+            });
+            if (advance > 0) {
+              const pay = db.insert('repair_payments', { job_id: rec.id, method: f.advance_method, amount: advance, reference: advRef, kind: 'advance', shift_id: (ABM.shift.current(user.id, branchId) || {}).id || null, bank_txn_id: txn ? txn.id : null, account_id: acc ? acc.id : null, created_by: user.id || null });
+              if (txn) db.update('bank_transactions', txn.id, { reference_id: pay.id });
+              db.audit('repair.payment', 'repair_job', rec.id, `${jobNo} advance ${utils.money(advance, { decimals: 0 })} via ${f.advance_method}${acc ? ' into ' + acc.name : ''}`, branchId);
+            }
+            db.insert('repair_status_log', { job_id: rec.id, status: 'received', notes: 'Device received at counter · ' + rec.accessories_received + (advance > 0 ? ' · advance ' + utils.money(advance, { decimals: 0 }) : ''), user_id: user.id || null });
+            if (this.request) { db.update('repair_requests', this.request.id, { status: 'converted', job_id: rec.id }); db.audit('repair_request.convert', 'repair_request', this.request.id, `Website request from ${this.request.name} converted to ${jobNo}`); }
+            if (f.technician_id) db.insert('repair_status_log', { job_id: rec.id, status: 'received', notes: 'Assigned to ' + db.userName(f.technician_id), user_id: user.id || null });
+            db.audit('repair.create', 'repair_job', rec.id, `Job card ${jobNo} created for ${this.customer.name} (${this.deviceSummary})${advance > 0 ? ' with advance ' + utils.money(advance, { decimals: 0 }) : ''}`, branchId);
+            ui.success('Job card ' + jobNo + ' created.' + (acc ? ' Advance posted to ' + this.accountName(acc.id) + '.' : ''));
+            location.href = 'repair-view.html?id=' + rec.id + '&print=receipt';
+          } catch (err) {
+            ui.error(err.message || 'Could not save the job card.');
+            this.busy = false;
+          }
+        },
+        closeModals() { this.qa.open = false; },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE fix: repair payments, refunds and khata</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+<pre id="out">running…</pre>
+<script>
+/* eslint-disable */
+// Money-integrity fix pass — repairs. Drives the REAL page components (repair-create, repair-view, repairs,
+// invoice) and checks the money against ABM data: drawer stamps, bank postings, khata on delivery, refunds,
+// voids, and that every screen shows NET paid (payments − refunds) without double counting.
+(async function () {
+  const L = [];
+  const log = (s) => { L.push(String(s)); console.log('DRIVE ' + s); };
+  let fails = 0;
+  const ok = (cond, msg, extra) => { if (cond) log('PASS  ' + msg); else { fails++; log('FAIL  ' + msg + (extra !== undefined ? '  [' + extra + ']' : '')); } };
+  const eq = (a, b, msg) => ok(a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 0.011), msg, 'got=' + JSON.stringify(a) + ' want=' + JSON.stringify(b));
+  const near = (x, y) => Math.abs(Number(x) - Number(y)) < 0.011;
+
+  const { db, utils, ui, session, bank } = ABM;
+  let confirmAnswer = true, confirmCalls = 0;
+  ui.confirm = async () => { confirmCalls++; return confirmAnswer; };
+
+  async function loadPage(file, fnName) {
+    const html = await (await fetch('../' + file, { cache: 'no-store' })).text();
+    const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => s.indexOf('function ' + fnName) >= 0);
+    if (!body) throw new Error('no ' + fnName + ' in ' + file);
+    (0, eval)(body.replace(/location\.href\s*=/g, 'window.__nav =').replace(/location\.reload\(\)/g, 'void 0'));
+  }
+  function mount(factory, query) {
+    history.replaceState(null, '', location.pathname + (query || ''));
+    const c = factory();
+    c.$nextTick = (fn) => { try { fn && fn(); } catch (e) { /* ignore */ } };
+    c.$refs = {}; c.$watch = () => {}; c.$el = document.body;
+    if (c.init) c.init();
+    return c;
+  }
+  const as = (u) => { session.logout(); session.login(db.all('users').find((x) => x.username === u)); return session.user(); };
+  const paysOf = (id) => db.all('repair_payments').filter((p) => String(p.job_id) === String(id));
+  const netPaid = (id) => utils.round2(paysOf(id).reduce((s, p) => s + (p.kind === 'refund' ? -1 : 1) * Number(p.amount), 0));
+  const jobRow = (id) => db.find('repair_jobs', id);
+  const bal = (id) => bank.balance(id);
+  const txCount = () => db.all('bank_transactions').length;
+  const tallyLine = (sh, key) => (ABM.shift.tally(sh.id).lines.find((l) => l.key === key) || { amount: 0 }).amount;
+
+  try {
+    db.reset();
+    const manager = as('manager');
+    const BR = Number(session.branchId());
+    log('manager ' + manager.name + ' branch ' + BR);
+    // seed jobs worth rendering (the seed is deterministic): ready with money due, money held beyond the total
+    const seedJobs = db.all('repair_jobs').filter((j) => Number(j.branch_id) === BR);
+    log('render candidates: ready+due=' + seedJobs.filter((j) => j.status === 'ready' && Number(j.due_amount) > 0).map((j) => j.id).slice(0, 5).join(',')
+      + ' overpaid=' + seedJobs.filter((j) => Number(j.paid_amount) > Number(j.total) && (Number(j.total) > 0 || j.status === 'delivered')).map((j) => j.id).slice(0, 5).join(',')
+      + ' delivered=' + seedJobs.filter((j) => j.status === 'delivered').map((j) => j.id).slice(0, 3).join(','));
+    await loadPage('repair-create.html', 'repairCreatePage');
+    await loadPage('repair-view.html', 'repairViewPage');
+    await loadPage('repairs.html', 'repairsPage');
+    await loadPage('invoice.html', 'invoicePage');
+
+    const custs = db.all('customers').filter((c) => !c.is_walkin && c.is_active);
+    const cust = custs[0], cust2 = custs[1], cust3 = custs[2];
+    const walkin = db.all('customers').find((c) => c.is_walkin);
+    const shiftM = ABM.shift.current(manager.id, BR) || ABM.shift.open({ branchId: BR, userId: manager.id, float: 20000 });
+    ok(!!shiftM, 'manager has an open drawer ' + shiftM.shift_no);
+
+    function newJob(c, advance, method, extra) {
+      const cp = mount(repairCreatePage, '');
+      cp.selectCustomer(c); cp.setDeviceType('mobile');
+      cp.form.brand_sel = 'Apple'; cp.form.model = 'iPhone fix-' + Math.random().toString(36).slice(2, 7);
+      cp.form.problem_description = 'Money fix driver job';
+      cp.form.advance = advance || 0; cp.form.advance_method = method || 'cash';
+      Object.assign(cp.form, extra || {});
+      window.__nav = '';
+      cp.save();
+      return { cp, id: Number(((window.__nav || '').match(/id=(\d+)/) || [])[1]) || null };
+    }
+    function addLabor(id, price) {
+      const v = mount(repairViewPage, '?id=' + id);
+      v.openLabor(); v.lm.mode = 'custom'; v.lm.description = 'Labour ' + price; v.lm.qty = 1; v.lm.price = price; v.saveLabor();
+    }
+    function makeReady(id) { const v = mount(repairViewPage, '?id=' + id); v.applyStatus('ready', 'done'); }
+
+    /* ================================================================ 1. INTAKE ADVANCE */
+    log('--- 1. intake advance: drawer stamp + bank posting ---');
+    const wallet = bank.accountFor('jazzcash', BR);
+    ok(!!wallet, 'a JazzCash account exists for the branch (' + bank.account(wallet).name + ')');
+    const w0 = bal(wallet);
+    const a = newJob(cust, 3000, 'jazzcash', { advance_reference: 'TID-555' });
+    ok(!!a.id, 'job with a JazzCash advance created');
+    let pA = paysOf(a.id)[0];
+    eq(pA.kind, 'advance', 'kind advance');
+    eq(Number(pA.shift_id), Number(shiftM.id), 'advance carries the open drawer shift_id');
+    ok(!!pA.bank_txn_id, 'advance keeps its bank_txn_id');
+    let tA = db.find('bank_transactions', pA.bank_txn_id);
+    ok(tA && tA.type === 'receipt' && Number(tA.account_id) === Number(wallet) && Number(tA.amount) === 3000, 'bank receipt of 3000 into the JazzCash wallet');
+    ok(tA && tA.reference_type === 'repair_payment' && Number(tA.reference_id) === Number(pA.id), 'bank row points back at the repair payment');
+    eq(bal(wallet), w0 + 3000, 'wallet balance up by 3000');
+    eq(Number(pA.account_id), Number(wallet), 'account_id stored on the payment');
+
+    const cash0 = tallyLine(shiftM, 'repair_cash');
+    const b = newJob(cust, 2000, 'cash');
+    const pB = paysOf(b.id)[0];
+    eq(Number(pB.shift_id), Number(shiftM.id), 'cash advance carries the drawer');
+    ok(!pB.bank_txn_id, 'cash advance never touches a bank');
+    eq(tallyLine(shiftM, 'repair_cash'), cash0 + 2000, 'drawer tally counts the cash advance');
+
+    // a picked account is honoured, a closed one refuses the whole save
+    const cur = bank.accounts(BR).find((x) => x.is_active && x.account_type === 'current');
+    const other = bank.accounts(BR).find((x) => x.is_active && String(x.id) !== String(bank.accountFor('card', BR)));
+    const o0 = bal(other.id);
+    const c1 = newJob(cust, 1500, 'card', { advance_account: String(other.id), advance_reference: 'AUTH-1' });
+    eq(Number(paysOf(c1.id)[0].account_id), Number(other.id), 'picked account used for the card advance (' + other.name + ')');
+    eq(bal(other.id), o0 + 1500, 'picked account balance up by 1500');
+    db.update('bank_accounts', other.id, { is_active: 0 });
+    const jobs0 = db.all('repair_jobs').length, tx0 = txCount(), pay0 = db.all('repair_payments').length;
+    const bad = newJob(cust, 900, 'card', { advance_account: String(other.id) });
+    ok(!bad.id && !!bad.cp.errors.advance_account, 'closed account refused: ' + bad.cp.errors.advance_account);
+    eq(db.all('repair_jobs').length, jobs0, 'no job written');
+    eq(txCount(), tx0, 'no bank row written');
+    eq(db.all('repair_payments').length, pay0, 'no payment written');
+    db.update('bank_accounts', other.id, { is_active: 1 });
+
+    /* ================================================================ 2. JOB-CARD PAYMENTS */
+    log('--- 2. job-card payment: drawer + bank + account picker ---');
+    addLabor(a.id, 10000);
+    let v = mount(repairViewPage, '?id=' + a.id);
+    eq(v.job.due_amount, 7000, 'due 10000 - 3000 advance');
+    const cur0 = bal(cur.id);
+    v.openPayment(); v.pay.amount = 2000; v.pay.method = 'card'; v.pay.account_id = String(cur.id); v.pay.reference = 'AUTH-22';
+    v.savePayment();
+    let last = paysOf(a.id).slice(-1)[0];
+    ok(last.method === 'card' && Number(last.amount) === 2000, 'card payment row written');
+    eq(last.kind, 'payment', 'a part payment is kind "payment"');
+    eq(Number(last.shift_id), Number(shiftM.id), 'payment stamped with the drawer');
+    ok(!!last.bank_txn_id && Number(db.find('bank_transactions', last.bank_txn_id).account_id) === Number(cur.id), 'card money posted to the picked account');
+    eq(bal(cur.id), cur0 + 2000, 'account balance up by 2000');
+    eq(Number(jobRow(a.id).paid_amount), 5000, 'stored paid_amount 5000');
+    eq(Number(jobRow(a.id).due_amount), 5000, 'stored due_amount 5000');
+    ok(db.all('audit_logs').some((x) => x.action === 'repair.payment' && String(x.entity_id) === String(a.id)), 'payment audited');
+    // two tabs: another tab collects the rest; this tab's stale form must not overcollect
+    v = mount(repairViewPage, '?id=' + a.id);
+    v.openPayment();
+    db.insert('repair_payments', { job_id: a.id, method: 'cash', amount: 5000, kind: 'final', shift_id: shiftM.id, created_by: manager.id });
+    const before2 = paysOf(a.id).length;
+    v.pay.amount = 5000; v.savePayment();
+    ok(!!v.pay.errors.amount, 'stale tab refused (re-read at save): ' + v.pay.errors.amount);
+    eq(paysOf(a.id).length, before2, 'no second payment written');
+    db.remove('repair_payments', paysOf(a.id).slice(-1)[0].id);   // undo the simulated other-tab row
+
+    /* ================================================================ 3. DELIVER ON CREDIT */
+    log('--- 3. deliver on credit: khata, limit, override ---');
+    // (a) within the limit, no approval needed
+    const k0 = Number(db.find('customers', cust2.id).balance) || 0;
+    db.update('customers', cust2.id, { credit_limit: Math.max(0, k0) + 100000 });
+    const d = newJob(cust2, 0, 'cash'); addLabor(d.id, 5000); makeReady(d.id);
+    v = mount(repairViewPage, '?id=' + d.id);
+    v.openDeliver(); v.dm.rows = [{ method: 'cash', amount: 1000, reference: '' }]; v.dm.allowPartial = true;
+    ok(v.dmCredit.ok === true, 'within limit: no approval needed');
+    confirmCalls = 0;
+    await v.saveDeliver();
+    let dj = jobRow(d.id);
+    eq(dj.status, 'delivered', 'delivered on credit');
+    eq(Number(dj.credit_amount), 4000, 'credit_amount 4000');
+    eq(Number(dj.on_credit), 1, 'on_credit flag');
+    eq(Number(dj.due_amount), 0, 'job no longer shows the khata part as due');
+    eq(Number(dj.paid_amount), 1000, 'paid 1000');
+    eq(confirmCalls, 0, 'no confirm within the limit');
+    const lt = db.all('customer_transactions').find((t) => t.reference_type === 'repair_job' && String(t.reference_id) === String(d.id));
+    ok(lt && lt.type === 'repair' && Number(lt.debit) === 4000 && Number(lt.credit) === 0, 'ledger debit 4000 type "repair" linked to the job');
+    eq(Number(db.find('customers', cust2.id).balance), k0 + 4000, 'khata balance up by 4000');
+    eq(Number(dj.credit_txn_id), Number(lt && lt.id), 'job points at its ledger row');
+    ok(db.all('audit_logs').some((x) => x.action === 'repair.credit' && String(x.entity_id) === String(d.id)), 'khata move audited');
+    v = mount(repairViewPage, '?id=' + d.id);
+    eq(v.money.credit, 4000, 'job card shows 4000 on khata');
+    ok(v.canAddPayment === false, 'no "Add payment" on a delivered job whose balance is on khata');
+    const inv = mount(invoicePage, '?job=' + d.id);
+    eq(inv.doc.credit, 4000, 'invoice: put on khata 4000');
+    eq(inv.doc.due, 4000, 'invoice: balance due includes the khata part');
+    eq(inv.doc.ledgerAmount, 4000, 'invoice khata box: this job 4000');
+    eq(inv.doc.closingBalance, Number(db.find('customers', cust2.id).balance), 'invoice closing balance = the customer ledger balance');
+    ok(inv.doc.showLedger === true, 'invoice shows the khata box');
+    eq(inv.doc.prevBalance, k0, 'invoice khata box: previous balance is the balance before this job');
+
+    // (b) walk-in: must pay in full
+    const w = newJob(cust, 0, 'cash'); addLabor(w.id, 3000); makeReady(w.id);
+    db.update('repair_jobs', w.id, { customer_id: walkin.id });
+    v = mount(repairViewPage, '?id=' + w.id);
+    v.openDeliver(); v.dm.rows = [{ method: 'cash', amount: 1000, reference: '' }]; v.dm.allowPartial = true;
+    await v.saveDeliver();
+    eq(jobRow(w.id).status, 'ready', 'walk-in: not delivered with a balance');
+    ok(/walk-in/i.test(v.dm.error), 'walk-in error: ' + v.dm.error);
+    eq(paysOf(w.id).length, 0, 'walk-in: no payment written');
+
+    // (c) over the limit as a cashier: blocked, nothing written
+    const cb = Number(db.find('customers', cust3.id).balance) || 0;
+    db.update('customers', cust3.id, { credit_limit: Math.max(1, cb + 100) });   // any 5500 more goes over it
+    const o = newJob(cust3, 0, 'cash'); addLabor(o.id, 6000); makeReady(o.id);
+    as('cashier');
+    v = mount(repairViewPage, '?id=' + o.id);
+    v.openDeliver(); v.dm.rows = [{ method: 'cash', amount: 500, reference: '' }]; v.dm.allowPartial = true;
+    confirmCalls = 0;
+    await v.saveDeliver();
+    eq(jobRow(o.id).status, 'ready', 'cashier over the limit: not delivered');
+    ok(/manager/i.test(v.dm.error), 'cashier sees "a manager must approve": ' + v.dm.error);
+    eq(confirmCalls, 0, 'cashier is not offered the override');
+    eq(Number(db.find('customers', cust3.id).balance) || 0, cb, 'khata untouched');
+    eq(paysOf(o.id).length, 0, 'no payment written');
+    // (d) manager declines, then approves
+    as('manager');
+    v = mount(repairViewPage, '?id=' + o.id);
+    v.openDeliver(); v.dm.rows = [{ method: 'cash', amount: 500, reference: '' }]; v.dm.allowPartial = true;
+    confirmAnswer = false; confirmCalls = 0;
+    await v.saveDeliver();
+    eq(confirmCalls, 1, 'manager asked to approve the credit');
+    eq(jobRow(o.id).status, 'ready', 'declined approval: nothing written');
+    eq(paysOf(o.id).length, 0, 'declined approval: no payment');
+    confirmAnswer = true;
+    await v.saveDeliver();
+    eq(jobRow(o.id).status, 'delivered', 'approved: delivered');
+    eq(Number(jobRow(o.id).credit_amount), 5500, 'approved: 5500 on khata');
+    eq(Number(db.find('customers', cust3.id).balance), cb + 5500, 'approved: khata up by 5500');
+    ok(db.all('audit_logs').some((x) => x.action === 'repair.credit_override' && String(x.entity_id) === String(o.id)), 'override audited');
+    ok(/override/i.test((db.all('customer_transactions').find((t) => t.reference_type === 'repair_job' && String(t.reference_id) === String(o.id)) || {}).notes || ''), 'ledger note records the override');
+
+    /* ================================================================ 4. REFUNDS */
+    log('--- 4. refunds: cancelled job holding an advance, overpayment ---');
+    const r = newJob(cust, 2000, 'cash');
+    v = mount(repairViewPage, '?id=' + r.id);
+    v.openCancel(); v.cm.reason = 'Customer declined the quote';
+    v.saveCancel();
+    eq(jobRow(r.id).status, 'cancelled', 'job cancelled');
+    eq(Number(jobRow(r.id).due_amount), 0, 'a cancelled job owes nothing');
+    ok(v.rf.open === true && Number(v.rf.amount) === 2000, 'refund window opens after cancelling, prefilled with 2000');
+    ok(v.canRefund === true, 'Refund action offered');
+    v.rf.amount = 2500; v.saveRefund();
+    ok(!!v.rf.errors.amount, 'cannot refund more than was paid: ' + v.rf.errors.amount);
+    const refLine0 = tallyLine(shiftM, 'repair_refunds'), exp0 = ABM.shift.tally(shiftM.id).expected;
+    v.rf.amount = 1500; v.rf.method = 'cash'; v.rf.notes = 'Advance returned, diagnostic fee kept'; v.saveRefund();
+    let rr = paysOf(r.id).find((p) => p.kind === 'refund');
+    ok(!!rr, 'refund row written');
+    ok(rr && Number(rr.amount) === 1500 && rr.method === 'cash' && rr.notes, 'refund row: positive 1500, cash, with its reason');
+    eq(Number(rr.shift_id), Number(shiftM.id), 'refund row carries the drawer');
+    eq(Number(rr.created_by), Number(manager.id), 'refund row records who paid it');
+    eq(tallyLine(shiftM, 'repair_refunds'), refLine0 + 1500, 'drawer tally: repair refunds line +1500');
+    eq(ABM.shift.tally(shiftM.id).expected, exp0 - 1500, 'drawer expected cash down by 1500');
+    eq(Number(jobRow(r.id).paid_amount), 500, 'stored paid_amount is NET: 500');
+    ok(db.all('audit_logs').some((x) => x.action === 'repair.refund' && String(x.entity_id) === String(r.id)), 'refund audited');
+    v = mount(repairViewPage, '?id=' + r.id);
+    eq(v.money.refundable, 500, '500 still refundable');
+    // overdraft refused, nothing recorded
+    const tiny = db.insert('bank_accounts', { name: 'Tiny Test Account', bank_name: 'Test Bank', account_type: 'current', branch_id: BR, balance: 100, opening_balance: 100, is_active: 1 });
+    const tx1 = txCount(), rows1 = paysOf(r.id).length;
+    v.openRefund(); v.rf.amount = 500; v.rf.method = 'bank_transfer'; v.rf.account_id = String(tiny.id); v.rf.notes = 'Transfer back'; v.saveRefund();
+    ok(!!v.rf.errors.account && /only holds/.test(v.rf.errors.account), 'refund that would overdraw refused: ' + v.rf.errors.account);
+    eq(txCount(), tx1, 'no bank row');
+    eq(paysOf(r.id).length, rows1, 'no refund row');
+    // the rest by bank transfer from a real account
+    const c0 = bal(cur.id);
+    v.rf.account_id = String(cur.id); v.rf.reference = 'IBFT-77'; v.saveRefund();
+    rr = paysOf(r.id).filter((p) => p.kind === 'refund').slice(-1)[0];
+    ok(rr && rr.method === 'bank_transfer' && Number(rr.amount) === 500 && !!rr.bank_txn_id, 'bank-transfer refund row with bank_txn_id');
+    const rt = rr && db.find('bank_transactions', rr.bank_txn_id);
+    ok(rt && rt.type === 'payment' && rt.reference_type === 'repair_payment' && Number(rt.reference_id) === Number(rr.id), 'bank payment row linked to the refund');
+    eq(bal(cur.id), c0 - 500, 'account down by 500');
+    eq(Number(jobRow(r.id).paid_amount), 0, 'net paid 0 after both refunds');
+    v = mount(repairViewPage, '?id=' + r.id);
+    ok(v.canRefund === false, 'nothing left to refund');
+
+    // overpayment on a delivered job
+    const ov = newJob(cust, 5000, 'cash'); addLabor(ov.id, 3000); makeReady(ov.id);
+    v = mount(repairViewPage, '?id=' + ov.id);
+    eq(v.job.due_amount, 0, 'overpaid job has nothing due');
+    v.openDeliver(); await v.saveDeliver();
+    eq(jobRow(ov.id).status, 'delivered', 'overpaid job delivered');
+    v = mount(repairViewPage, '?id=' + ov.id);
+    eq(v.money.refundable, 2000, 'overpayment of 2000 is refundable');
+    v.openRefund(); eq(Number(v.rf.amount), 2000, 'refund prefilled with the overpayment');
+    v.saveRefund();
+    eq(Number(jobRow(ov.id).paid_amount), 3000, 'net paid = job total after the refund');
+    eq(mount(repairViewPage, '?id=' + ov.id).money.refundable, 0, 'nothing refundable any more');
+    // permissions
+    as('technician');
+    const tv = mount(repairViewPage, '?id=' + d.id);
+    ok(tv.canRefundPerm === false, 'technician cannot refund');
+    ok(tv.canVoid === false, 'technician cannot void payments');
+    as('cashier');
+    const cv = mount(repairViewPage, '?id=' + d.id);
+    ok(cv.canRefundPerm === true, 'cashier (repairs.deliver) can refund');
+    ok(cv.canVoid === false, 'cashier (no repairs.edit) cannot void');
+    as('manager');
+
+    /* ================================================================ 5. VOID A MISTAKEN PAYMENT */
+    log('--- 5. void: reversal row, never delete ---');
+    const cashIn0 = tallyLine(shiftM, 'repair_cash'), refIn0 = tallyLine(shiftM, 'repair_refunds');
+    const vj = newJob(cust, 1000, 'cash'); addLabor(vj.id, 8000);
+    v = mount(repairViewPage, '?id=' + vj.id);
+    const orig = v.payments[0];
+    ok(v.voidable(orig), 'the cash advance can be voided');
+    v.openVoid(orig); v.vd.reason = ''; v.saveVoid();
+    ok(!!v.vd.error, 'a reason is required');
+    v.vd.reason = 'Keyed twice by mistake'; v.saveVoid();
+    const rowsV = paysOf(vj.id);
+    eq(rowsV.length, 2, 'original kept + one reversal row (nothing deleted)');
+    const rev = rowsV.find((p) => p.kind === 'refund');
+    ok(rev && Number(rev.voids_payment_id) === Number(orig.id) && Number(rev.amount) === 1000 && rev.method === 'cash', 'reversal: kind refund, same method and amount, voids_payment_id');
+    eq(Number(db.find('repair_payments', orig.id).voided_by_id), Number(rev && rev.id), 'original marked voided_by_id');
+    eq(Number(jobRow(vj.id).paid_amount), 0, 'net paid 0 after the void');
+    eq(Number(jobRow(vj.id).due_amount), 8000, 'due back to the full 8000');
+    eq(utils.round2(tallyLine(shiftM, 'repair_cash') - cashIn0 - (tallyLine(shiftM, 'repair_refunds') - refIn0)), 1000 - 1000, 'drawer: +1000 in and -1000 out — the voided cash nets to zero');
+    ok(db.all('audit_logs').some((x) => x.action === 'repair.payment.void' && String(x.entity_id) === String(vj.id)), 'void audited');
+    v = mount(repairViewPage, '?id=' + vj.id);
+    ok(!v.voidable(v.payments.find((p) => p.id === orig.id)), 'a voided payment cannot be voided again');
+    ok(!v.voidable(v.payments.find((p) => p.kind === 'refund')), 'a reversal row cannot be voided');
+    ok(v.kindBadge(v.payments.find((p) => p.id === orig.id)).indexOf('voided') >= 0 && v.kindBadge(rev).indexOf('Void') >= 0, 'table labels: "voided" original and "Void" reversal');
+
+    // non-cash payment with its own bank row: bank.undo
+    v.openPayment(); v.pay.amount = 3000; v.pay.method = 'easypaisa'; v.pay.reference = 'EP-9'; v.savePayment();
+    const ep = paysOf(vj.id).find((p) => p.method === 'easypaisa');
+    const epAcc = db.find('bank_transactions', ep.bank_txn_id).account_id;
+    const e0 = bal(epAcc);
+    v = mount(repairViewPage, '?id=' + vj.id);
+    v.openVoid(v.payments.find((p) => p.id === ep.id)); v.vd.reason = 'Customer paid cash instead'; v.saveVoid();
+    const epRev = paysOf(vj.id).find((p) => Number(p.voids_payment_id) === Number(ep.id));
+    ok(!!epRev && !!epRev.bank_txn_id, 'easypaisa void has its own bank reversal');
+    ok(!!db.find('bank_transactions', ep.bank_txn_id).reversed_by, 'the original bank receipt is marked reversed');
+    eq(Number(epRev.bank_txn_id), Number(db.find('bank_transactions', ep.bank_txn_id).reversed_by), 'reversal row id stored on the void');
+    eq(bal(epAcc), e0 - 3000, 'wallet back down by 3000');
+
+    // an older payment inside a day-settlement row (how the seed banks card / wallet money): only that payment comes out
+    let seeded = db.all('repair_payments').find((p) => bank.isNonCash(p.method) && p.bank_txn_id && !p.voided_by_id && (() => { const t = db.find('bank_transactions', p.bank_txn_id); const j = jobRow(p.job_id); return t && !t.reversed_by && Number(t.amount) > Number(p.amount) + 1 && j && Number(j.branch_id) === BR; })());
+    if (!seeded) {
+      // none in this seed: build one — a day's card settlement of 10000 of which 2500 was this job's payment
+      const settle = bank.post(bank.accountFor('card', BR), { type: 'receipt', amount: 10000, method: 'card', reference: 'Card settlement (fixture)', ref: { type: 'settlement', id: null }, branchId: BR });
+      const fj = newJob(cust, 0, 'cash'); addLabor(fj.id, 2500);
+      seeded = db.insert('repair_payments', { job_id: fj.id, method: 'card', amount: 2500, kind: 'final', reference: null, bank_txn_id: settle.id, created_by: manager.id });
+      mount(repairViewPage, '?id=' + fj.id).recalc();
+      log('fixture: settlement row #' + settle.id + ' carrying repair payment #' + seeded.id);
+    }
+    if (seeded) {
+      const st = db.find('bank_transactions', seeded.bank_txn_id);
+      const s0 = bal(st.account_id);
+      v = mount(repairViewPage, '?id=' + seeded.job_id);
+      v.openVoid(v.payments.find((p) => p.id === seeded.id)); v.vd.reason = 'Wrong method on the old job'; v.saveVoid();
+      ok(!db.find('bank_transactions', st.id).reversed_by, 'the shared settlement row is NOT reversed');
+      eq(bal(st.account_id), s0 - Number(seeded.amount), 'only this payment (' + seeded.amount + ') leaves the account');
+      const sRev = paysOf(seeded.job_id).find((p) => Number(p.voids_payment_id) === Number(seeded.id));
+      ok(sRev && db.find('bank_transactions', sRev.bank_txn_id).reference_type === 'repair_payment', 'partial reversal linked to the void row');
+    } else log('SKIP  no seeded settlement-backed repair payment at this branch');
+
+    // cannot void money already refunded
+    const vr = newJob(cust, 2000, 'cash');
+    v = mount(repairViewPage, '?id=' + vr.id);
+    v.openCancel(); v.cm.reason = 'Not repairable'; v.saveCancel();
+    v.rf.notes = 'Returned'; v.saveRefund();
+    v = mount(repairViewPage, '?id=' + vr.id);
+    const adv = v.payments.find((p) => p.kind === 'advance');
+    ok(!v.voidable(adv), 'an advance already refunded cannot also be voided');
+    const n0 = paysOf(vr.id).length;
+    v.vd = { open: true, payment: adv, reason: 'try anyway', error: '', busy: false }; v.saveVoid();
+    ok(!!v.vd.error, 'saveVoid refuses too: ' + v.vd.error);
+    eq(paysOf(vr.id).length, n0, 'nothing written');
+
+    /* ================================================================ 6. MONEY SHOWN EVERYWHERE */
+    log('--- 6. net paid on the list, board, tiles, invoice and receipt ---');
+    const rp = mount(repairsPage, '');
+    rp.range.set('all');
+    const touched = [a.id, b.id, d.id, o.id, r.id, ov.id, vj.id, vr.id];
+    let listBad = 0;
+    touched.forEach((id) => {
+      const row = rp.jobs.find((j) => j.id === id); const vv = mount(repairViewPage, '?id=' + id);
+      if (!row || Math.abs(row.paid_amount - vv.job.paid_amount) > 0.01 || Math.abs(row.due_amount - vv.job.due_amount) > 0.01 || Math.abs(row.refundable - vv.money.refundable) > 0.01) { listBad++; log('  list/card mismatch on job ' + id); }
+      if (Math.abs(netPaid(id) - Number(jobRow(id).paid_amount)) > 0.01) { listBad++; log('  stored paid_amount != payments - refunds on job ' + id); }
+    });
+    eq(listBad, 0, 'list rows, job cards and stored paid_amount agree on NET paid / due / refundable');
+    eq(rp.moneyNote(rp.jobs.find((j) => j.id === d.id)).text.indexOf('Khata'), 0, 'list shows the khata amount for a job delivered on credit');
+    eq(rp.moneyNote(rp.jobs.find((j) => j.id === vj.id)).text.indexOf('Due'), 0, 'list shows the due after a void');
+    const inR = db.all('repair_payments').filter((p) => rp.jobs.some((j) => j.id == p.job_id) && rp.range.contains(p.created_at));
+    eq(rp.tiles.collected, utils.round2(utils.sum(inR.filter((p) => p.kind !== 'refund'), 'amount') - utils.sum(inR.filter((p) => p.kind === 'refund'), 'amount')), 'Collected tile = payments − refunds');
+    eq(rp.tiles.due, utils.round2(utils.sum(rp.jobs.filter((j) => j.status !== 'cancelled'), 'due_amount')), 'Due tile = live dues (khata excluded)');
+    ok(rp.boardColumns.some((c) => c.jobs.some((j) => j.id === vj.id)), 'board still lists the job');
+    const invR = mount(invoicePage, '?job=' + r.id);
+    eq(invR.doc.paid, 0, 'invoice: paid is net (2000 - 1500 - 500)');
+    eq(utils.round2(utils.sum(invR.doc.payments, 'amount')), invR.doc.paid, 'invoice payment lines foot to Total paid');
+    ok(invR.doc.payments.filter((p) => p.amount < 0).length === 2, 'invoice prints the two refunds as negative lines');
+    const invV = mount(invoicePage, '?job=' + vj.id);
+    ok(invV.doc.payments.some((p) => p.voided) && invV.doc.payments.some((p) => /^Void/.test(p.label)), 'invoice marks the voided payment and its reversal');
+    eq(invV.doc.paid, 0, 'invoice: a voided payment is not counted');
+    eq(invV.doc.due, 8000, 'invoice: balance due after the void');
+    const vcard = mount(repairViewPage, '?id=' + vj.id);
+    eq(vcard.advanceTotal, 0, 'job receipt: a voided advance is not shown as paid');
+    const invS = mount(invoicePage, '?job=' + db.all('repair_jobs').find((j) => j.status === 'delivered' && Number(j.branch_id) === BR && !j.credit_amount).id);
+    ok(near(utils.round2(invS.doc.subtotal - invS.doc.discount), invS.doc.total), 'plain repair invoice still foots');
+    // sale invoices are untouched by the repair changes
+    const sale = db.all('sales').find((s) => s.status !== 'void' && Number(s.branch_id) === BR);
+    const invSale = mount(invoicePage, '?id=' + sale.id);
+    ok(invSale.doc && invSale.doc.kind === 'sale' && invSale.doc.ledgerAmount == null, 'sale invoices still build, without the repair-only khata field');
+  } catch (e) {
+    fails++;
+    log('EXCEPTION ' + (e && e.stack ? e.stack : e));
+  }
+  log('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ' failures)'));
+  console.log('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL ' + fails));
+  document.getElementById('out').textContent = L.join('\n');
+})();
+</script>
+</body>
+</html>

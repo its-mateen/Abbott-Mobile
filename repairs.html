@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Repair Jobs · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="repairs" data-title="Repair Jobs" data-perm="repairs.view">
+  <main x-data="repairsPage()" @keydown.escape.window="closeModals()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Repair Jobs</h2>
+        <p class="page-subtitle"><b x-text="tiles.open"></b> open job<span x-text="tiles.open === 1 ? '' : 's'"></span> · <span x-text="scopeLabel"></span><template x-if="bench"><span> · showing jobs at your branch</span></template></p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a href="repair-create.html" class="btn btn-primary" x-show="canCreate"><span x-html="ABM.icon('plus')"></span>New Job Card</a>
+      </div>
+    </div>
+
+    <!-- Standard date range bar (applies to received date) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold" role="group" aria-label="Date basis">
+            <button type="button" class="px-2.5 py-1 rounded-md" :class="f.basis === 'received' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="f.basis = 'received'">Received</button>
+            <button type="button" class="px-2.5 py-1 rounded-md" :class="f.basis === 'delivered' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="f.basis = 'delivered'">Delivered</button>
+          </div>
+          <span class="range-label" x-text="range.label + ' · by ' + f.basis + ' date'"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" :class="showMoney ? 'xl:grid-cols-6' : 'xl:grid-cols-4'">
+      <a :href="'repairs.html?status=open&range=all' + branchQuery" class="stat stat-accent !p-4" title="Show all open jobs">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Open jobs</div><div class="stat-value" x-text="tiles.open"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('wrench')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.received"></span> waiting for diagnosis</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'repairs.html?status=in_progress&range=all' + branchQuery" class="stat !p-4" title="Show jobs in progress">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">In progress</div><div class="stat-value" x-text="tiles.inProgress"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('cog')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.awaiting"></span> awaiting approval / parts</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'repairs.html?status=ready&range=all' + branchQuery" class="stat stat-money !p-4" title="Show jobs ready for pickup">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Ready for pickup</div><div class="stat-value" x-text="tiles.ready"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('check-circle')"></span>
+        </div>
+        <div class="stat-meta">Notify customers to collect</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'repairs.html?overdue=1&range=all' + branchQuery" class="stat stat-danger !p-4" title="Show overdue jobs">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Overdue</div><div class="stat-value" :class="tiles.overdue ? 'text-rose-600' : ''" x-text="tiles.overdue"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta">Past promised date, not ready</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <template x-if="showMoney">
+        <a :href="'repairs.html?status=delivered&basis=delivered&' + range.query + branchQuery" class="stat !p-4" title="Show jobs handed over in this period">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Delivered · <span x-text="periodShort"></span></div><div class="stat-value" x-text="tiles.delivered"></div></div>
+            <span class="chip chip-slate" x-html="ABM.icon('truck')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="tiles.received_in_range"></span> received in period</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </template>
+      <template x-if="showMoney">
+        <a :href="'report-repairs.html?' + range.query" class="stat stat-money !p-4" title="Open repairs report">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Revenue · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(tiles.revenue, {decimals:0})"></div></div>
+            <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+          </div>
+          <div class="stat-meta">Collected <b x-text="$money(tiles.collected, {decimals:0})"></b> in period · <b class="text-rose-600" x-text="$money(tiles.due, {decimals:0})"></b> still due</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </template>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs mt-4">
+      <button type="button" class="tab" :class="tab === 'jobs' && 'active'" @click="tab = 'jobs'">Job cards <span class="count" x-text="listRows.length"></span></button>
+      <button type="button" class="tab" :class="tab === 'requests' && 'active'" @click="tab = 'requests'">Website requests <span class="count" :class="requestCounts.new && 'bg-rose-100 text-rose-700'" x-text="requestCounts.new + ' new'"></span></button>
+    </div>
+
+    <!-- ============================== JOBS TAB ============================== -->
+    <div x-show="tab === 'jobs'">
+      <!-- Filters -->
+      <div class="card mt-4">
+        <div class="card-body !py-3">
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+            <div class="relative md:col-span-4">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+              <input type="search" class="input pl-9" placeholder="Search job no, customer, phone, serial, model…" x-model.debounce.200ms="q" aria-label="Search jobs">
+            </div>
+            <select class="select md:col-span-2" x-model="f.status" aria-label="Status">
+              <option value="">All statuses</option>
+              <option value="open">All open</option>
+              <template x-for="s in statuses" :key="s"><option :value="s" x-text="ABM.ui.statusLabel(s)"></option></template>
+            </select>
+            <select class="select md:col-span-2" x-model="f.technician" aria-label="Technician">
+              <option value="">All technicians</option>
+              <option value="none">Unassigned</option>
+              <template x-for="t in techs" :key="t.id"><option :value="String(t.id)" :selected="f.technician === String(t.id)" x-text="t.name"></option></template>
+            </select>
+            <select class="select md:col-span-2" x-model="f.device" aria-label="Device type">
+              <option value="">All devices</option>
+              <template x-for="d in deviceTypes" :key="d"><option :value="d" x-text="ABM.db.deviceTypeLabel(d)"></option></template>
+            </select>
+            <select class="select md:col-span-2" x-model="f.priority" aria-label="Priority">
+              <option value="">Any priority</option>
+              <option value="urgent">Urgent</option>
+              <option value="normal">Normal</option>
+            </select>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <template x-if="isSuper">
+              <select class="select input-sm !w-auto pr-8" x-model="f.branch" aria-label="Branch" @change="compute()">
+                <option value="all" :selected="f.branch === 'all'">All branches</option>
+                <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" :selected="f.branch === String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+              </select>
+            </template>
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="checkbox" x-model="f.overdue">
+              <span class="text-slate-700">Overdue only</span>
+            </label>
+            <div class="inline-flex items-center gap-2 ml-auto">
+              <button type="button" class="btn btn-ghost btn-sm" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+              <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+                <button type="button" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1" :class="view === 'list' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setView('list')"><span x-html="ABM.icon('menu','w-3.5 h-3.5')"></span>List</button>
+                <button type="button" class="px-2.5 py-1 rounded-md inline-flex items-center gap-1" :class="view === 'board' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="setView('board')"><span x-html="ABM.icon('grid','w-3.5 h-3.5')"></span>Board</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIST VIEW -->
+      <div class="card mt-4" x-show="view === 'list'">
+        <div class="card-header">
+          <div><div class="card-title">Job cards</div><div class="card-subtitle"><span x-text="listRows.length"></span> job<span x-text="listRows.length === 1 ? '' : 's'"></span> · <span x-text="range.label"></span> · by <span x-text="f.basis"></span> date</div></div>
+          <div class="text-xs text-slate-500 hidden sm:block">Overdue promised dates are shown in red</div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th class="hidden sm:table-cell" x-text="f.basis === 'delivered' ? 'Delivered' : 'Received'"></th>
+                <th>Customer</th>
+                <th class="hidden md:table-cell">Device</th>
+                <th class="hidden lg:table-cell">Problem</th>
+                <th class="hidden lg:table-cell">Technician</th>
+                <th>Status</th>
+                <th class="hidden md:table-cell">Promised</th>
+                <th class="num hidden sm:table-cell">Total / Due</th>
+                <th class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="j in pager.items" :key="j.id">
+                <tr :class="j.status === 'cancelled' && 'opacity-60'">
+                  <td>
+                    <a :href="'repair-view.html?id=' + j.id" class="font-semibold text-navy-700 hover:underline mono" x-text="j.job_no"></a>
+                    <div class="mt-0.5 flex items-center gap-1"><span x-show="j.priority === 'urgent'" x-html="$badge('urgent')"></span><span class="badge badge-slate hidden sm:inline-flex" x-show="isSuper && f.branch === 'all'" x-text="ABM.db.branchCode(j.branch_id)"></span></div>
+                  </td>
+                  <td class="hidden sm:table-cell whitespace-nowrap"><div class="text-slate-700" x-text="$date(basisDate(j))"></div><div class="text-xs text-slate-400" x-text="ABM.utils.time(basisDate(j))"></div></td>
+                  <td>
+                    <div class="font-medium text-slate-800 truncate max-w-[10rem]" x-text="j.customerName"></div>
+                    <div class="text-xs text-slate-500 mono" x-text="j.customerPhone || '—'"></div>
+                  </td>
+                  <td class="hidden md:table-cell">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-600" x-html="ABM.icon(j.icon,'w-4 h-4')" :title="ABM.db.deviceTypeLabel(j.device_type)"></span>
+                      <div class="min-w-0"><div class="font-medium text-slate-800 truncate max-w-[12rem]" x-text="j.device"></div><div class="text-[11px] text-slate-500 mono truncate max-w-[12rem]"><span x-text="j.serialLabel"></span> <span x-text="j.serial || '—'"></span></div></div>
+                    </div>
+                  </td>
+                  <td class="hidden lg:table-cell"><div class="text-slate-700 truncate max-w-[14rem]" :title="j.problem_description" x-text="j.problem_description"></div></td>
+                  <td class="hidden lg:table-cell">
+                    <template x-if="j.technician_id"><div class="flex items-center gap-2"><span class="avatar w-7 h-7 text-[11px]" x-text="ABM.utils.initials(j.techName)"></span><span class="text-slate-700 truncate max-w-[8rem]" x-text="j.techName"></span></div></template>
+                    <template x-if="!j.technician_id"><span class="text-xs text-slate-400">Unassigned</span></template>
+                  </td>
+                  <td><span x-html="$badge(j.status)"></span></td>
+                  <td class="hidden md:table-cell whitespace-nowrap"><div :class="j.overdue ? 'text-rose-600 font-semibold' : 'text-slate-700'" x-text="$date(j.promised_at)"></div><div class="text-xs" :class="j.overdue ? 'text-rose-500' : 'text-slate-400'" x-text="j.overdue ? 'Overdue' : ABM.utils.time(j.promised_at)"></div></td>
+                  <td class="num hidden sm:table-cell whitespace-nowrap"><div class="font-semibold" x-text="j.total > 0 ? $money(j.total, {decimals:0}) : (j.estimated_cost > 0 ? '~' + $money(j.estimated_cost, {decimals:0}) : '—')"></div><div class="text-xs" :class="moneyNote(j).cls" x-text="moneyNote(j).text"></div></td>
+                  <td class="actions">
+                    <div class="inline-flex items-center gap-0.5">
+                      <a :href="'repair-view.html?id=' + j.id" class="btn btn-ghost btn-sm btn-icon" title="View job card" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" data-quick-status title="Quick status change" x-show="canMove(j)" @click="openStatus(j)" x-html="ABM.icon('refresh','w-4 h-4')"></button>
+                      <a :href="'repair-view.html?id=' + j.id + '&print=' + (j.status === 'delivered' ? 'invoice' : 'receipt')" class="btn btn-ghost btn-sm btn-icon" :title="j.status === 'delivered' ? 'Print invoice' : 'Print job receipt'" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!pager.items.length">
+                <tr><td colspan="10">
+                  <div class="empty">
+                    <span x-html="ABM.icon('wrench')"></span>
+                    <div class="empty-title">No repair jobs match</div>
+                    <div class="text-sm mt-1" x-text="hasFilters ? 'Try a different search, a wider date range or clear the filters.' : (f.basis === 'delivered' ? 'No jobs were delivered in this period.' : 'No jobs were received in this period.')"></div>
+                    <div class="mt-4 flex justify-center gap-2">
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                      <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                      <a href="repair-create.html" class="btn btn-primary btn-sm" x-show="canCreate">New job card</a>
+                    </div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+          <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+          <div class="flex items-center gap-1">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers(pager)" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- BOARD VIEW -->
+      <div class="mt-4" x-show="view === 'board'" x-cloak>
+        <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
+          <div class="text-sm text-slate-500">Open jobs are always shown · closed jobs limited to <b x-text="range.label"></b> by <span x-text="f.basis"></span> date</div>
+          <div class="text-xs text-slate-400 hidden sm:block">Scroll sideways to see all columns</div>
+        </div>
+        <div class="flex gap-3 overflow-x-auto pb-3 snap-x">
+          <template x-for="col in boardColumns" :key="col.key">
+            <div class="w-72 flex-none snap-start">
+              <div class="card">
+                <div class="px-3 py-2.5 border-b border-slate-200 flex items-center justify-between gap-2">
+                  <span x-html="$badge(col.key)"></span>
+                  <span class="text-xs font-bold text-slate-500" x-text="col.jobs.length"></span>
+                </div>
+                <div class="p-2 space-y-2 max-h-[65vh] overflow-y-auto bg-slate-50 rounded-b-xl">
+                  <template x-for="j in col.jobs" :key="j.id">
+                    <div class="card card-hover p-3" :class="j.overdue && 'border-rose-300'">
+                      <div class="flex items-start justify-between gap-2">
+                        <a :href="'repair-view.html?id=' + j.id" class="mono text-xs font-bold text-navy-700 hover:underline" x-text="j.job_no"></a>
+                        <div class="flex items-center gap-1"><span x-show="j.priority === 'urgent'" x-html="$badge('urgent')"></span><span class="badge badge-slate" x-show="isSuper && f.branch === 'all'" x-text="ABM.db.branchCode(j.branch_id)"></span></div>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2 min-w-0">
+                        <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center bg-white border border-slate-200 text-slate-600" x-html="ABM.icon(j.icon,'w-4 h-4')"></span>
+                        <div class="min-w-0"><div class="text-sm font-semibold text-slate-800 truncate" x-text="j.device"></div><div class="text-xs text-slate-500 truncate" x-text="j.customerName"></div></div>
+                      </div>
+                      <div class="mt-1.5 text-xs text-slate-500 truncate" :title="j.problem_description" x-text="j.problem_description"></div>
+                      <div class="mt-2 flex items-center justify-between gap-2 text-xs">
+                        <template x-if="j.technician_id"><span class="avatar w-6 h-6 text-[10px]" :title="j.techName" x-text="ABM.utils.initials(j.techName)"></span></template>
+                        <template x-if="!j.technician_id"><span class="w-6 h-6 rounded-full border border-dashed border-slate-300 text-slate-400 inline-flex items-center justify-center" title="Unassigned" x-html="ABM.icon('user','w-3.5 h-3.5')"></span></template>
+                        <span class="inline-flex items-center gap-1 truncate" :class="j.overdue ? 'text-rose-600 font-semibold' : 'text-slate-500'"><span x-html="ABM.icon('clock','w-3.5 h-3.5')"></span><span x-text="$date(j.promised_at,'short')"></span></span>
+                        <span class="font-semibold text-slate-800" x-text="j.total > 0 ? $money(j.total,{decimals:0}) : (j.estimated_cost > 0 ? '~' + $money(j.estimated_cost,{decimals:0}) : '—')"></span>
+                      </div>
+                      <div class="mt-1 text-[11px] text-right truncate" :class="moneyNote(j).cls" x-show="moneyNote(j).text && (moneyNote(j).text.indexOf('Paid') !== 0)" x-text="moneyNote(j).text"></div>
+                      <button type="button" class="btn btn-secondary btn-sm w-full mt-2.5" x-show="canMove(j)" @click="openStatus(j)"><span>Move to</span><span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></button>
+                    </div>
+                  </template>
+                  <template x-if="!col.jobs.length"><div class="text-center text-xs text-slate-400 py-6">No jobs</div></template>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============================ REQUESTS TAB ============================ -->
+    <div x-show="tab === 'requests'" x-cloak>
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Website repair requests</div><div class="card-subtitle">Booked from the public site · convert them into job cards</div></div>
+          <div class="tabs-pill">
+            <template x-for="s in [['active','Active'],['new','New'],['contacted','Contacted'],['converted','Converted'],['closed','Closed'],['','All']]" :key="s[0]">
+              <button type="button" class="tab" :class="reqFilter === s[0] && 'active'" @click="reqFilter = s[0]; reqPage = 1" x-text="s[1] + (s[0] === 'new' && requestCounts.new ? ' (' + requestCounts.new + ')' : '')"></button>
+            </template>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Requested</th>
+                <th>Customer</th>
+                <th class="hidden md:table-cell">Device</th>
+                <th class="hidden lg:table-cell">Problem</th>
+                <th class="hidden md:table-cell">Preferred</th>
+                <th>Status</th>
+                <th class="actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in reqPager.items" :key="r.id">
+                <tr>
+                  <td class="whitespace-nowrap"><div class="text-slate-700" x-text="$date(r.created_at)"></div><div class="text-xs text-slate-400" x-text="ABM.utils.timeAgo(r.created_at)"></div></td>
+                  <td><div class="font-medium text-slate-800 truncate max-w-[10rem]" x-text="r.name"></div><div class="text-xs text-slate-500 mono" x-text="r.phone"></div><div class="text-xs text-slate-400 truncate max-w-[10rem]" x-show="r.email" x-text="r.email"></div></td>
+                  <td class="hidden md:table-cell"><div class="flex items-center gap-2"><span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-600" x-html="ABM.icon(deviceIcon(r.device_type),'w-4 h-4')"></span><div class="min-w-0"><div class="font-medium text-slate-800 truncate max-w-[12rem]" x-text="[r.brand, r.model].filter(Boolean).join(' ') || '—'"></div><div class="text-xs text-slate-500" x-text="ABM.db.deviceTypeLabel(r.device_type)"></div></div></div></td>
+                  <td class="hidden lg:table-cell"><div class="text-slate-700 truncate max-w-[16rem]" :title="r.problem" x-text="r.problem"></div><div class="text-xs text-slate-400 truncate max-w-[16rem]" x-show="r.notes" x-text="'Note: ' + r.notes"></div></td>
+                  <td class="hidden md:table-cell whitespace-nowrap"><div class="text-slate-700" x-text="r.preferred_date ? $date(r.preferred_date) : '—'"></div><div class="text-xs text-slate-400" x-text="r.preferred_branch_id ? ABM.db.branchName(r.preferred_branch_id) : 'Any branch'"></div></td>
+                  <td><span x-html="$badge(r.status)"></span><template x-if="r.job_id"><a :href="'repair-view.html?id=' + r.job_id" class="block text-[11px] mono text-navy-700 hover:underline mt-0.5" x-text="jobNo(r.job_id)"></a></template></td>
+                  <td class="actions">
+                    <div class="inline-flex items-center gap-0.5">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-sky-700" title="Mark contacted" x-show="r.status === 'new'" @click="markContacted(r)" x-html="ABM.icon('phone-call','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Notes" @click="openNotes(r)" x-html="ABM.icon('chat','w-4 h-4')"></button>
+                      <a :href="'repair-create.html?request=' + r.id" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Convert to job card" x-show="canCreate && ['new','contacted'].includes(r.status)" x-html="ABM.icon('arrow-up-right','w-4 h-4')"></a>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Close request" x-show="['new','contacted'].includes(r.status)" @click="closeRequest(r)" x-html="ABM.icon('x-circle','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-amber-700" title="Reopen" x-show="r.status === 'closed'" @click="reopenRequest(r)" x-html="ABM.icon('refresh','w-4 h-4')"></button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!reqPager.items.length">
+                <tr><td colspan="7">
+                  <div class="empty">
+                    <span x-html="ABM.icon('globe')"></span>
+                    <div class="empty-title">No website requests</div>
+                    <div class="text-sm mt-1">Requests booked on the storefront repair page appear here.</div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+          <div>Showing <b class="text-slate-800" x-text="reqPager.from"></b>–<b class="text-slate-800" x-text="reqPager.to"></b> of <b class="text-slate-800" x-text="reqPager.total"></b></div>
+          <div class="flex items-center gap-1">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="reqPager.page <= 1" @click="reqPage = reqPager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers(reqPager)" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === reqPager.page ? 'btn-primary' : 'btn-ghost'" @click="reqPage = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="reqPager.page >= reqPager.pages" @click="reqPage = reqPager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick status modal -->
+    <div x-show="sm.open" x-cloak class="modal-backdrop" @click.self="sm.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="smTitle">
+        <form @submit.prevent="saveStatus()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="smTitle">Change status</div>
+              <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="sm.job && sm.job.job_no"></span> · <span x-text="sm.job && sm.job.device"></span></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="sm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="flex items-center gap-2 text-sm"><span class="text-slate-500">Current:</span><span x-html="sm.job ? $badge(sm.job.status) : ''"></span></div>
+            <div>
+              <label class="label">Move to <span class="req">*</span></label>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <template x-for="s in smTargets" :key="s">
+                  <button type="button" class="btn btn-sm justify-start" :class="sm.status === s ? 'btn-primary' : 'btn-secondary'" @click="sm.status = s"><span x-text="ABM.ui.statusLabel(s)"></span></button>
+                </template>
+              </div>
+              <p class="field-error" x-show="sm.error" x-text="sm.error"></p>
+            </div>
+            <div class="alert alert-warning" x-show="smConsumeCount > 0"><span x-html="ABM.icon('cube')"></span><div><b x-text="smConsumeCount"></b> part line<span x-text="smConsumeCount === 1 ? '' : 's'"></span> will be consumed from <span x-text="sm.job ? ABM.db.branchName(sm.job.branch_id) : ''"></span> stock when work starts.</div></div>
+            <div class="alert alert-info" x-show="sm.status === 'delivered' || sm.status === 'cancelled'"><span x-html="ABM.icon('info')"></span><div x-text="sm.status === 'delivered' ? 'Delivery collects the balance payment — you will be taken to the job card to complete it.' : 'Cancelling requires a reason and returns consumed parts to stock — you will be taken to the job card.'"></div></div>
+            <div>
+              <label class="label" for="sm-notes">Notes</label>
+              <textarea id="sm-notes" class="textarea" rows="2" x-model="sm.notes" placeholder="Optional note for the timeline" maxlength="300"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="sm.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="sm.busy || !sm.status"><span x-html="ABM.icon('check')"></span><span x-text="sm.status === 'delivered' ? 'Continue to deliver' : sm.status === 'cancelled' ? 'Continue to cancel' : 'Update status'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Request notes modal -->
+    <div x-show="rm.open" x-cloak class="modal-backdrop" @click.self="rm.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
+        <form @submit.prevent="saveNotes()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0"><div class="modal-title" id="rmTitle">Request notes</div><div class="text-xs text-slate-500 truncate" x-text="rm.req ? rm.req.name + ' · ' + rm.req.phone : ''"></div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="rm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-3">
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm text-slate-700" x-show="rm.req"><div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Reported problem</div><div x-text="rm.req && rm.req.problem"></div></div>
+            <div>
+              <label class="label" for="rm-notes">Internal notes</label>
+              <textarea id="rm-notes" class="textarea" rows="4" x-model="rm.notes" x-ref="rmNotes" placeholder="Call outcome, quote given, appointment…" maxlength="500"></textarea>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="rm.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="rm.busy"><span x-html="ABM.icon('check')"></span>Save notes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function repairsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const FLOW = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'ready', 'delivered'];
+      const OPEN = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'ready'];
+      const user = session.user() || {};
+      const role = session.role();
+      // a bench technician works jobs but does not run the desk: own + unassigned jobs only, no prices
+      const bench = ABM.roles.isBench(role);
+      const isSuper = session.isSuperAdmin();
+      const isOverdue = (j) => !!j.promised_at && !['ready', 'delivered', 'cancelled'].includes(j.status) && new Date(j.promised_at) < new Date();
+      const deviceIcon = (t) => ({ mobile: 'phone', tablet: 'tablet', smartwatch: 'watch', laptop: 'laptop', desktop: 'desktop' })[t] || 'cube';
+      return {
+        role, bench, isSuper, user,
+        branch: session.branch() || { name: '', code: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        canCreate: session.can('repairs.add'),
+        showMoney: !bench,
+        statuses: FLOW.concat(['cancelled']),
+        deviceTypes: ['mobile', 'tablet', 'smartwatch', 'laptop', 'desktop'],
+        range: null, tab: 'jobs', view: 'list',
+        q: '', f: { status: '', technician: '', device: '', priority: '', branch: '', overdue: false, basis: 'received' },
+        page: 1, reqFilter: 'active', reqPage: 1,
+        jobs: [], techs: [], requests: [],
+        tiles: { open: 0, received: 0, inProgress: 0, awaiting: 0, ready: 0, overdue: 0, delivered: 0, received_in_range: 0, revenue: 0, collected: 0, due: 0 },
+        sm: { open: false, job: null, status: '', notes: '', busy: false, error: '' },
+        rm: { open: false, req: null, notes: '', busy: false },
+
+        init() {
+          try { this.view = localStorage.getItem('abm.repairs.view') || 'list'; } catch (e) { /* ignore */ }
+          this.f.branch = String(session.branchId() || '');
+          const st = utils.qs('status'); if (st && (st === 'open' || this.statuses.includes(st))) this.f.status = st;
+          if (utils.qs('overdue') === '1') this.f.overdue = true;
+          if (utils.qs('basis') === 'delivered') this.f.basis = 'delivered';
+          if (utils.qs('tab') === 'requests') this.tab = 'requests';
+          if (utils.qs('q')) this.q = utils.qs('q');
+          if (utils.qs('technician')) this.f.technician = utils.qs('technician');
+          if (utils.qs('device')) this.f.device = utils.qs('device');
+          if (isSuper && utils.qs('branch')) this.f.branch = utils.qs('branch');
+          if (utils.qs('view') === 'board') this.view = 'board';
+          this.range = ABM.range('this_month', () => this.compute(), 'repairs');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          ['status', 'technician', 'device', 'priority', 'overdue', 'branch', 'basis'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+        },
+
+        /* ---------------------------------------------------------- scope */
+        get scopeBranchIds() {
+          if (!isSuper) return [Number(session.branchId())];
+          if (this.f.branch === 'all') return this.branches.map((b) => b.id);
+          return [Number(this.f.branch)];
+        },
+        get scopeLabel() { return isSuper && this.f.branch === 'all' ? 'all branches' : db.branchName(this.scopeBranchIds[0]); },
+        get branchQuery() { return isSuper ? '&branch=' + encodeURIComponent(this.f.branch) : ''; },
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        deviceIcon,
+        jobNo(id) { const j = db.find('repair_jobs', id); return j ? j.job_no : '#' + id; },
+
+        /* ----------------------------------------------------------- data */
+        /**
+         * `pay` = { in, out } summed from the job's repair_payments rows: paid is NET (payments − refunds, a
+         * voided payment is cancelled by its own refund row), a khata balance is no longer due on the job,
+         * and money held beyond what the customer owes is refundable — the same rule as the job card.
+         */
+        decorate(j, pay) {
+          const c = db.customer(j.customer_id);
+          this.normalizeConsumed(j);
+          const total = utils.round2(Number(j.total) || 0);
+          const paid = utils.round2(((pay && pay.in) || 0) - ((pay && pay.out) || 0));
+          const credit = utils.round2(Number(j.credit_amount) || 0);
+          const cancelled = j.status === 'cancelled';
+          return {
+            ...j,
+            customerName: c ? c.name : 'Walk-in Customer', customerPhone: c ? c.phone : '',
+            techName: j.technician_id ? db.userName(j.technician_id) : '',
+            device: [j.brand, j.model].filter(Boolean).join(' ') || db.deviceTypeLabel(j.device_type),
+            serialLabel: db.serialLabel({ serial_type: j.serial_type, device_type: j.device_type }),
+            icon: deviceIcon(j.device_type), overdue: isOverdue(j),
+            total, paid_amount: paid, credit_amount: credit, refunded: utils.round2((pay && pay.out) || 0),
+            due_amount: cancelled ? 0 : Math.max(0, utils.round2(total - paid - credit)),
+            refundable: cancelled ? Math.max(0, paid) : ((j.status === 'delivered' || total > 0) ? Math.max(0, utils.round2(paid + credit - total)) : 0),
+            estimated_cost: Number(j.estimated_cost) || 0,
+          };
+        },
+        /** Money line under a job's total: what is still due, on khata, owed back, or paid. */
+        moneyNote(j) {
+          if (j.due_amount > 0) return { text: 'Due ' + utils.money(j.due_amount, { decimals: 0 }), cls: 'text-rose-600 font-semibold' };
+          if (j.refundable > 0) return { text: 'Refund ' + utils.money(j.refundable, { decimals: 0 }), cls: 'text-amber-700 font-semibold' };
+          if (j.credit_amount > 0) return { text: 'Khata ' + utils.money(j.credit_amount, { decimals: 0 }), cls: 'text-amber-700' };
+          if (j.paid_amount > 0) return { text: 'Paid ' + utils.money(j.paid_amount, { decimals: 0 }), cls: 'text-emerald-700' };
+          return { text: '', cls: '' };
+        },
+        /** Seeded jobs at/after in_progress already had their parts deducted from stock: flag those lines as consumed once. */
+        normalizeConsumed(j) {
+          if (FLOW.indexOf(j.status) < FLOW.indexOf('in_progress')) return;
+          let changed = false;
+          db.all('repair_items').forEach((i) => { if (i.job_id == j.id && i.type === 'part' && i.consumed === undefined) { i.consumed = 1; changed = true; } });
+          if (changed) db.save();
+        },
+        compute() {
+          const ids = this.scopeBranchIds;
+          const payByJob = new Map();
+          db.all('repair_payments').forEach((p) => {
+            const k = String(p.job_id); const a = payByJob.get(k) || { in: 0, out: 0 };
+            if (p.kind === 'refund') a.out += Number(p.amount) || 0; else a.in += Number(p.amount) || 0;
+            payByJob.set(k, a);
+          });
+          this.jobs = db.all('repair_jobs').filter((j) => ids.includes(Number(j.branch_id))).map((j) => this.decorate(j, payByJob.get(String(j.id))));
+          const r = this.range;
+          const receivedInRange = this.jobs.filter((j) => r.contains(j.received_at));
+          // Repair revenue is recognised when the device is handed over, so the money tiles use delivered_at
+          // (and real payment dates) — this is the same basis as report-repairs.html, which they link to.
+          const delivered = this.jobs.filter((j) => j.delivered_at && r.contains(j.delivered_at));
+          const scopeIds = new Set(this.jobs.map((j) => j.id));
+          const pays = db.all('repair_payments').filter((p) => scopeIds.has(p.job_id) && r.contains(p.created_at));
+          this.tiles = {
+            open: this.jobs.filter((j) => OPEN.includes(j.status)).length,
+            received: this.jobs.filter((j) => j.status === 'received').length,
+            inProgress: this.jobs.filter((j) => j.status === 'in_progress').length,
+            awaiting: this.jobs.filter((j) => ['awaiting_approval', 'awaiting_parts'].includes(j.status)).length,
+            ready: this.jobs.filter((j) => j.status === 'ready').length,
+            overdue: this.jobs.filter((j) => j.overdue).length,
+            delivered: delivered.length, received_in_range: receivedInRange.length,
+            revenue: utils.round2(utils.sum(delivered, 'total')),
+            // money taken in the period, less refunds (and voided payments) paid back in it
+            collected: utils.round2(utils.sum(pays.filter((p) => p.kind !== 'refund'), 'amount') - utils.sum(pays.filter((p) => p.kind === 'refund'), 'amount')),
+            due: utils.round2(utils.sum(this.jobs.filter((j) => j.status !== 'cancelled'), 'due_amount')),
+          };
+          this.techs = db.technicians(null).filter((u) => !u.branch_id || ids.includes(Number(u.branch_id)));
+          this.requests = db.all('repair_requests').filter((x) => !x.preferred_branch_id || ids.includes(Number(x.preferred_branch_id)) || (isSuper && this.f.branch === 'all'));
+        },
+        get hasFilters() { return !!(this.q || this.f.status || this.f.technician || this.f.device || this.f.priority || this.f.overdue); },
+        clearFilters() { this.q = ''; this.f.status = ''; this.f.technician = ''; this.f.device = ''; this.f.priority = ''; this.f.overdue = false; },
+        matches(j, ignoreStatus = false) {
+          const q = this.q.trim().toLowerCase();
+          if (!ignoreStatus && this.f.status) { if (this.f.status === 'open' ? !OPEN.includes(j.status) : j.status !== this.f.status) return false; }
+          if (this.f.technician === 'none' && j.technician_id) return false;
+          if (this.f.technician && this.f.technician !== 'none' && String(j.technician_id) !== String(this.f.technician)) return false;
+          if (this.f.device && j.device_type !== this.f.device) return false;
+          if (this.f.priority && j.priority !== this.f.priority) return false;
+          if (this.f.overdue && !j.overdue) return false;
+          if (q && ![j.job_no, j.customerName, j.customerPhone, j.serial, j.model, j.brand, j.problem_description, j.techName].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+          return true;
+        },
+        /** Period membership for the list/board — 'received' (intake date) or 'delivered' (hand-over date). */
+        inPeriod(j) { return this.f.basis === 'delivered' ? !!j.delivered_at && this.range.contains(j.delivered_at) : this.range.contains(j.received_at); },
+        basisDate(j) { return this.f.basis === 'delivered' ? j.delivered_at : j.received_at; },
+        get listRows() {
+          const key = this.f.basis === 'delivered' ? 'delivered_at' : 'received_at';
+          return utils.sortBy(this.jobs.filter((j) => this.inPeriod(j) && this.matches(j)), key, 'desc');
+        },
+        get pager() { return utils.paginate(this.listRows, this.page, PER_PAGE); },
+        pageNumbers(p) { const out = []; for (let n = Math.max(1, p.page - 2); n <= Math.min(p.pages, p.page + 2); n++) out.push(n); return out; },
+        get boardColumns() {
+          const rows = this.jobs.filter((j) => this.matches(j, true) && (OPEN.includes(j.status) || this.inPeriod(j)));
+          const sortKey = (j) => (j.priority === 'urgent' ? '0' : '1') + (j.promised_at || '');
+          return this.statuses.map((key) => ({ key, jobs: utils.sortBy(rows.filter((j) => j.status === key), key === 'delivered' || key === 'cancelled' ? (j) => j.delivered_at || j.updated_at || j.received_at : sortKey, key === 'delivered' || key === 'cancelled' ? 'desc' : 'asc') }));
+        },
+        setView(v) { this.view = v; try { localStorage.setItem('abm.repairs.view', v); } catch (e) { /* ignore */ } },
+        exportCsv() {
+          const cols = [
+            { label: 'Job No', key: 'job_no' }, { label: 'Received', value: (j) => utils.datetime(j.received_at) }, { label: 'Branch', value: (j) => db.branchCode(j.branch_id) },
+            { label: 'Customer', key: 'customerName' }, { label: 'Phone', key: 'customerPhone' }, { label: 'Device type', value: (j) => db.deviceTypeLabel(j.device_type) },
+            { label: 'Brand', key: 'brand' }, { label: 'Model', key: 'model' }, { label: 'Serial / IMEI', key: 'serial' }, { label: 'Problem', key: 'problem_description' },
+            { label: 'Technician', key: 'techName' }, { label: 'Status', value: (j) => ui.statusLabel(j.status) }, { label: 'Priority', key: 'priority' },
+            { label: 'Promised', value: (j) => utils.datetime(j.promised_at) }, { label: 'Estimate', key: 'estimated_cost' }, { label: 'Total', key: 'total' }, { label: 'Paid (net)', key: 'paid_amount' }, { label: 'Refunded', key: 'refunded' }, { label: 'On khata', key: 'credit_amount' }, { label: 'Due', key: 'due_amount' }, { label: 'Refund due', key: 'refundable' },
+            { label: 'Delivered', value: (j) => utils.datetime(j.delivered_at) },
+          ];
+          if (!utils.download('repair-jobs-' + utils.today() + '.csv', utils.toCsv(this.listRows, cols))) return;
+          ui.success('Exported ' + this.listRows.length + ' jobs.');
+        },
+
+        /* ---------------------------------------------------- permissions */
+        canMove(j) {
+          if (['delivered', 'cancelled'].includes(j.status)) return false;
+          if (bench) return session.can('repairs.edit') && Number(j.branch_id) === Number(session.branchId()) && (!j.technician_id || Number(j.technician_id) === Number(user.id));
+          return session.can('repairs.edit') || (session.can('repairs.deliver') && j.status === 'ready');
+        },
+
+        /* --------------------------------------------------- status modal */
+        openStatus(j) {
+          this.sm = { open: true, job: j, status: '', notes: '', busy: false, error: '' };
+        },
+        get smTargets() {
+          if (!this.sm.job) return [];
+          const j = this.sm.job;
+          if (!session.can('repairs.edit')) return session.can('repairs.deliver') && j.status === 'ready' ? ['delivered'] : [];
+          // only offer targets this role can actually complete on the job card
+          return this.statuses.filter((s) => s !== j.status && (s !== 'delivered' || (session.can('repairs.deliver') && j.status === 'ready')));
+        },
+        get smConsumeCount() {
+          if (!this.sm.job || !this.sm.status) return 0;
+          if (FLOW.indexOf(this.sm.status) < FLOW.indexOf('in_progress')) return 0;
+          return db.all('repair_items').filter((i) => i.job_id == this.sm.job.id && i.type === 'part' && i.product_id && !i.consumed && db.isStockTracked(i.product_id)).length;
+        },
+        saveStatus() {
+          const { job, status, notes } = this.sm;
+          if (!status) { this.sm.error = 'Choose the new status.'; return; }
+          if (status === 'delivered') { location.href = 'repair-view.html?id=' + job.id + '&action=deliver'; return; }
+          if (status === 'cancelled') { location.href = 'repair-view.html?id=' + job.id + '&action=cancel'; return; }
+          this.sm.busy = true;
+          try {
+            this.applyStatus(job, status, notes);
+            ui.success(job.job_no + ' moved to ' + ui.statusLabel(status) + '.');
+            this.sm.open = false;
+            this.compute();
+          } catch (e) { ui.error(e.message || 'Could not update status.'); }
+          finally { this.sm.busy = false; }
+        },
+        /** Consume unconsumed part lines from branch stock (validates everything first). Returns number of lines consumed. */
+        consumeParts(job) {
+          const lines = db.all('repair_items').filter((i) => i.job_id == job.id && i.type === 'part' && i.product_id && !i.consumed && db.isStockTracked(i.product_id));
+          if (!db.setting('allow_negative_stock')) {
+            lines.forEach((l) => { const q = ABM.stock.qty(job.branch_id, l.product_id); if (q < l.quantity) throw new Error(`Insufficient stock for ${db.productLabel(l.product_id)} at ${db.branchName(job.branch_id)} (available ${q}, needed ${l.quantity}). Receive the part first or set the job to Awaiting Parts.`); });
+          }
+          lines.forEach((l) => {
+            const cost = ABM.stock.remove(job.branch_id, l.product_id, l.quantity, 'repair', { type: 'repair_job', id: job.id }, { notes: 'Used on ' + job.job_no });
+            db.update('repair_items', l.id, { consumed: 1, consumed_at: utils.now(), unit_cost: utils.round2(cost) });
+          });
+          return lines.length;
+        },
+        applyStatus(job, status, notes) {
+          const fresh = db.find('repair_jobs', job.id);
+          if (!fresh) throw new Error('Job not found.');
+          const patch = { status };
+          let consumed = 0;
+          if (FLOW.indexOf(status) >= FLOW.indexOf('in_progress')) consumed = this.consumeParts(fresh);
+          if (status === 'awaiting_approval' && !fresh.quoted_at) patch.quoted_at = utils.now();
+          if (status === 'ready' && !fresh.completed_at) patch.completed_at = utils.now();
+          if (status === 'in_progress' && fresh.status === 'ready') patch.completed_at = null;
+          db.update('repair_jobs', fresh.id, patch);
+          const note = [notes, consumed ? `${consumed} part line${consumed === 1 ? '' : 's'} consumed from stock` : ''].filter(Boolean).join(' · ');
+          db.insert('repair_status_log', { job_id: fresh.id, status, notes: note, user_id: user.id || null });
+          db.audit('repair.status', 'repair_job', fresh.id, `${fresh.job_no} ${fresh.status} -> ${status}${notes ? ' (' + notes + ')' : ''}`);
+        },
+
+        /* ------------------------------------------------------ requests */
+        get requestCounts() { return { new: this.requests.filter((r) => r.status === 'new').length }; },
+        get reqRows() {
+          const f = this.reqFilter;
+          const list = this.requests.filter((r) => f === '' ? true : f === 'active' ? ['new', 'contacted'].includes(r.status) : r.status === f);
+          return utils.sortBy(list, 'created_at', 'desc');
+        },
+        get reqPager() { return utils.paginate(this.reqRows, this.reqPage, PER_PAGE); },
+        markContacted(r) {
+          db.update('repair_requests', r.id, { status: 'contacted' });
+          db.audit('repair_request.contacted', 'repair_request', r.id, `Website request from ${r.name} marked contacted`);
+          ui.success('Marked as contacted.');
+          this.compute();
+        },
+        openNotes(r) { this.rm = { open: true, req: r, notes: r.notes || '', busy: false }; this.$nextTick(() => this.$refs.rmNotes && this.$refs.rmNotes.focus()); },
+        saveNotes() {
+          this.rm.busy = true;
+          try {
+            db.update('repair_requests', this.rm.req.id, { notes: String(this.rm.notes || '').trim() });
+            db.audit('repair_request.notes', 'repair_request', this.rm.req.id, `Notes updated for website request from ${this.rm.req.name}`);
+            ui.success('Notes saved.');
+            this.rm.open = false; this.compute();
+          } finally { this.rm.busy = false; }
+        },
+        async closeRequest(r) {
+          const ok = await ui.confirm({ title: 'Close this request?', message: `${r.name}'s request will be closed without creating a job card. You can reopen it later.`, confirmText: 'Close request', danger: true });
+          if (!ok) return;
+          db.update('repair_requests', r.id, { status: 'closed' });
+          db.audit('repair_request.close', 'repair_request', r.id, `Website request from ${r.name} closed`);
+          ui.success('Request closed.');
+          this.compute();
+        },
+        reopenRequest(r) {
+          db.update('repair_requests', r.id, { status: 'new' });
+          db.audit('repair_request.reopen', 'repair_request', r.id, `Website request from ${r.name} reopened`);
+          ui.success('Request reopened.');
+          this.compute();
+        },
+        closeModals() { this.sm.open = false; this.rm.open = false; },
+      };
+    }
+  </script>
+</body>
+</html>

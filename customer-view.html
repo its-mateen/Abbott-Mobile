@@ -1,0 +1,852 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Customer · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block !important; }
+      .no-print { display: none !important; }
+      .stmt table { border-collapse: collapse; width: 100%; }
+      .stmt th, .stmt td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; vertical-align: top; }
+      .stmt th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+      .stmt .num { text-align: right; font-variant-numeric: tabular-nums; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="customer-view" data-title="Customer" data-perm="customers.view">
+  <main x-data="customerViewPage()" @keydown.escape.window="closeModals()">
+
+    <!-- Not found -->
+    <template x-if="!c">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('users','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Customer not found</h2>
+          <p class="text-sm text-slate-600 mt-2">No customer matches id <span class="mono" x-text="requestedId || '(none)'"></span>. It may have been deleted or the link is wrong.</p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap">
+            <a href="customers.html" class="btn btn-primary"><span x-html="ABM.icon('users')"></span>Back to customers</a>
+            <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New sale</a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="c">
+      <div>
+        <div class="no-print">
+          <!-- Page header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="customers.html" class="hover:text-navy-700">Customers</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span>Account</span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title truncate" x-text="c.name"></h2>
+                <span class="badge badge-slate" x-show="c.is_walkin">Walk-in</span>
+                <span class="badge badge-red" x-show="!c.is_active">Inactive</span>
+                <span class="badge" :class="c.balance > 0 ? 'badge-red' : c.balance < 0 ? 'badge-purple' : 'badge-green'" x-text="c.balance > 0 ? 'Owes ' + $money(c.balance, {decimals:0}) : c.balance < 0 ? 'Credit ' + $money(-c.balance, {decimals:0}) : 'Clear'"></span>
+              </div>
+              <p class="page-subtitle">
+                <span x-show="c.phone"><span x-text="c.phone"></span> · </span>Customer since <b x-text="$date(c.created_at)"></b> · <span x-text="allSales.length"></span> lifetime sale<span x-text="allSales.length === 1 ? '' : 's'"></span> · lifetime spend <b class="text-slate-700" x-text="$money(lifetimeSpend, {decimals:0})"></b>
+              </p>
+            </div>
+            <div class="page-actions">
+              <a :href="'pos.html?customer=' + c.id" class="btn btn-money" x-show="canPos && c.is_active"><span x-html="ABM.icon('cart')"></span>New sale</a>
+              <a :href="'repair-create.html?customer=' + c.id" class="btn btn-secondary" x-show="canRepair && c.is_active"><span x-html="ABM.icon('wrench')"></span>New repair</a>
+              <button type="button" class="btn btn-secondary" @click="printStatement()"><span x-html="ABM.icon('printer')"></span>Print statement</button>
+              <a :href="'customers.html?edit=' + c.id" class="btn btn-secondary" x-show="canManage && !c.is_walkin"><span x-html="ABM.icon('edit')"></span>Edit</a>
+            </div>
+          </div>
+
+          <!-- Profile + balance -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <!-- Profile -->
+            <div class="card min-w-0">
+              <div class="card-header"><div class="card-title">Profile</div><span class="badge" :class="c.is_active ? 'badge-green' : 'badge-red'" x-text="c.is_active ? 'Active' : 'Inactive'"></span></div>
+              <div class="card-body">
+                <div class="flex items-center gap-3 mb-4 min-w-0">
+                  <div class="avatar w-12 h-12 text-base flex-none" x-text="ABM.utils.initials(c.name)"></div>
+                  <div class="min-w-0">
+                    <div class="font-bold text-slate-900 truncate" x-text="c.name"></div>
+                    <div class="text-xs text-slate-500 truncate" x-text="c.is_walkin ? 'Built-in counter customer' : 'Khata account'"></div>
+                  </div>
+                </div>
+                <dl class="space-y-2.5 text-sm">
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('phone','w-4 h-4')"></span>
+                    <dd class="min-w-0"><a :href="'tel:' + c.phone" class="font-medium text-slate-800 hover:text-navy-700 break-all" x-show="c.phone" x-text="c.phone"></a><span class="text-slate-400" x-show="!c.phone">No phone on file</span></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('mail','w-4 h-4')"></span>
+                    <dd class="min-w-0"><a :href="'mailto:' + c.email" class="text-slate-700 hover:text-navy-700 break-all" x-show="c.email" x-text="c.email"></a><span class="text-slate-400" x-show="!c.email">No email</span></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('map-pin','w-4 h-4')"></span>
+                    <dd class="min-w-0 text-slate-700" x-text="c.address || 'No address'"></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('shield','w-4 h-4')"></span>
+                    <dd class="min-w-0 mono text-slate-700" x-text="c.cnic || '—'"></dd>
+                  </div>
+                  <div class="flex items-start gap-2 min-w-0">
+                    <span class="text-slate-400 flex-none mt-0.5" x-html="ABM.icon('calendar','w-4 h-4')"></span>
+                    <dd class="min-w-0 text-slate-700">Joined <span x-text="$date(c.created_at)"></span></dd>
+                  </div>
+                </dl>
+                <div class="mt-4 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600" x-show="c.notes">
+                  <div class="font-bold uppercase tracking-wider text-[10px] text-slate-500 mb-1">Notes</div>
+                  <div class="whitespace-pre-line" x-text="c.notes"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Balance -->
+            <div class="card lg:col-span-2 min-w-0">
+              <div class="card-header">
+                <div><div class="card-title">Account balance</div><div class="card-subtitle">Khata (receivable) across all branches</div></div>
+                <a href="report-receivables.html" class="text-xs font-semibold text-navy-700 hover:underline">Receivables report</a>
+              </div>
+              <div class="card-body">
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div class="rounded-xl border p-3 min-w-0" :class="outstanding > 0 ? 'bg-rose-50 border-rose-200' : 'bg-slate-50 border-slate-200'">
+                    <div class="text-[11px] font-bold uppercase tracking-wider" :class="outstanding > 0 ? 'text-rose-600' : 'text-slate-500'">Outstanding</div>
+                    <div class="text-lg font-extrabold tabular break-words" :class="outstanding > 0 ? 'text-rose-600' : 'text-slate-700'" x-text="$money(outstanding, {decimals:0})"></div>
+                  </div>
+                  <div class="rounded-xl border p-3 min-w-0" :class="storeCredit > 0 ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'">
+                    <div class="text-[11px] font-bold uppercase tracking-wider" :class="storeCredit > 0 ? 'text-emerald-700' : 'text-slate-500'">Store credit</div>
+                    <div class="text-lg font-extrabold tabular break-words" :class="storeCredit > 0 ? 'text-emerald-700' : 'text-slate-700'" x-text="$money(storeCredit, {decimals:0})"></div>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Credit limit</div>
+                    <div class="text-lg font-extrabold tabular text-slate-800 break-words" x-text="c.credit_limit ? $money(c.credit_limit, {decimals:0}) : 'None'"></div>
+                  </div>
+                  <div class="rounded-xl border border-navy-200 bg-navy-50 p-3 min-w-0">
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-navy-700">Available</div>
+                    <div class="text-lg font-extrabold tabular text-navy-800 break-words" x-text="c.credit_limit ? $money(available, {decimals:0}) : '—'"></div>
+                  </div>
+                </div>
+                <div class="mt-4" x-show="c.credit_limit > 0">
+                  <div class="flex items-center justify-between text-xs text-slate-500 mb-1.5">
+                    <span>Credit used</span>
+                    <span><b :class="usedPct >= 100 ? 'text-rose-600' : 'text-slate-700'" x-text="usedPct + '%'"></b> of <span x-text="$money(c.credit_limit, {decimals:0})"></span></span>
+                  </div>
+                  <div class="progress" :class="usedPct < 80 && 'progress-money'"><div :style="'width:' + Math.min(100, usedPct) + '%'"></div></div>
+                  <p class="help text-rose-600 mt-1" x-show="usedPct >= 100">Credit limit reached — new khata sales should be blocked until a payment is received.</p>
+                </div>
+                <div class="alert alert-info mt-4" x-show="!c.credit_limit && !c.is_walkin"><span x-html="ABM.icon('info')"></span><div>No credit limit set — this customer is cash-only at POS. Set a limit from the customer edit form to allow khata sales.</div></div>
+              </div>
+              <div class="card-footer flex flex-wrap gap-2">
+                <button type="button" class="btn btn-money btn-sm" x-show="canPay" @click="openPay()"><span x-html="ABM.icon('banknotes')"></span>Receive payment</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-open-adjust x-show="canManage" @click="openAdjust()"><span x-html="ABM.icon('scale')"></span>Adjustment</button>
+                <a :href="'pos.html?customer=' + c.id" class="btn btn-secondary btn-sm" x-show="canPos && c.is_active"><span x-html="ABM.icon('cart')"></span>New sale</a>
+                <a :href="'repair-create.html?customer=' + c.id" class="btn btn-secondary btn-sm" x-show="canRepair && c.is_active"><span x-html="ABM.icon('wrench')"></span>New repair</a>
+                <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="printStatement()"><span x-html="ABM.icon('printer')"></span>Statement</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="card mt-4">
+            <div class="px-4 sm:px-5 pt-3">
+              <div class="tabs">
+                <template x-for="t in tabs" :key="t.key">
+                  <button type="button" class="tab" :class="tab === t.key && 'active'" @click="tab = t.key">
+                    <span x-text="t.label"></span><span class="count" x-text="tabCounts[t.key]"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+            <div class="card-body !py-3 border-b border-slate-200">
+              <div class="range-bar">
+                <div class="tabs-pill">
+                  <template x-for="p in range.presets" :key="p.key">
+                    <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+                  </template>
+                </div>
+                <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+                  <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+                  <span class="text-xs text-slate-500">to</span>
+                  <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+                </div>
+                <span class="range-label" x-text="range.label"></span>
+                <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-ghost btn-sm ml-auto" @click="exportCsv()"><span x-html="ABM.icon('download','w-4 h-4')"></span>CSV</button>
+              </div>
+            </div>
+
+            <!-- LEDGER -->
+            <div x-show="tab === 'ledger'">
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th class="hidden md:table-cell">Reference</th>
+                      <th class="hidden xl:table-cell" x-show="showBranch">Branch</th>
+                      <th class="hidden lg:table-cell">Method</th>
+                      <th class="hidden 2xl:table-cell">Notes</th>
+                      <th class="num">Debit</th>
+                      <th class="num">Credit</th>
+                      <th class="num">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="bg-slate-50">
+                      <td class="font-semibold text-slate-700" x-text="range.value.from ? $date(range.value.from) : 'Start'"></td>
+                      <td colspan="2" class="font-semibold text-slate-700">Opening balance</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="hidden lg:table-cell"></td>
+                      <td class="hidden 2xl:table-cell"></td>
+                      <td class="num text-slate-400">—</td>
+                      <td class="num text-slate-400">—</td>
+                      <td class="num font-bold" :class="opening > 0 ? 'text-rose-600' : opening < 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="$money(opening)"></td>
+                    </tr>
+                    <template x-for="t in ledger" :key="t.id">
+                      <tr>
+                        <td class="whitespace-nowrap">
+                          <div class="text-slate-800" x-text="$date(t.created_at)"></div>
+                          <div class="text-[11px] text-slate-400" x-text="ABM.utils.time(t.created_at)"></div>
+                        </td>
+                        <td>
+                          <span x-html="$badge(t.type, t.type === 'payment' ? 'Payment' : null)"></span>
+                          <div class="lg:hidden mt-0.5" x-show="t.chequeStatus"><span x-html="$badge(t.chequeStatus, 'Cheque ' + ABM.ui.statusLabel(t.chequeStatus).toLowerCase())"></span></div>
+                        </td>
+                        <td class="hidden md:table-cell whitespace-nowrap">
+                          <template x-if="t.link"><a :href="t.link" class="mono text-navy-700 hover:underline" x-text="t.refLabel"></a></template>
+                          <template x-if="!t.link"><span class="text-slate-400" x-text="t.refLabel || '—'"></span></template>
+                        </td>
+                        <td class="hidden xl:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="ABM.db.branchCode(t.branch_id)"></span></td>
+                        <td class="hidden lg:table-cell">
+                          <span x-show="t.payment_method" x-html="$badge(t.payment_method)"></span><span class="text-slate-400" x-show="!t.payment_method">—</span>
+                          <!-- a cheque payment shows where the cheque is: pending, deposited, cleared, bounced -->
+                          <div class="mt-0.5" x-show="t.chequeStatus"><span x-html="$badge(t.chequeStatus)"></span></div>
+                          <div class="text-[11px] text-slate-400 truncate max-w-[10rem]" x-show="t.accountName" x-text="'→ ' + t.accountName"></div>
+                        </td>
+                        <td class="hidden 2xl:table-cell"><div class="max-w-[16rem] truncate text-slate-500" x-text="t.notes || '—'"></div></td>
+                        <td class="num whitespace-nowrap" :class="t.debit ? 'text-rose-600 font-semibold' : 'text-slate-300'" x-text="t.debit ? $money(t.debit) : '—'"></td>
+                        <td class="num whitespace-nowrap" :class="t.credit ? 'text-emerald-700 font-semibold' : 'text-slate-300'" x-text="t.credit ? $money(t.credit) : '—'"></td>
+                        <td class="num whitespace-nowrap font-semibold" :class="t.running > 0 ? 'text-rose-600' : t.running < 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="$money(t.running)"></td>
+                      </tr>
+                    </template>
+                    <template x-if="!ledger.length">
+                      <tr><td colspan="9"><div class="empty"><span x-html="ABM.icon('document')"></span><div class="empty-title">No ledger entries in this period</div><div class="text-sm mt-1">Credit sales, payments, refunds and adjustments appear here.</div><button type="button" class="btn btn-secondary btn-sm mt-4" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button></div></td></tr>
+                    </template>
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td colspan="3">Period totals</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="hidden lg:table-cell"></td>
+                      <td class="hidden 2xl:table-cell"></td>
+                      <td class="num text-rose-600 whitespace-nowrap" x-text="$money(totals.debit)"></td>
+                      <td class="num text-emerald-700 whitespace-nowrap" x-text="$money(totals.credit)"></td>
+                      <td class="num whitespace-nowrap" :class="closing > 0 ? 'text-rose-600' : closing < 0 ? 'text-emerald-700' : ''" x-text="$money(closing)"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+              <div class="card-footer text-xs text-slate-500">Debit increases what the customer owes · credit reduces it. Closing balance <b :class="closing > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(closing)"></b> <span x-text="closing > 0 ? '(receivable)' : closing < 0 ? '(store credit)' : ''"></span></div>
+            </div>
+
+            <!-- SALES -->
+            <div x-show="tab === 'sales'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead>
+                    <tr><th>Invoice</th><th class="hidden sm:table-cell">Date</th><th class="hidden xl:table-cell" x-show="showBranch">Branch</th><th class="num hidden lg:table-cell">Items</th><th class="num">Total</th><th class="num hidden md:table-cell">Paid</th><th class="num">Due</th><th class="hidden sm:table-cell">Status</th><th class="actions">Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="s in sales" :key="s.id">
+                      <tr :class="s.status === 'void' && 'opacity-60'">
+                        <td><a :href="'sale-view.html?id=' + s.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="s.invoice_no"></a><div class="text-[11px] text-slate-400 sm:hidden" x-text="$date(s.sale_date)"></div></td>
+                        <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(s.sale_date)"></td>
+                        <td class="hidden xl:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="ABM.db.branchCode(s.branch_id)"></span></td>
+                        <td class="num hidden lg:table-cell text-slate-600" x-text="s.lines"></td>
+                        <td class="num font-semibold whitespace-nowrap" x-text="$money(s.total, {decimals:0})"></td>
+                        <td class="num hidden md:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(s.paid_amount, {decimals:0})"></td>
+                        <td class="num whitespace-nowrap" :class="s.due_amount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-text="s.due_amount > 0 ? $money(s.due_amount, {decimals:0}) : '—'"></td>
+                        <td class="hidden sm:table-cell"><span x-html="$badge(s.status)"></span></td>
+                        <td class="actions"><div class="inline-flex items-center gap-0.5">
+                          <a :href="'sale-view.html?id=' + s.id" class="btn btn-ghost btn-sm btn-icon" title="Open invoice" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                          <a :href="'invoice.html?id=' + s.id + '&layout=a4'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print invoice" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                        </div></td>
+                      </tr>
+                    </template>
+                    <template x-if="!sales.length"><tr><td colspan="9"><div class="empty"><span x-html="ABM.icon('receipt')"></span><div class="empty-title">No sales in this period</div><div class="mt-4 flex justify-center gap-2 flex-wrap"><button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button><a :href="'pos.html?customer=' + c.id" class="btn btn-money btn-sm" x-show="canPos && c.is_active">Start a sale</a></div></div></td></tr></template>
+                  </tbody>
+                  <tfoot x-show="sales.length">
+                    <tr>
+                      <td colspan="2">Totals</td>
+                      <td class="hidden xl:table-cell" x-show="showBranch"></td>
+                      <td class="num hidden lg:table-cell" x-text="saleTotals.lines"></td>
+                      <td class="num whitespace-nowrap" x-text="$money(saleTotals.total, {decimals:0})"></td>
+                      <td class="num hidden md:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(saleTotals.paid, {decimals:0})"></td>
+                      <td class="num text-rose-600 whitespace-nowrap" x-text="$money(saleTotals.due, {decimals:0})"></td>
+                      <td class="hidden sm:table-cell"></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- RETURNS -->
+            <div x-show="tab === 'returns'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Return</th><th class="hidden sm:table-cell">Date</th><th>Invoice</th><th class="hidden lg:table-cell">Refund method</th><th class="hidden xl:table-cell">Reason</th><th class="num">Refund</th><th class="actions">Actions</th></tr></thead>
+                  <tbody>
+                    <template x-for="r in returns" :key="r.id">
+                      <tr>
+                        <td class="mono font-semibold text-slate-800 whitespace-nowrap" x-text="r.return_no"></td>
+                        <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(r.return_date)"></td>
+                        <td><a :href="'sale-view.html?id=' + r.sale_id" class="mono text-navy-700 hover:underline" x-text="r.invoiceNo"></a></td>
+                        <td class="hidden lg:table-cell"><span x-html="$badge(r.refund_method)"></span></td>
+                        <td class="hidden xl:table-cell"><div class="max-w-[16rem] truncate text-slate-500" x-text="r.reason || '—'"></div></td>
+                        <td class="num font-semibold text-amber-700 whitespace-nowrap" x-text="$money(r.refund_amount, {decimals:0})"></td>
+                        <td class="actions"><a :href="'sale-view.html?id=' + r.sale_id" class="btn btn-ghost btn-sm btn-icon" title="Open invoice" x-html="ABM.icon('eye','w-4 h-4')"></a></td>
+                      </tr>
+                    </template>
+                    <template x-if="!returns.length"><tr><td colspan="7"><div class="empty"><span x-html="ABM.icon('return')"></span><div class="empty-title">No returns in this period</div><button type="button" class="btn btn-secondary btn-sm mt-4" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button></div></td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- REPAIRS -->
+            <div x-show="tab === 'repairs'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Job</th><th class="hidden sm:table-cell">Received</th><th>Device</th><th class="hidden lg:table-cell">Technician</th><th>Status</th><th class="num hidden md:table-cell">Total</th><th class="num">Due</th><th class="actions">Actions</th></tr></thead>
+                  <tbody>
+                    <template x-for="j in jobs" :key="j.id">
+                      <tr>
+                        <td><a :href="'repair-view.html?id=' + j.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="j.job_no"></a><div class="text-[11px] text-slate-400 sm:hidden" x-text="$date(j.received_at)"></div></td>
+                        <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(j.received_at)"></td>
+                        <td><div class="min-w-0 max-w-[12rem]"><div class="font-medium text-slate-800 truncate" x-text="j.brand + ' ' + j.model"></div><div class="text-[11px] text-slate-400 truncate" x-text="ABM.db.deviceTypeLabel(j.device_type) + (j.serial ? ' · ' + j.serial : '')"></div></div></td>
+                        <td class="hidden lg:table-cell text-slate-600" x-text="j.technician_id ? ABM.db.userName(j.technician_id) : 'Unassigned'"></td>
+                        <td><span x-html="$badge(j.status)"></span><span class="badge badge-red ml-1" x-show="j.priority === 'urgent'">Urgent</span></td>
+                        <td class="num hidden md:table-cell font-semibold whitespace-nowrap" x-text="$money(j.total, {decimals:0})"></td>
+                        <td class="num whitespace-nowrap" :class="j.due_amount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-text="j.due_amount > 0 ? $money(j.due_amount, {decimals:0}) : '—'"></td>
+                        <td class="actions"><a :href="'repair-view.html?id=' + j.id" class="btn btn-ghost btn-sm btn-icon" title="Open job card" x-html="ABM.icon('eye','w-4 h-4')"></a></td>
+                      </tr>
+                    </template>
+                    <template x-if="!jobs.length"><tr><td colspan="8"><div class="empty"><span x-html="ABM.icon('wrench')"></span><div class="empty-title">No repair jobs in this period</div><div class="mt-4 flex justify-center gap-2 flex-wrap"><button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button><a :href="'repair-create.html?customer=' + c.id" class="btn btn-primary btn-sm" x-show="canRepair && c.is_active">Book a repair</a></div></div></td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- ONLINE ORDERS -->
+            <div x-show="tab === 'orders'" x-cloak>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Order</th><th class="hidden sm:table-cell">Placed</th><th class="hidden lg:table-cell">Delivery to</th><th class="num hidden md:table-cell">Items</th><th>Status</th><th class="hidden md:table-cell">Payment</th><th class="num">Total</th><th class="actions">Actions</th></tr></thead>
+                  <tbody>
+                    <template x-for="o in orders" :key="o.id">
+                      <tr>
+                        <td><a :href="'online-order-view.html?id=' + o.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="o.order_no"></a><div class="text-[11px] text-slate-400" x-show="o.matchedByPhone">matched by phone</div></td>
+                        <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(o.created_at)"></td>
+                        <td class="hidden lg:table-cell"><div class="max-w-[14rem] truncate text-slate-600" x-text="o.cityLine"></div></td>
+                        <td class="num hidden md:table-cell text-slate-600" x-text="o.units"></td>
+                        <td><span x-html="$badge(o.status)"></span></td>
+                        <td class="hidden md:table-cell"><span x-html="$badge(o.payment_method)"></span> <span x-html="$badge(o.payment_status)"></span></td>
+                        <td class="num font-semibold whitespace-nowrap" x-text="$money(o.total, {decimals:0})"></td>
+                        <td class="actions"><a :href="'online-order-view.html?id=' + o.id" class="btn btn-ghost btn-sm btn-icon" title="Open order" x-html="ABM.icon('eye','w-4 h-4')"></a></td>
+                      </tr>
+                    </template>
+                    <template x-if="!orders.length"><tr><td colspan="8"><div class="empty"><span x-html="ABM.icon('bag')"></span><div class="empty-title">No online orders in this period</div><div class="text-sm mt-1">Orders are linked by customer account or by phone number.</div><button type="button" class="btn btn-secondary btn-sm mt-4" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button></div></td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ PRINT STATEMENT -->
+        <div class="print-only print-area stmt text-slate-900">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-extrabold" x-text="company.name"></div>
+              <div class="text-sm" x-text="branchLine"></div>
+              <div class="text-xs" x-show="company.tax">NTN / Tax ID: <span x-text="company.tax"></span></div>
+            </div>
+            <div class="text-right">
+              <div class="text-lg font-bold">CUSTOMER STATEMENT</div>
+              <div class="text-sm" x-text="range.label"></div>
+              <div class="text-xs" x-text="'Printed ' + ABM.utils.datetime(new Date()) + ' by ' + userName"></div>
+            </div>
+          </div>
+          <div class="border-b border-slate-300 my-3"></div>
+          <div class="flex items-start justify-between gap-6 text-sm">
+            <div>
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Statement for</div>
+              <div class="font-bold" x-text="c.name"></div>
+              <div x-show="c.phone" x-text="c.phone"></div>
+              <div x-show="c.address" x-text="c.address"></div>
+              <div x-show="c.cnic">CNIC <span x-text="c.cnic"></span></div>
+            </div>
+            <div class="text-right">
+              <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Closing balance</div>
+              <div class="text-lg font-extrabold" x-text="$money(closing)"></div>
+              <div class="text-xs" x-text="closing > 0 ? 'Payable by customer' : closing < 0 ? 'Store credit in favour of customer' : 'Account clear'"></div>
+              <div class="text-xs" x-show="c.credit_limit">Credit limit <span x-text="$money(c.credit_limit, {decimals:0})"></span></div>
+            </div>
+          </div>
+          <table class="mt-3">
+            <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Notes</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+            <tbody>
+              <tr>
+                <td x-text="range.value.from ? ABM.utils.date(range.value.from) : '—'"></td>
+                <td colspan="3"><b>Opening balance</b></td>
+                <td class="num"></td><td class="num"></td>
+                <td class="num" x-text="$money(opening)"></td>
+              </tr>
+              <template x-for="t in ledger" :key="'p' + t.id">
+                <tr>
+                  <td x-text="$date(t.created_at)"></td>
+                  <td x-text="ABM.ui.statusLabel(t.type)"></td>
+                  <td x-text="t.refLabel || '—'"></td>
+                  <td x-text="t.notes || ''"></td>
+                  <td class="num" x-text="t.debit ? ABM.utils.money(t.debit, {symbol:false}) : ''"></td>
+                  <td class="num" x-text="t.credit ? ABM.utils.money(t.credit, {symbol:false}) : ''"></td>
+                  <td class="num" x-text="ABM.utils.money(t.running, {symbol:false})"></td>
+                </tr>
+              </template>
+              <tr>
+                <td colspan="4"><b>Closing balance</b></td>
+                <td class="num" x-text="ABM.utils.money(totals.debit, {symbol:false})"></td>
+                <td class="num" x-text="ABM.utils.money(totals.credit, {symbol:false})"></td>
+                <td class="num"><b x-text="ABM.utils.money(closing, {symbol:false})"></b></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="text-[10px] mt-4 text-slate-600">
+            Debit increases the amount owed by the customer; credit reduces it. Please settle any outstanding amount at your nearest branch.
+            This statement is computer generated and valid without a signature.
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ RECEIVE PAYMENT -->
+        <div x-show="pay.open" x-cloak class="modal-backdrop" @click.self="closePay()">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="payTitle">
+            <form @submit.prevent="savePay()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="payTitle">Receive payment</div>
+                  <div class="text-xs text-slate-500 truncate" x-text="c.name + ' · ' + branchName"></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="closePay()" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div class="flex flex-wrap gap-2">
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-rose-600">Outstanding</div><div class="text-sm font-bold text-rose-600 tabular" x-text="$money(outstanding)"></div></div>
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Store credit</div><div class="text-sm font-bold text-emerald-700 tabular" x-text="$money(storeCredit)"></div></div>
+                  <div class="flex-1 min-w-[7rem] rounded-xl bg-slate-50 border border-slate-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Unpaid invoices</div><div class="text-sm font-bold text-slate-800 tabular" x-text="openInvoices.length"></div></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="pay-amount">Amount <span class="req">*</span></label>
+                    <div class="input-group"><span class="addon addon-left">Rs.</span><input id="pay-amount" x-ref="payAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="pay.amount" :class="pay.errors.amount && 'is-invalid'"></div>
+                    <p class="field-error" x-show="pay.errors.amount" x-text="pay.errors.amount"></p>
+                    <button type="button" class="help text-navy-700 font-semibold hover:underline" x-show="outstanding > 0" @click="pay.amount = outstanding">Pay full outstanding (<span x-text="$money(outstanding, {decimals:0})"></span>)</button>
+                  </div>
+                  <div>
+                    <label class="label" for="pay-method">Method <span class="req">*</span></label>
+                    <select id="pay-method" class="select" x-model="pay.method" @change="pay.account_id = ''" :class="pay.errors.method && 'is-invalid'">
+                      <template x-for="m in methods" :key="m"><option :value="m" :selected="m === pay.method" x-text="ABM.ui.statusLabel(m)"></option></template>
+                    </select>
+                    <p class="field-error" x-show="pay.errors.method" x-text="pay.errors.method"></p>
+                  </div>
+                  <!-- card / wallet / transfer money lands in a bank or wallet account -->
+                  <div class="sm:col-span-2" x-show="isBank(pay.method)">
+                    <label class="label" for="pay-account">Into account <span class="req">*</span></label>
+                    <select id="pay-account" class="select" x-model="pay.account_id" :class="pay.errors.account && 'is-invalid'">
+                      <option value="" x-show="!payAccounts.length">No account set up</option>
+                      <template x-for="a in payAccounts" :key="a.id"><option :value="String(a.id)" :selected="String(a.id) === String(payAccountId() || '')" x-text="a.name"></option></template>
+                    </select>
+                    <p class="field-error" x-show="pay.errors.account" x-text="pay.errors.account"></p>
+                  </div>
+                  <!-- a cheque is not money until it clears: it is recorded in the cheque register and credited now -->
+                  <template x-if="pay.method === 'cheque'">
+                    <div class="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div class="min-w-0">
+                        <label class="label" for="pay-chq">Cheque no <span class="req">*</span></label>
+                        <input id="pay-chq" type="text" class="input" x-model="pay.cheque_no" :class="pay.errors.cheque_no && 'is-invalid'" placeholder="e.g. 00451287" maxlength="30">
+                        <p class="field-error" x-show="pay.errors.cheque_no" x-text="pay.errors.cheque_no"></p>
+                      </div>
+                      <div class="min-w-0">
+                        <label class="label" for="pay-chq-bank">Bank <span class="req">*</span></label>
+                        <input id="pay-chq-bank" type="text" class="input" x-model="pay.bank_name" :class="pay.errors.bank_name && 'is-invalid'" placeholder="e.g. HBL" maxlength="60">
+                        <p class="field-error" x-show="pay.errors.bank_name" x-text="pay.errors.bank_name"></p>
+                      </div>
+                      <div class="min-w-0">
+                        <label class="label" for="pay-chq-due">Cheque date <span class="req">*</span></label>
+                        <input id="pay-chq-due" type="date" class="input" x-model="pay.due_date" :class="pay.errors.due_date && 'is-invalid'">
+                        <p class="field-error" x-show="pay.errors.due_date" x-text="pay.errors.due_date"></p>
+                      </div>
+                      <p class="help sm:col-span-3 !mt-0">The balance is reduced now. If the cheque bounces or is cancelled in the cheque register, the amount is owed again.</p>
+                    </div>
+                  </template>
+                  <div class="sm:col-span-2" x-show="pay.method !== 'cheque'">
+                    <label class="label" for="pay-ref">Reference <span class="text-slate-400 font-normal" x-show="pay.method === 'cash'">(optional)</span><span class="req" x-show="pay.method !== 'cash'">*</span></label>
+                    <input id="pay-ref" type="text" class="input" x-model="pay.reference" :class="pay.errors.reference && 'is-invalid'" placeholder="Transaction id…" maxlength="60">
+                    <p class="field-error" x-show="pay.errors.reference" x-text="pay.errors.reference"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="pay-notes">Notes</label>
+                    <input id="pay-notes" type="text" class="input" x-model="pay.notes" placeholder="Optional" maxlength="200">
+                  </div>
+                  <div class="sm:col-span-2" x-show="openInvoices.length">
+                    <label class="flex items-start gap-3 cursor-pointer select-none">
+                      <input type="checkbox" class="checkbox mt-0.5" x-model="pay.allocate">
+                      <span class="min-w-0"><span class="text-sm font-semibold text-slate-800">Allocate to oldest unpaid invoices</span><span class="block text-xs text-slate-500">Settles <span x-text="openInvoices.length"></span> invoice<span x-text="openInvoices.length === 1 ? '' : 's'"></span> (<span x-text="$money(invoiceDue, {decimals:0})"></span> due) starting with the oldest.</span></span>
+                    </label>
+                  </div>
+                </div>
+                <div class="alert alert-success" x-show="Number(pay.amount) > 0 && Number(pay.amount) <= outstanding + 0.005"><span x-html="ABM.icon('check-circle')"></span><div>Remaining balance after this payment: <b x-text="$money(ABM.utils.round2(outstanding - Number(pay.amount || 0)))"></b>.</div></div>
+                <div class="alert alert-warning" x-show="Number(pay.amount) > outstanding + 0.005"><span x-html="ABM.icon('info')"></span><div><b x-text="$money(ABM.utils.round2(Number(pay.amount || 0) - outstanding))"></b> more than the outstanding amount — the excess is kept as <b>store credit</b> and can be used on the next sale.</div></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="closePay()">Cancel</button>
+                <button type="submit" class="btn btn-money" :disabled="pay.busy"><span x-html="ABM.icon('banknotes')"></span>Record payment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- ------------------------------------------------ ADJUSTMENT -->
+        <div x-show="adj.open" x-cloak class="modal-backdrop" @click.self="closeAdjust()">
+          <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="adjTitle">
+            <form @submit.prevent="saveAdjust()" novalidate>
+              <div class="modal-header">
+                <div class="min-w-0">
+                  <div class="modal-title" id="adjTitle">Ledger adjustment</div>
+                  <div class="text-xs text-slate-500 truncate" x-text="c.name + ' · current balance ' + $money(c.balance)"></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="closeAdjust()" aria-label="Close" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="modal-body space-y-4">
+                <div>
+                  <span class="label">Direction <span class="req">*</span></span>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" class="rounded-xl border p-3 text-left" :class="adj.dir === 'increase' ? 'border-rose-400 bg-rose-50' : 'border-slate-200 hover:border-slate-300'" @click="adj.dir = 'increase'">
+                      <div class="text-sm font-bold" :class="adj.dir === 'increase' ? 'text-rose-700' : 'text-slate-700'">Increase due</div>
+                      <div class="text-xs text-slate-500">Debit — customer owes more</div>
+                    </button>
+                    <button type="button" class="rounded-xl border p-3 text-left" :class="adj.dir === 'decrease' ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'" @click="adj.dir = 'decrease'">
+                      <div class="text-sm font-bold" :class="adj.dir === 'decrease' ? 'text-emerald-700' : 'text-slate-700'">Decrease due</div>
+                      <div class="text-xs text-slate-500">Credit — write-off / discount</div>
+                    </button>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label class="label" for="adj-amount">Amount <span class="req">*</span></label>
+                    <div class="input-group"><span class="addon addon-left">Rs.</span><input id="adj-amount" x-ref="adjAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="adj.amount" :class="adj.errors.amount && 'is-invalid'"></div>
+                    <p class="field-error" x-show="adj.errors.amount" x-text="adj.errors.amount"></p>
+                  </div>
+                  <div>
+                    <label class="label">New balance</label>
+                    <div class="input bg-slate-50 tabular" :class="projected > 0 ? 'text-rose-600' : projected < 0 ? 'text-emerald-700' : ''" x-text="$money(projected)"></div>
+                    <p class="help" x-text="projected > 0 ? 'Receivable' : projected < 0 ? 'Store credit' : 'Account clear'"></p>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="label" for="adj-reason">Reason <span class="req">*</span></label>
+                    <textarea id="adj-reason" class="textarea" rows="2" maxlength="200" x-model="adj.reason" :class="adj.errors.reason && 'is-invalid'" placeholder="e.g. Rounding write-off approved by manager"></textarea>
+                    <p class="field-error" x-show="adj.errors.reason" x-text="adj.errors.reason"></p>
+                  </div>
+                </div>
+                <div class="alert alert-warning"><span x-html="ABM.icon('warning')"></span><div>Adjustments change the customer's balance without a sale or payment. They are written to the audit log with your name.</div></div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @click="closeAdjust()">Cancel</button>
+                <button type="submit" class="btn btn-primary" :disabled="adj.busy"><span x-html="ABM.icon('check')"></span>Post adjustment</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function customerViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const METHODS = ['cash', 'bank_transfer', 'card', 'jazzcash', 'easypaisa', 'cheque'];
+      const isBank = (m) => ABM.bank.isNonCash(m);
+      const digits = (v) => String(v || '').replace(/\D/g, '');
+      const emptyPay = (amount) => ({ open: false, amount, method: 'cash', reference: '', notes: '', allocate: true, account_id: '', cheque_no: '', bank_name: '', due_date: utils.today(), errors: {}, busy: false });
+      return {
+        requestedId: utils.qs('id', ''),
+        c: null,
+        isSuperAdmin: session.isSuperAdmin(),
+        canManage: session.can('customers.edit'),
+        canPay: session.can('customers.payments'),
+        canPos: session.can('pos.view'),
+        canRepair: session.can('repairs.add'),
+        userName: (session.user() || {}).name || '',
+        branchName: (session.branch() || {}).name || '',
+        methods: METHODS,
+        tabs: [{ key: 'ledger', label: 'Ledger' }, { key: 'sales', label: 'Sales' }, { key: 'returns', label: 'Returns' }, { key: 'repairs', label: 'Repairs' }, { key: 'orders', label: 'Online orders' }],
+        tab: 'ledger', range: null,
+        ledger: [], sales: [], returns: [], jobs: [], orders: [], allSales: [], openInvoices: [],
+        opening: 0, closing: 0, totals: { debit: 0, credit: 0 },
+        company: { name: 'Abbott Mobile', tax: '' }, branchLine: '',
+        pay: emptyPay(''),
+        adj: { open: false, dir: 'increase', amount: '', reason: '', errors: {}, busy: false },
+
+        get showBranch() { return this.isSuperAdmin; },
+        get outstanding() { return this.c && this.c.balance > 0 ? utils.round2(this.c.balance) : 0; },
+        get storeCredit() { return this.c && this.c.balance < 0 ? utils.round2(-this.c.balance) : 0; },
+        get available() { return utils.round2(Math.max(0, (Number(this.c.credit_limit) || 0) - this.outstanding)); },
+        get usedPct() { const l = Number(this.c.credit_limit) || 0; return l > 0 ? Math.round(this.outstanding / l * 100) : 0; },
+        get lifetimeSpend() { return utils.sum(this.allSales.filter((s) => s.status !== 'void'), 'total'); },
+        get invoiceDue() { return utils.sum(this.openInvoices, 'due_amount'); },
+        get saleTotals() { const live = this.sales.filter((s) => s.status !== 'void'); return { lines: live.reduce((a, s) => a + s.lines, 0), total: utils.sum(live, 'total'), paid: utils.sum(live, 'paid_amount'), due: utils.sum(live, 'due_amount') }; },
+        get projected() { const amt = Number(this.adj.amount) || 0; const b = Number(this.c.balance) || 0; return utils.round2(this.adj.dir === 'increase' ? b + amt : b - amt); },
+        get tabCounts() { return { ledger: this.ledger.length, sales: this.sales.length, returns: this.returns.length, repairs: this.jobs.length, orders: this.orders.length }; },
+
+        init() {
+          const c = db.find('customers', this.requestedId);
+          if (!c) { this.range = ABM.range('all', null, null); return; }
+          this.c = c;
+          const b = session.branch() || {};
+          this.company = { name: db.setting('company_name') || 'Abbott Mobile', tax: b.tax_id || '' };
+          this.branchLine = [b.name, b.address, b.phone].filter(Boolean).join(' · ');
+          const t = utils.qs('tab', ''); if (this.tabs.some((x) => x.key === t)) this.tab = t;
+          this.range = ABM.range('all', () => this.compute(), 'customer-ledger');
+          this.compute();
+          document.title = c.name + ' · Abbott Mobile';
+          if (utils.qs('pay') && this.canPay) this.$nextTick(() => this.openPay());
+        },
+
+        /* --------------------------------------------------------- data */
+        inBranch(row) { return this.isSuperAdmin || String(row.branch_id) === String(session.branchId()); },
+        refLink(t) {
+          const id = t.reference_id;
+          if (!id) return { link: '', label: '' };
+          if (t.reference_type === 'sale') { const s = db.find('sales', id); return { link: 'sale-view.html?id=' + id, label: s ? s.invoice_no : 'Sale #' + id }; }
+          if (t.reference_type === 'sale_return') { const r = db.find('sale_returns', id); return { link: r ? 'sale-view.html?id=' + r.sale_id : '', label: r ? r.return_no : 'Return #' + id }; }
+          if (t.reference_type === 'repair_job') { const j = db.find('repair_jobs', id); return { link: 'repair-view.html?id=' + id, label: j ? j.job_no : 'Job #' + id }; }
+          if (t.reference_type === 'online_order') { const o = db.find('online_orders', id); return { link: 'online-order-view.html?id=' + id, label: o ? o.order_no : 'Order #' + id }; }
+          if (t.reference_type === 'cheque') { const c = db.find('cheques', id); return { link: session.can('cheques.view') ? 'cheques.html?id=' + id : '', label: c ? 'Cheque ' + c.cheque_no : 'Cheque #' + id }; }
+          return { link: '', label: '' };
+        },
+        compute() {
+          const id = this.c.id, r = this.range;
+          const tx = utils.sortBy(db.all('customer_transactions').filter((t) => String(t.customer_id) === String(id) && this.inBranch(t)), (t) => String(t.created_at) + '|' + String(t.id).padStart(8, '0'));
+          const from = r.value.from;
+          let running = 0;
+          const before = from ? tx.filter((t) => String(t.created_at).slice(0, 10) < from) : [];
+          before.forEach((t) => { running = utils.round2(running + (Number(t.debit) || 0) - (Number(t.credit) || 0)); });
+          this.opening = running;
+          const inRange = tx.filter((t) => r.contains(t.created_at));
+          this.ledger = inRange.map((t) => {
+            running = utils.round2(running + (Number(t.debit) || 0) - (Number(t.credit) || 0));
+            const ref = this.refLink(t);
+            // a payment made by cheque shows the cheque's status; a card / wallet / transfer one, its account
+            const chq = t.cheque_id ? db.find('cheques', t.cheque_id) : null;
+            const txn = t.bank_txn_id ? db.find('bank_transactions', t.bank_txn_id) : null;
+            const acc = txn ? db.find('bank_accounts', txn.account_id) : null;
+            return { ...t, running, link: ref.link, refLabel: ref.label, chequeStatus: chq && t.type === 'payment' ? chq.status : '', accountName: acc ? acc.name : '' };
+          });
+          this.closing = running;
+          this.totals = { debit: utils.sum(inRange, 'debit'), credit: utils.sum(inRange, 'credit') };
+
+          this.allSales = db.all('sales').filter((s) => String(s.customer_id) === String(id) && this.inBranch(s));
+          const items = db.all('sale_items');
+          this.sales = utils.sortBy(this.allSales.filter((s) => r.contains(s.sale_date)), 'sale_date', 'desc')
+            .map((s) => ({ ...s, lines: items.filter((i) => i.sale_id === s.id).length }));
+          this.openInvoices = utils.sortBy(this.allSales.filter((s) => s.status !== 'void' && Number(s.due_amount) > 0.005), 'sale_date');
+
+          this.returns = utils.sortBy(db.all('sale_returns').filter((x) => String(x.customer_id) === String(id) && this.inBranch(x) && r.contains(x.return_date)), 'return_date', 'desc')
+            .map((x) => { const s = db.find('sales', x.sale_id); return { ...x, invoiceNo: s ? s.invoice_no : '#' + x.sale_id }; });
+
+          this.jobs = utils.sortBy(db.all('repair_jobs').filter((j) => String(j.customer_id) === String(id) && this.inBranch(j) && r.contains(j.received_at)), 'received_at', 'desc');
+
+          const phone = digits(this.c.phone);
+          this.orders = utils.sortBy(db.all('online_orders').filter((o) => {
+            if (!r.contains(o.created_at)) return false;
+            if (String(o.customer_id) === String(id)) return true;
+            return !!phone && digits((o.customer || {}).phone) === phone;
+          }), 'created_at', 'desc').map((o) => ({
+            ...o, matchedByPhone: String(o.customer_id) !== String(id),
+            units: (o.items || []).reduce((a, x) => a + (Number(x.quantity) || 0), 0),
+            cityLine: [(o.customer || {}).address, (o.customer || {}).city].filter(Boolean).join(', ') || '—',
+          }));
+        },
+        exportCsv() {
+          const name = String(this.c.name).replace(/[^A-Za-z0-9]+/g, '-').toLowerCase();
+          if (this.tab === 'ledger') {
+            const cols = [{ label: 'Date', value: (t) => String(t.created_at).slice(0, 10) }, { label: 'Type', value: (t) => ui.statusLabel(t.type) }, { label: 'Reference', key: 'refLabel' }, { label: 'Branch', value: (t) => db.branchCode(t.branch_id) }, { label: 'Method', value: (t) => (t.payment_method ? ui.statusLabel(t.payment_method) : '') }, { label: 'Notes', key: 'notes' }, { label: 'Debit', key: 'debit' }, { label: 'Credit', key: 'credit' }, { label: 'Balance', key: 'running' }];
+            if (!utils.download('statement-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.ledger, cols))) return;
+          } else if (this.tab === 'sales') {
+            const cols = [{ label: 'Invoice', key: 'invoice_no' }, { label: 'Date', value: (s) => String(s.sale_date).slice(0, 10) }, { label: 'Branch', value: (s) => db.branchCode(s.branch_id) }, { label: 'Lines', key: 'lines' }, { label: 'Total', key: 'total' }, { label: 'Paid', key: 'paid_amount' }, { label: 'Due', key: 'due_amount' }, { label: 'Status', value: (s) => ui.statusLabel(s.status) }];
+            if (!utils.download('sales-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.sales, cols))) return;
+          } else if (this.tab === 'returns') {
+            const cols = [{ label: 'Return', key: 'return_no' }, { label: 'Date', value: (x) => String(x.return_date).slice(0, 10) }, { label: 'Invoice', key: 'invoiceNo' }, { label: 'Method', value: (x) => ui.statusLabel(x.refund_method) }, { label: 'Reason', key: 'reason' }, { label: 'Refund', key: 'refund_amount' }];
+            if (!utils.download('returns-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.returns, cols))) return;
+          } else if (this.tab === 'repairs') {
+            const cols = [{ label: 'Job', key: 'job_no' }, { label: 'Received', value: (j) => String(j.received_at).slice(0, 10) }, { label: 'Device', value: (j) => [j.brand, j.model].filter(Boolean).join(' ') }, { label: 'Serial', key: 'serial' }, { label: 'Status', value: (j) => ui.statusLabel(j.status) }, { label: 'Total', key: 'total' }, { label: 'Due', key: 'due_amount' }];
+            if (!utils.download('repairs-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.jobs, cols))) return;
+          } else {
+            const cols = [{ label: 'Order', key: 'order_no' }, { label: 'Placed', value: (o) => String(o.created_at).slice(0, 10) }, { label: 'Status', value: (o) => ui.statusLabel(o.status) }, { label: 'Payment', value: (o) => ui.statusLabel(o.payment_method) + ' / ' + ui.statusLabel(o.payment_status) }, { label: 'Units', key: 'units' }, { label: 'Total', key: 'total' }];
+            if (!utils.download('online-orders-' + name + '-' + utils.today() + '.csv', utils.toCsv(this.orders, cols))) return;
+          }
+          ui.success('Export ready.');
+        },
+        printStatement() { this.tab = 'ledger'; this.$nextTick(() => window.print()); },
+        closeModals() { this.closePay(); this.closeAdjust(); },
+
+        /* ------------------------------------------------- receive payment */
+        openPay() {
+          if (!this.canPay) { ui.error('You do not have permission to receive payments.'); return; }
+          this.pay = { ...emptyPay(this.outstanding > 0 ? this.outstanding : ''), open: true };
+          this.$nextTick(() => { if (this.$refs.payAmount) { this.$refs.payAmount.focus(); this.$refs.payAmount.select(); } });
+        },
+        closePay() { if (this.pay.open) this.pay.open = false; },
+        isBank(m) { return isBank(m); },
+        /** Open accounts of this branch a card / wallet / transfer payment can land in. */
+        get payAccounts() { return ABM.bank.accounts(session.branchId()).filter((a) => a.is_active); },
+        /** The account picked, else the Banking-page default for the method. */
+        payAccountId() { return isBank(this.pay.method) ? (this.pay.account_id || ABM.bank.accountFor(this.pay.method, session.branchId()) || null) : null; },
+        savePay() {
+          const p = this.pay, e = {};
+          const amt = Number(p.amount);
+          if (p.amount === '' || p.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          else if (amt > 10000000) e.amount = 'That amount looks wrong — please check.';
+          if (!METHODS.includes(p.method)) e.method = 'Select a payment method.';
+          if (p.method === 'cheque') {
+            if (!String(p.cheque_no || '').trim()) e.cheque_no = 'Enter the cheque number.';
+            if (!String(p.bank_name || '').trim()) e.bank_name = 'Enter the bank the cheque is drawn on.';
+            if (!utils.parseDate(p.due_date)) e.due_date = 'Enter the date on the cheque.';
+          } else if (p.method !== 'cash' && !String(p.reference || '').trim()) e.reference = 'Enter the transaction reference.';
+          // card / wallet / transfer money must have an open account to land in — checked before anything is written
+          const accountId = this.payAccountId();
+          const acc = accountId ? db.find('bank_accounts', accountId) : null;
+          if (isBank(p.method)) {
+            if (!acc) e.account = 'No bank or wallet account is set up for ' + ui.statusLabel(p.method) + ' — add one under Bank Accounts.';
+            else if (!acc.is_active) e.account = acc.name + ' is closed — choose another account.';
+          }
+          p.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          p.busy = true;
+          try {
+            const amount = utils.round2(amt);
+            const bid = session.branchId();
+            const c = db.find('customers', this.c.id);          // re-read: another tab may have changed the balance
+            if (!c) throw new Error('This customer no longer exists.');
+            const plan = p.allocate ? this.allocationPlan(amount) : [];   // oldest unpaid invoices first (nothing written yet)
+            const noteParts = [String(p.notes || '').trim() || 'Payment received'];
+            if (plan.length) noteParts.push('applied to ' + plan.map((x) => x.invoice_no).join(', '));
+            const notes = noteParts.filter(Boolean).join(' · ');
+            const oneSale = plan.length === 1 ? { type: 'sale', id: plan[0].id } : null;
+            let t = null, cheque = null, txn = null;
+            if (p.method === 'cheque') {
+              // the cheque's own ledger credit IS the payment (linked both ways), so a bounce undoes exactly it
+              cheque = ABM.bank.cheque.receive({
+                cheque_no: String(p.cheque_no).trim(), bank_name: String(p.bank_name).trim(), amount, issue_date: utils.today(), due_date: p.due_date,
+                party_type: 'customer', party_id: c.id, party_name: c.name, branch_id: bid, notes: String(p.notes || '').trim(),
+                postLedger: true, ledgerRef: oneSale, ledgerNotes: notes + ' · cheque ' + String(p.cheque_no).trim() + ' (' + String(p.bank_name).trim() + ')',
+              });
+              t = cheque.ledger_txn_id ? db.find('customer_transactions', cheque.ledger_txn_id) : null;
+            } else {
+              txn = ABM.bank.receive(p.method, amount, { accountId, branchId: bid, reference: String(p.reference || '').trim(), party: c.name, notes: 'Khata payment · ' + c.name, ref: { type: 'customer', id: c.id } });
+              t = ABM.ledger.customer(c.id, bid, 'payment', 0, amount, {
+                referenceType: oneSale ? 'sale' : null, referenceId: oneSale ? oneSale.id : null,
+                paymentMethod: p.method, paymentReference: String(p.reference || '').trim() || null,
+                bankTxnId: txn ? txn.id : null, notes,
+              });
+              // point the bank row at the exact ledger entry it belongs to
+              if (txn && t) db.update('bank_transactions', txn.id, { reference_type: 'customer_transaction', reference_id: t.id });
+            }
+            this.applyAllocation(plan);
+            if (t && plan.length) db.update('customer_transactions', t.id, { allocations: plan.map((x) => ({ sale_id: x.id, amount: x.amount })) });
+            const where = cheque ? ' · cheque ' + cheque.cheque_no + ' pending' : (txn ? ' → ' + acc.name : '');
+            db.audit('customer.payment', 'customer', c.id, `${utils.money(amount)} received from ${c.name} (${ui.statusLabel(p.method)})${where}${plan.length ? ' · applied to ' + plan.map((x) => x.invoice_no).join(', ') : ''}`);
+            const fresh = db.find('customers', c.id);
+            this.c = fresh;
+            ui.success('Payment of ' + utils.money(amount) + ' recorded' + (cheque ? ' — cheque ' + cheque.cheque_no + ' is in the cheque register.' : txn ? ' into ' + acc.name + '.' : '.'));
+            if (fresh.balance < 0) ui.toast('Store credit of ' + utils.money(-fresh.balance) + ' is now available for this customer.', 'info');
+            p.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not record the payment.');
+          } finally {
+            p.busy = false;
+          }
+        },
+        /** Which oldest unpaid invoices a payment settles, read fresh (nothing is written). */
+        allocationPlan(amount) {
+          let left = amount;
+          const out = [];
+          const open = utils.sortBy(db.all('sales').filter((s) => String(s.customer_id) === String(this.c.id) && this.inBranch(s) && s.status !== 'void' && Number(s.due_amount) > 0.005), 'sale_date');
+          for (const cur of open) {
+            if (left <= 0.005) break;
+            const part = utils.round2(Math.min(left, utils.round2(Number(cur.due_amount))));
+            left = utils.round2(left - part);
+            out.push({ id: cur.id, invoice_no: cur.invoice_no, amount: part });
+          }
+          return out;
+        },
+        /** Apply a payment to the invoices it settles (keeps sale.due_amount in sync with the ledger). */
+        applyAllocation(plan) {
+          plan.forEach((x) => {
+            const cur = db.find('sales', x.id);
+            if (!cur) return;
+            const part = utils.round2(Math.min(x.amount, Number(cur.due_amount) || 0));
+            if (!(part > 0)) return;
+            db.update('sales', cur.id, { paid_amount: utils.round2((Number(cur.paid_amount) || 0) + part), due_amount: utils.round2(Number(cur.due_amount) - part) });
+          });
+        },
+        /** Kept for callers of the old API: plan + apply in one go. */
+        allocate(amount) { const plan = this.allocationPlan(amount); this.applyAllocation(plan); return plan.map((x) => ({ id: x.id, invoice_no: x.invoice_no })); },
+
+        /* ---------------------------------------------------- adjustment */
+        openAdjust() {
+          if (!this.canManage) { ui.error('You do not have permission to post adjustments.'); return; }
+          this.adj = { open: true, dir: 'increase', amount: '', reason: '', errors: {}, busy: false };
+          this.$nextTick(() => this.$refs.adjAmount && this.$refs.adjAmount.focus());
+        },
+        closeAdjust() { if (this.adj.open) this.adj.open = false; },
+        saveAdjust() {
+          const a = this.adj, e = {};
+          const amt = Number(a.amount);
+          if (a.amount === '' || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          if (String(a.reason || '').trim().length < 4) e.reason = 'A reason is required for every adjustment.';
+          a.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          a.busy = true;
+          try {
+            const amount = utils.round2(amt);
+            const reason = String(a.reason).trim();
+            ABM.ledger.customer(this.c.id, session.branchId(), 'adjustment', a.dir === 'increase' ? amount : 0, a.dir === 'decrease' ? amount : 0, { notes: reason });
+            db.audit('customer.adjustment', 'customer', this.c.id, `${a.dir === 'increase' ? 'Increased' : 'Decreased'} ${this.c.name}'s balance by ${utils.money(amount)} — ${reason}`);
+            this.c = db.find('customers', this.c.id);
+            ui.success('Adjustment posted. New balance ' + utils.money(this.c.balance) + '.');
+            a.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not post the adjustment.');
+          } finally {
+            a.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

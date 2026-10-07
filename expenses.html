@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Expenses · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="expenses" data-title="Expenses" data-perm="expenses.view">
+  <main x-data="expensesPage()" @keydown.escape.window="closeModals()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Expenses</h2>
+        <p class="page-subtitle"><span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canManage">
+          <button type="button" class="btn btn-secondary" @click="openCategories()"><span x-html="ABM.icon('tag')"></span>Manage categories</button>
+        </template>
+        <template x-if="canAdd">
+          <button type="button" class="btn btn-primary" id="btn-add" @click="openAdd()"><span x-html="ABM.icon('plus')"></span>Add Expense</button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'report-expenses.html?' + range.query" class="stat stat-danger" title="Open the expenses report for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Total expenses</div><div class="stat-value" x-text="$money(tiles.total, {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta">of which <b class="text-slate-700" x-text="$money(tiles.cash, {decimals:0})"></b> paid in cash</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="tiles.top ? ('expenses.html?' + range.query + '&category=' + tiles.top.id) : ('expenses.html?' + range.query)" class="stat stat-accent" title="Filter this list by the top category">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Top category</div><div class="stat-value !text-xl truncate" :title="tiles.top ? tiles.top.name : ''" x-text="tiles.top ? tiles.top.name : '—'"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('tag')"></span>
+        </div>
+        <div class="stat-meta" x-show="tiles.top"><b class="text-slate-700" x-text="tiles.top ? $money(tiles.top.amount, {decimals:0}) : ''"></b> · <span x-text="tiles.top ? tiles.top.pct + '% of total' : ''"></span></div>
+        <div class="stat-meta" x-show="!tiles.top">No expenses in this period</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#expense-list" class="stat" title="Jump to the list">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Entries</div><div class="stat-value" x-text="ABM.utils.num(tiles.count)"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta">avg <b class="text-slate-700" x-text="$money(tiles.count ? tiles.total / tiles.count : 0, {decimals:0})"></b> per entry · <span x-text="tiles.categoriesUsed"></span> categor<span x-text="tiles.categoriesUsed === 1 ? 'y' : 'ies'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="tiles.hasPrev ? ('expenses.html?range=custom&from=' + range.previous.from + '&to=' + range.previous.to) : 'report-expenses.html'" class="stat" :class="tiles.delta > 0 ? 'stat-warning' : 'stat-money'" title="Open the previous period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">vs previous period</div>
+            <div class="stat-value" :class="!tiles.hasPrev ? 'text-slate-400' : tiles.delta > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="tiles.hasPrev ? ((tiles.delta > 0 ? '+' : '') + tiles.delta + '%') : '—'"></div>
+          </div>
+          <span class="chip" :class="tiles.delta > 0 ? 'chip-warning' : 'chip-money'" x-html="ABM.icon(tiles.delta > 0 ? 'trend-up' : 'trend-down')"></span>
+        </div>
+        <div class="stat-meta" x-show="tiles.hasPrev">previous <b class="text-slate-700" x-text="$money(tiles.prevTotal, {decimals:0})"></b> · <span x-text="ABM.utils.date(range.previous.from,'short') + ' – ' + ABM.utils.date(range.previous.to,'short')"></span></div>
+        <div class="stat-meta" x-show="!tiles.hasPrev">Pick a bounded period to compare</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Chart + breakdown -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+      <div class="card lg:col-span-2 min-w-0">
+        <div class="card-header">
+          <div><div class="card-title">Expenses by category</div><div class="card-subtitle"><span x-text="range.label"></span> · <span x-text="scopeLabel"></span></div></div>
+          <a :href="'report-expenses.html?' + range.query" class="text-xs font-semibold text-navy-700 hover:underline">Full report</a>
+        </div>
+        <div class="card-body">
+          <div class="relative w-full min-w-0 h-64 sm:h-72" x-show="byCategory.length"><canvas id="catChart" role="img" aria-label="Horizontal bar chart of expenses by category"></canvas></div>
+          <div class="empty" x-show="!byCategory.length"><span x-html="ABM.icon('chart')"></span><div class="empty-title">Nothing to chart</div><div class="text-sm mt-1">No expenses were recorded in this period.</div></div>
+        </div>
+      </div>
+      <div class="card min-w-0">
+        <div class="card-header"><div class="card-title">Breakdown</div><span class="text-xs text-slate-500" x-text="byCategory.length + ' categor' + (byCategory.length === 1 ? 'y' : 'ies')"></span></div>
+        <div class="card-body space-y-3">
+          <template x-for="c in byCategory" :key="c.id">
+            <button type="button" class="w-full text-left group" @click="f.category = String(c.id); page = 1" :title="'Filter by ' + c.name">
+              <div class="flex items-center gap-2 text-sm">
+                <span class="flex-1 min-w-0 truncate text-slate-700 group-hover:text-navy-700" x-text="c.name"></span>
+                <span class="font-semibold tabular" x-text="$money(c.amount, {decimals:0})"></span>
+                <span class="text-xs text-slate-400 w-10 text-right" x-text="c.pct + '%'"></span>
+              </div>
+              <div class="progress mt-1"><div :style="'width:' + c.pct + '%'"></div></div>
+            </button>
+          </template>
+          <template x-if="!byCategory.length"><div class="empty py-6 text-sm">No expenses in this period.</div></template>
+          <div class="divider" x-show="byMethod.length"></div>
+          <div x-show="byMethod.length">
+            <div class="section-title">By payment method</div>
+            <ul class="space-y-1.5 text-sm">
+              <template x-for="m in byMethod" :key="m.method">
+                <li class="flex items-center gap-2">
+                  <span x-html="$badge(m.method)"></span>
+                  <span class="flex-1 text-xs text-slate-400" x-text="m.count + ' entr' + (m.count === 1 ? 'y' : 'ies')"></span>
+                  <span class="font-semibold tabular" x-text="$money(m.amount, {decimals:0})"></span>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4" id="expense-list">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div class="relative md:col-span-4">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search description, reference, category, user…" x-model.debounce.200ms="q" aria-label="Search expenses">
+          </div>
+          <select class="select" :class="isSuperAdmin ? 'md:col-span-3' : 'md:col-span-4'" x-model="f.category" aria-label="Category">
+            <option value="">All categories</option>
+            <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name + (c.is_active ? '' : ' (inactive)')"></option></template>
+          </select>
+          <select class="select" :class="isSuperAdmin ? 'md:col-span-2' : 'md:col-span-4'" x-model="f.method" aria-label="Payment method">
+            <option value="">All methods</option>
+            <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+          </select>
+          <template x-if="isSuperAdmin">
+            <select class="select md:col-span-3" x-model="f.branch" aria-label="Branch">
+              <option value="">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" x-show="hasFilters">
+          <span class="text-slate-500"><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> entries match</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Expense entries</div><div class="card-subtitle"><span x-text="filtered.length"></span> entr<span x-text="filtered.length === 1 ? 'y' : 'ies'"></span> · total <b class="text-slate-700" x-text="$money(filteredTotal, {decimals:0})"></b></div></div>
+        <div class="text-xs text-slate-500 hidden sm:block">Click a column heading to sort</div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="th-sort" @click="setSort('expense_date')"><span class="inline-flex items-center gap-1">Date <span x-html="sortIcon('expense_date')"></span></span></th>
+              <th class="th-sort" @click="setSort('categoryName')"><span class="inline-flex items-center gap-1">Category <span x-html="sortIcon('categoryName')"></span></span></th>
+              <th>Description</th>
+              <th class="hidden md:table-cell">Reference</th>
+              <th class="hidden sm:table-cell">Method</th>
+              <th class="num th-sort" @click="setSort('amount')"><span class="inline-flex items-center gap-1">Amount <span x-html="sortIcon('amount')"></span></span></th>
+              <th class="hidden lg:table-cell">By</th>
+              <template x-if="isSuperAdmin"><th class="hidden xl:table-cell">Branch</th></template>
+              <template x-if="canManage || canDelete"><th class="actions">Actions</th></template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr>
+                <td class="whitespace-nowrap"><div class="font-medium text-slate-800" x-text="$date(r.expense_date)"></div><div class="text-[11px] text-slate-400 sm:hidden" x-text="ABM.ui.statusLabel(r.payment_method)"></div></td>
+                <td><span class="badge badge-navy" x-text="r.categoryName"></span></td>
+                <td>
+                  <div class="font-medium text-slate-800 max-w-[16rem] truncate" :title="r.description" x-text="r.description"></div>
+                  <div class="text-[11px] text-slate-400 md:hidden mono truncate max-w-[10rem]" x-show="r.reference" x-text="r.reference"></div>
+                </td>
+                <td class="hidden md:table-cell"><span class="mono text-slate-600" x-text="r.reference || '—'"></span></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.payment_method)"></span></td>
+                <td class="num font-semibold whitespace-nowrap text-rose-600" x-text="$money(r.amount)"></td>
+                <td class="hidden lg:table-cell text-slate-600"><div x-text="r.userName"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.timeAgo(r.created_at)"></div></td>
+                <template x-if="isSuperAdmin"><td class="hidden xl:table-cell"><span class="badge badge-slate" x-text="r.branchCode"></span></td></template>
+                <template x-if="canManage || canDelete">
+                  <td class="actions">
+                    <div class="inline-flex items-center gap-0.5">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit" x-show="canManage" @click="openEdit(r.id)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete" x-show="canDelete" @click="remove(r)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </div>
+                  </td>
+                </template>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('banknotes')"></span>
+                  <div class="empty-title">No expenses found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No expenses were recorded in ' + range.label + '.'"></div>
+                  <div class="mt-4 flex justify-center gap-2">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <template x-if="canAdd"><button type="button" class="btn btn-primary btn-sm" @click="openAdd()">Add expense</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="pager.items.length">
+            <tr>
+              <td colspan="5" class="hidden md:table-cell">Total (<span x-text="filtered.length"></span> entr<span x-text="filtered.length === 1 ? 'y' : 'ies'"></span>)</td>
+              <td colspan="4" class="hidden sm:table-cell md:hidden">Total</td>
+              <td colspan="3" class="sm:hidden">Total</td>
+              <td class="num text-rose-600" x-text="$money(filteredTotal)"></td>
+              <td class="hidden lg:table-cell"></td>
+              <template x-if="isSuperAdmin"><td class="hidden xl:table-cell"></td></template>
+              <template x-if="canManage || canDelete"><td></td></template>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / Edit expense modal -->
+    <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="closeModal()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="expenseModalTitle">
+        <form @submit.prevent="save()" novalidate>
+          <div class="modal-header">
+            <div>
+              <div class="modal-title" id="expenseModalTitle" x-text="modal.mode === 'add' ? 'Add expense' : 'Edit expense'"></div>
+              <div class="text-xs text-slate-500" x-text="modal.mode === 'add' ? 'Record money paid out of the business' : ('Editing entry #' + modal.id)"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeModal()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="ef-date">Date <span class="req">*</span></label>
+                <input id="ef-date" type="date" class="input" x-ref="firstField" x-model="modal.form.expense_date" :max="today" :class="modal.errors.expense_date && 'is-invalid'">
+                <p class="field-error" x-show="modal.errors.expense_date" x-text="modal.errors.expense_date"></p>
+              </div>
+              <div>
+                <label class="label" for="ef-category">Category <span class="req">*</span></label>
+                <select id="ef-category" class="select" x-model="modal.form.category_id" :class="modal.errors.category_id && 'is-invalid'">
+                  <option value="">Select category…</option>
+                  <template x-for="c in categories.filter(c => c.is_active || String(c.id) === String(modal.form.category_id))" :key="c.id"><option :value="String(c.id)" x-text="c.name + (c.is_active ? '' : ' (inactive)')"></option></template>
+                </select>
+                <p class="field-error" x-show="modal.errors.category_id" x-text="modal.errors.category_id"></p>
+                <p class="help" x-show="!modal.errors.category_id"><button type="button" class="font-semibold text-navy-700 hover:underline" @click="openCategories()">Manage categories</button></p>
+              </div>
+              <div>
+                <label class="label" for="ef-amount">Amount <span class="req">*</span></label>
+                <div class="input-group"><input id="ef-amount" type="number" min="0.01" step="0.01" inputmode="decimal" class="input input-money" x-model.number="modal.form.amount" :class="modal.errors.amount && 'is-invalid'" placeholder="0.00"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="modal.errors.amount" x-text="modal.errors.amount"></p>
+              </div>
+              <div>
+                <label class="label" for="ef-method">Payment method <span class="req">*</span></label>
+                <select id="ef-method" class="select" x-model="modal.form.payment_method" :class="modal.errors.payment_method && 'is-invalid'">
+                  <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+                </select>
+                <p class="field-error" x-show="modal.errors.payment_method" x-text="modal.errors.payment_method"></p>
+              </div>
+              <template x-if="isSuperAdmin">
+                <div class="sm:col-span-2">
+                  <label class="label" for="ef-branch">Branch <span class="req">*</span></label>
+                  <select id="ef-branch" class="select" x-model="modal.form.branch_id" :class="modal.errors.branch_id && 'is-invalid'">
+                    <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                  <p class="field-error" x-show="modal.errors.branch_id" x-text="modal.errors.branch_id"></p>
+                </div>
+              </template>
+              <div class="sm:col-span-2">
+                <label class="label" for="ef-desc">Description <span class="req">*</span></label>
+                <input id="ef-desc" type="text" class="input" x-model="modal.form.description" :class="modal.errors.description && 'is-invalid'" placeholder="e.g. LESCO electricity bill – September" maxlength="160">
+                <p class="field-error" x-show="modal.errors.description" x-text="modal.errors.description"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="ef-ref">Reference <span class="text-slate-400 font-normal">(bill / voucher no., optional)</span></label>
+                <input id="ef-ref" type="text" class="input mono" x-model="modal.form.reference" placeholder="e.g. LESCO-123456" maxlength="60">
+              </div>
+            </div>
+            <div class="alert alert-warning" x-show="closedDayWarning" x-cloak>
+              <span x-html="ABM.icon('warning')"></span>
+              <div><b>This day has already been closed.</b> The Z-report for <span x-text="$date(modal.form.expense_date)"></span> will not change; ask a super admin to reopen it if this cash expense must be counted in that drawer.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="modal.busy"><span x-html="ABM.icon('check')"></span><span x-text="modal.mode === 'add' ? 'Save expense' : 'Save changes'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Manage categories modal -->
+    <div x-show="cat.open" x-cloak class="modal-backdrop" @click.self="closeCategories()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="catModalTitle">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title" id="catModalTitle">Expense categories</div>
+            <div class="text-xs text-slate-500"><span x-text="categories.filter(c => c.is_active).length"></span> active · used to group expenses in reports</div>
+          </div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="closeCategories()" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-4">
+          <form @submit.prevent="addCategory()" novalidate>
+            <label class="label" for="cf-name">New category</label>
+            <div class="flex gap-2">
+              <input id="cf-name" type="text" class="input flex-1 min-w-0" x-ref="catField" x-model="cat.newName" :class="cat.error && 'is-invalid'" placeholder="e.g. Generator Fuel" maxlength="60">
+              <button type="submit" class="btn btn-primary flex-none" :disabled="cat.busy"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add</button>
+            </div>
+            <p class="field-error" x-show="cat.error" x-text="cat.error"></p>
+          </form>
+          <ul class="divide-y divide-slate-100 rounded-xl border border-slate-200">
+            <template x-for="c in categories" :key="c.id">
+              <li class="px-3 py-2.5">
+                <template x-if="cat.editId !== c.id">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-medium truncate" :class="c.is_active ? 'text-slate-800' : 'text-slate-400 line-through'" x-text="c.name"></div>
+                      <div class="text-[11px] text-slate-400"><span x-text="usage[c.id] || 0"></span> expense<span x-text="(usage[c.id] || 0) === 1 ? '' : 's'"></span></div>
+                    </div>
+                    <span x-html="$badge(c.is_active ? 'active' : 'inactive')"></span>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Rename" @click="startRename(c)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" :class="c.is_active ? 'text-amber-700' : 'text-emerald-700'" :title="c.is_active ? 'Deactivate' : 'Activate'" @click="toggleCategory(c)" x-html="ABM.icon(c.is_active ? 'x-circle' : 'check-circle','w-4 h-4')"></button>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete" @click="removeCategory(c)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                  </div>
+                </template>
+                <template x-if="cat.editId === c.id">
+                  <form class="flex flex-wrap items-start gap-2" @submit.prevent="saveRename()" novalidate>
+                    <div class="flex-1 min-w-[10rem]">
+                      <input type="text" class="input input-sm" x-model="cat.editName" :class="cat.editError && 'is-invalid'" maxlength="60" aria-label="Category name" @keydown.escape.stop="cancelRename()">
+                      <p class="field-error" x-show="cat.editError" x-text="cat.editError"></p>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                    <button type="button" class="btn btn-secondary btn-sm" @click="cancelRename()">Cancel</button>
+                  </form>
+                </template>
+              </li>
+            </template>
+            <template x-if="!categories.length"><li class="empty py-6 text-sm">No categories yet — add one above.</li></template>
+          </ul>
+          <p class="help">Categories that are already used by expenses cannot be deleted — deactivate them instead to hide them from new entries.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" @click="closeCategories()">Done</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function expensesPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const METHODS = ['cash', 'card', 'jazzcash', 'easypaisa', 'bank_transfer'];
+      const user = session.user() || {};
+      return {
+        user,
+        branch: session.branch() || { name: '', code: '' },
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('expenses.add'),
+        canManage: session.can('expenses.edit'),
+        canDelete: session.can('expenses.delete'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        methods: METHODS,
+        today: utils.today(),
+        categories: [],
+        usage: {},
+        range: null,
+        rows: [],
+        tiles: { total: 0, cash: 0, count: 0, prevTotal: 0, delta: 0, hasPrev: false, top: null, categoriesUsed: 0 },
+        byCategory: [],
+        byMethod: [],
+        q: '',
+        f: { category: '', method: '', branch: '' },
+        sort: { key: 'expense_date', dir: 'desc' },
+        page: 1,
+        chart: null,
+        chartData: [],
+        modal: { open: false, mode: 'add', id: null, busy: false, form: {}, errors: {} },
+        cat: { open: false, newName: '', error: '', editId: null, editName: '', editError: '', busy: false },
+
+        init() {
+          this.loadCategories();
+          const qb = utils.qs('branch');
+          this.f.branch = this.isSuperAdmin ? (qb !== null && (qb === '' || this.branches.some((b) => String(b.id) === qb)) ? qb : String(session.branchId())) : String(session.branchId());
+          const qc = utils.qs('category', ''); if (qc && db.find('expense_categories', qc)) this.f.category = String(qc);
+          const qm = utils.qs('method', ''); if (METHODS.includes(qm)) this.f.method = qm;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('this_month', () => this.refresh(), 'expenses');
+          this.refresh();
+          this.$watch('q', () => { this.page = 1; });
+          ['category', 'method'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.refresh(); });
+          ABM.theme.onChange(() => this.drawChart());
+          const editId = utils.qs('edit');
+          if (editId && this.canManage) this.openEdit(editId);
+          else if (utils.qs('new') && this.canAdd) this.openAdd();
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeBranchId() { return this.isSuperAdmin ? (this.f.branch === '' ? null : Number(this.f.branch)) : session.branchId(); },
+        get scopeLabel() { const id = this.scopeBranchId; return id === null ? 'All branches' : db.branchName(id); },
+        inScope(row) { const id = this.scopeBranchId; return id === null || Number(row.branch_id) === Number(id); },
+        catName(id) { const c = db.find('expense_categories', id); return c ? c.name : '—'; },
+        loadCategories() {
+          this.categories = utils.sortBy(db.all('expense_categories'), (c) => c.name.toLowerCase());
+          const u = {}; db.all('expenses').forEach((e) => { u[e.category_id] = (u[e.category_id] || 0) + 1; }); this.usage = u;
+        },
+
+        /* ------------------------------------------------------------- data */
+        refresh() {
+          const r = this.range;
+          const all = db.all('expenses').filter((e) => this.inScope(e));
+          const inRange = all.filter((e) => r.contains(e.expense_date));
+          this.rows = inRange.map((e) => ({ ...e, amount: Number(e.amount) || 0, categoryName: this.catName(e.category_id), userName: db.userName(e.created_by), branchCode: db.branchCode(e.branch_id) }));
+          const total = utils.sum(inRange, 'amount');
+          const prev = r.previous;
+          const prevTotal = prev.from ? utils.sum(all.filter((e) => utils.inRange(e.expense_date, prev)), 'amount') : 0;
+          const catAgg = {};
+          inRange.forEach((e) => { const a = catAgg[e.category_id] = catAgg[e.category_id] || { id: e.category_id, name: this.catName(e.category_id), amount: 0, count: 0 }; a.amount += Number(e.amount) || 0; a.count += 1; });
+          const byCat = Object.values(catAgg).sort((a, b) => b.amount - a.amount).map((c) => ({ ...c, amount: utils.round2(c.amount), pct: total ? Math.round(c.amount / total * 100) : 0 }));
+          const methAgg = {};
+          inRange.forEach((e) => { const a = methAgg[e.payment_method] = methAgg[e.payment_method] || { method: e.payment_method, amount: 0, count: 0 }; a.amount += Number(e.amount) || 0; a.count += 1; });
+          this.byCategory = byCat;
+          this.byMethod = Object.values(methAgg).sort((a, b) => b.amount - a.amount);
+          this.tiles = {
+            total, cash: utils.sum(inRange.filter((e) => e.payment_method === 'cash'), 'amount'), count: inRange.length,
+            prevTotal, hasPrev: !!prev.from, delta: prevTotal ? Math.round((total - prevTotal) / prevTotal * 100) : (total ? 100 : 0),
+            top: byCat[0] || null, categoriesUsed: byCat.length,
+          };
+          this.$nextTick(() => this.drawChart());
+        },
+        get hasFilters() { return !!(this.q || this.f.category || this.f.method); },
+        clearFilters() { this.q = ''; this.f.category = ''; this.f.method = ''; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const list = this.rows.filter((r) => {
+            if (this.f.category && String(r.category_id) !== String(this.f.category)) return false;
+            if (this.f.method && r.payment_method !== this.f.method) return false;
+            if (q && ![r.description, r.reference, r.categoryName, r.userName, String(r.amount), r.expense_date].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+          const { key, dir } = this.sort;
+          const val = (r) => { if (key === 'amount') return r.amount; if (key === 'expense_date') return r.expense_date + '|' + String(r.created_at || ''); return String(r[key] || '').toLowerCase(); };
+          return utils.sortBy(list, val, dir);
+        },
+        get filteredTotal() { return utils.sum(this.filtered, 'amount'); },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: key === 'categoryName' ? 'asc' : 'desc' }; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+        exportCsv() {
+          const cols = [
+            { label: 'Date', key: 'expense_date' }, { label: 'Category', key: 'categoryName' }, { label: 'Description', key: 'description' }, { label: 'Reference', key: 'reference' },
+            { label: 'Method', value: (r) => ui.statusLabel(r.payment_method) }, { label: 'Amount', key: 'amount' }, { label: 'Branch', key: 'branchCode' }, { label: 'Recorded by', key: 'userName' },
+          ];
+          if (!utils.download('expenses-' + (this.range.value.from || 'all') + '-to-' + (this.range.value.to || utils.today()) + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' expense' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* ------------------------------------------------------------ chart */
+        /* The chart is created once and updated in place afterwards (data / theme colours). Destroying and
+           re-creating on every redraw races Chart.js' pending animation frames and throws on the dead canvas. */
+        drawChart() {
+          const el = document.getElementById('catChart');
+          if (!window.Chart || !el) return;
+          try {
+            const tc = ABM.theme.chart();
+            const MAX = 8;
+            let data = this.byCategory.slice(0, MAX);
+            if (this.byCategory.length > MAX) { const rest = this.byCategory.slice(MAX); data = data.concat([{ name: 'Other (' + rest.length + ')', amount: utils.sum(rest, 'amount'), count: rest.reduce((a, c) => a + c.count, 0) }]); }
+            this.chartData = data;
+            const labels = data.map((c) => c.name), values = data.map((c) => c.amount);
+            if (this.chart && this.chart.canvas !== el) { try { this.chart.destroy(); } catch (e) { /* ignore */ } this.chart = null; }
+            if (this.chart) {
+              const ch = this.chart;
+              ch.data.labels = labels; ch.data.datasets[0].data = values; ch.data.datasets[0].backgroundColor = tc.primary;
+              ch.options.scales.x.grid.color = tc.grid; ch.options.scales.x.ticks.color = tc.tick; ch.options.scales.y.ticks.color = tc.tick;
+              ch.update();
+              return;
+            }
+            if (!data.length) return;
+            Chart.defaults.color = tc.tick;
+            Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+            const self = this;
+            this.chart = new Chart(el, {
+              type: 'bar',
+              data: { labels, datasets: [{ label: 'Expenses', data: values, backgroundColor: tc.primary, borderRadius: 4, borderSkipped: 'start', barThickness: 14, maxBarThickness: 18 }] },
+              options: {
+                indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => { const d = self.chartData[c.dataIndex] || { count: 0 }; return ' ' + utils.money(c.raw, { decimals: 0 }) + ' · ' + d.count + ' entr' + (d.count === 1 ? 'y' : 'ies'); } } } },
+                scales: {
+                  x: { beginAtZero: true, grid: { color: tc.grid }, ticks: { color: tc.tick, maxTicksLimit: 6, callback: (v) => (v >= 1000 ? Math.round(v / 1000) + 'k' : v) } },
+                  y: { grid: { display: false }, ticks: { color: tc.tick, autoSkip: false, callback: (v, i) => { const d = self.chartData[i]; const l = d ? d.name : ''; return l.length > 22 ? l.slice(0, 21) + '…' : l; } } },
+                },
+              },
+            });
+          } catch (e) { console.warn('Expenses chart could not be drawn', e); }
+        },
+
+        /* ------------------------------------------------------------ modal */
+        blankForm() {
+          return { expense_date: utils.today(), category_id: '', amount: '', payment_method: 'cash', description: '', reference: '', branch_id: String(this.scopeBranchId || session.branchId()) };
+        },
+        openAdd() {
+          if (!this.canAdd) { ui.error('Your role is not allowed to add expenses.'); return; }
+          this.modal = { open: true, mode: 'add', id: null, busy: false, form: this.blankForm(), errors: {} };
+          this.$nextTick(() => this.$refs.firstField && this.$refs.firstField.focus());
+        },
+        openEdit(id) {
+          if (!this.canManage) { ui.error('Your role is not allowed to edit expenses.'); return; }
+          const e = db.find('expenses', id);
+          if (!e) { ui.error('Expense not found.'); return; }
+          if (!this.inScope(e) && !this.isSuperAdmin) { ui.error('This expense belongs to another branch.'); return; }
+          const form = this.blankForm();
+          form.expense_date = e.expense_date; form.category_id = String(e.category_id); form.amount = Number(e.amount) || 0; form.payment_method = e.payment_method || 'cash';
+          form.description = e.description || ''; form.reference = e.reference || ''; form.branch_id = String(e.branch_id);
+          this.modal = { open: true, mode: 'edit', id: e.id, busy: false, form, errors: {} };
+          this.$nextTick(() => this.$refs.firstField && this.$refs.firstField.focus());
+        },
+        closeModal() { if (this.modal.open) this.modal.open = false; },
+        closeModals() { if (this.cat.open) this.closeCategories(); else this.closeModal(); },
+        get closedDayWarning() {
+          const f = this.modal.form; if (!this.modal.open || !f.expense_date || f.payment_method !== 'cash') return false;
+          return !!db.first('daily_closings', (c) => String(c.branch_id) === String(f.branch_id) && c.closing_date === f.expense_date && c.status === 'closed');
+        },
+        validate() {
+          const f = this.modal.form; const e = {};
+          if (!f.expense_date || !utils.parseDate(f.expense_date)) e.expense_date = 'Enter a valid date.';
+          else if (f.expense_date > utils.today()) e.expense_date = 'Date cannot be in the future.';
+          const c = db.find('expense_categories', f.category_id);
+          if (!f.category_id || !c) e.category_id = 'Select a category.';
+          const amt = Number(f.amount);
+          if (f.amount === '' || f.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          else if (amt > 100000000) e.amount = 'Amount looks too large.';
+          if (!METHODS.includes(f.payment_method)) e.payment_method = 'Select a payment method.';
+          if (!String(f.description || '').trim()) e.description = 'Describe what this expense was for.';
+          if (this.isSuperAdmin && !this.branches.some((b) => String(b.id) === String(f.branch_id))) e.branch_id = 'Select a branch.';
+          this.modal.errors = e;
+          return !Object.keys(e).length;
+        },
+        save() {
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); return; }
+          this.modal.busy = true;
+          try {
+            const f = this.modal.form;
+            const data = {
+              branch_id: Number(this.isSuperAdmin ? f.branch_id : session.branchId()), category_id: Number(f.category_id), amount: utils.round2(f.amount), expense_date: f.expense_date,
+              payment_method: f.payment_method, description: String(f.description).trim(), reference: String(f.reference || '').trim(),
+            };
+            const label = utils.money(data.amount) + ' · ' + this.catName(data.category_id) + ' · ' + data.description;
+            if (this.modal.mode === 'add') {
+              const rec = db.insert('expenses', { ...data, created_by: user.id || null });
+              db.audit('expense.create', 'expense', rec.id, 'Expense recorded: ' + label);
+              ui.success('Expense saved.');
+            } else {
+              const before = { ...db.find('expenses', this.modal.id) };
+              const changes = [];
+              if (Number(before.amount) !== data.amount) changes.push('Amount ' + before.amount + ' -> ' + data.amount);
+              if (before.expense_date !== data.expense_date) changes.push('Date ' + before.expense_date + ' -> ' + data.expense_date);
+              if (Number(before.category_id) !== data.category_id) changes.push('Category ' + this.catName(before.category_id) + ' -> ' + this.catName(data.category_id));
+              if (before.payment_method !== data.payment_method) changes.push('Method ' + before.payment_method + ' -> ' + data.payment_method);
+              if (Number(before.branch_id) !== data.branch_id) changes.push('Branch ' + db.branchCode(before.branch_id) + ' -> ' + db.branchCode(data.branch_id));
+              db.update('expenses', this.modal.id, data);
+              db.audit('expense.update', 'expense', this.modal.id, changes.length ? changes.join('; ') : 'Expense details updated: ' + label);
+              ui.success('Expense updated.');
+            }
+            this.modal.open = false;
+            this.loadCategories();
+            this.refresh();
+          } catch (err) {
+            ui.error(err.message || 'Could not save the expense.');
+          } finally {
+            this.modal.busy = false;
+          }
+        },
+        async remove(r) {
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete expenses.'); return; }
+          const ok = await ui.confirm({ title: 'Delete expense?', message: `${utils.money(r.amount)} · ${r.categoryName} · "${r.description}" (${utils.date(r.expense_date)}) will be permanently removed.`, confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          db.remove('expenses', r.id);
+          db.audit('expense.delete', 'expense', r.id, `Expense deleted: ${utils.money(r.amount)} · ${r.categoryName} · ${r.description}`);
+          ui.success('Expense deleted.');
+          this.loadCategories();
+          this.refresh();
+        },
+
+        /* ------------------------------------------------------- categories */
+        openCategories() {
+          if (!this.canManage) return;
+          this.loadCategories();
+          this.cat = { open: true, newName: '', error: '', editId: null, editName: '', editError: '', busy: false };
+          this.$nextTick(() => this.$refs.catField && this.$refs.catField.focus());
+        },
+        closeCategories() { if (this.cat.open) { this.cat.open = false; this.cat.editId = null; } },
+        categoryNameError(name, excludeId = null) {
+          const n = String(name || '').trim();
+          if (!n) return 'Enter a category name.';
+          if (n.length > 60) return 'Keep the name under 60 characters.';
+          if (db.all('expense_categories').some((c) => c.name.toLowerCase() === n.toLowerCase() && String(c.id) !== String(excludeId))) return 'A category with this name already exists.';
+          return '';
+        },
+        addCategory() {
+          const err = this.categoryNameError(this.cat.newName);
+          this.cat.error = err; if (err) return;
+          this.cat.busy = true;
+          try {
+            const rec = db.insert('expense_categories', { name: this.cat.newName.trim(), is_active: 1 });
+            db.audit('expense_category.create', 'expense_category', rec.id, `Expense category "${rec.name}" created`);
+            ui.success('Category added.');
+            this.cat.newName = '';
+            this.loadCategories();
+            if (this.modal.open && !this.modal.form.category_id) this.modal.form.category_id = String(rec.id);
+          } finally { this.cat.busy = false; }
+        },
+        startRename(c) { this.cat.editId = c.id; this.cat.editName = c.name; this.cat.editError = ''; },
+        cancelRename() { this.cat.editId = null; this.cat.editName = ''; this.cat.editError = ''; },
+        saveRename() {
+          const c = db.find('expense_categories', this.cat.editId); if (!c) { this.cancelRename(); return; }
+          const err = this.categoryNameError(this.cat.editName, c.id);
+          this.cat.editError = err; if (err) return;
+          const before = c.name; const name = this.cat.editName.trim();
+          if (name !== before) {
+            db.update('expense_categories', c.id, { name });
+            db.audit('expense_category.update', 'expense_category', c.id, `Expense category renamed "${before}" -> "${name}"`);
+            ui.success('Category renamed.');
+          }
+          this.cancelRename();
+          this.loadCategories();
+          this.refresh();
+        },
+        async toggleCategory(c) {
+          const activate = !c.is_active;
+          if (!activate) {
+            const ok = await ui.confirm({ title: 'Deactivate category?', message: `"${c.name}" will be hidden from new expenses. Existing entries keep it for reporting.`, confirmText: 'Deactivate', danger: true });
+            if (!ok) return;
+          }
+          db.update('expense_categories', c.id, { is_active: activate ? 1 : 0 });
+          db.audit(activate ? 'expense_category.activate' : 'expense_category.deactivate', 'expense_category', c.id, `Expense category "${c.name}" ${activate ? 'activated' : 'deactivated'}`);
+          ui.success(activate ? 'Category activated.' : 'Category deactivated.');
+          this.loadCategories();
+        },
+        async removeCategory(c) {
+          const used = this.usage[c.id] || 0;
+          if (used) {
+            const ok = await ui.confirm({ title: 'This category cannot be deleted', message: `"${c.name}" is used by ${used} expense${used === 1 ? '' : 's'}. Categories with history are kept for reporting${c.is_active ? ' — deactivate it instead?' : '.'}`, confirmText: c.is_active ? 'Deactivate instead' : 'OK', cancelText: 'Close', danger: c.is_active });
+            if (ok && c.is_active) {
+              db.update('expense_categories', c.id, { is_active: 0 });
+              db.audit('expense_category.deactivate', 'expense_category', c.id, `Expense category "${c.name}" deactivated (delete blocked)`);
+              ui.success('Category deactivated.');
+              this.loadCategories();
+            }
+            return;
+          }
+          const ok = await ui.confirm({ title: 'Delete category?', message: `"${c.name}" will be permanently removed.`, confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          db.remove('expense_categories', c.id);
+          db.audit('expense_category.delete', 'expense_category', c.id, `Expense category "${c.name}" deleted`);
+          ui.success('Category deleted.');
+          if (String(this.f.category) === String(c.id)) this.f.category = '';
+          if (String(this.modal.form.category_id) === String(c.id)) this.modal.form.category_id = '';
+          this.loadCategories();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: supplier returns</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the supplier-return lifecycle through the real ABM services and checks stock + ledger.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(n, c, x) { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + n + (x ? '  [' + x + ']' : '')); }
+      function throws(n, fn, match) { try { fn(); ok(n, false, 'no error'); } catch (e) { ok(n, !match || e.message.indexOf(match) >= 0, e.message); } }
+      var db = ABM.db, stock = ABM.stock, ledger = ABM.ledger, utils = ABM.utils;
+
+      try {
+        db.reset();
+
+        /* ---------------- seed ---------------- */
+        var rets = db.all('supplier_returns');
+        ok('seed ships supplier returns', rets.length >= 2, rets.length + ' returns');
+        ok('every return has a number', rets.every(function (r) { return /^SRT-/.test(r.return_no); }));
+        var completed = rets.filter(function (r) { return r.status === 'completed'; })[0];
+        ok('a completed return carries credit', !!completed && completed.credit_amount > 0, completed ? completed.credit_amount : 'none');
+        ok('completed return posted a supplier credit', db.all('supplier_transactions').some(function (t) {
+          return t.type === 'return' && String(t.reference_id) === String(completed.id) && t.debit === completed.credit_amount;
+        }));
+        ok('units on a sent return show as with-supplier', db.all('product_imeis').some(function (i) { return i.status === 'returned_to_supplier'; }));
+
+        /* ---------------- build a return by hand, as the page does ---------------- */
+        var branchId = 1;
+        // make a healthy unit defective first
+        var unit = db.all('product_imeis').filter(function (i) { return i.branch_id === branchId && i.status === 'available'; })[0];
+        var product = db.find('products', unit.product_id);
+        var qtyBefore = db.stockQty(branchId, unit.product_id);
+        stock.markDefective(unit.id, 'Screen flicker');
+        ok('marking defective removes it from sellable stock', db.stockQty(branchId, unit.product_id) === qtyBefore - 1);
+        ok('unit is now defective', db.find('product_imeis', unit.id).status === 'defective');
+
+        var supplierId = 2;
+        var supplierBefore = db.find('suppliers', supplierId).balance;
+        var ret = db.insert('supplier_returns', {
+          return_no: db.nextNumber('SRT', db.branchCode(branchId)), branch_id: branchId, supplier_id: supplierId,
+          return_date: utils.today(), status: 'draft', resolution: 'credit_note', reason: 'Faulty on arrival',
+          notes: '', subtotal: unit.cost_price, credit_amount: 0, created_by: 1, sent_at: null, completed_at: null,
+        });
+        db.insert('supplier_return_items', { return_id: ret.id, product_id: unit.product_id, imei_id: unit.id, quantity: 1, unit_cost: unit.cost_price, total: unit.cost_price, condition: 'defective', resolution_note: '', replacement_imei_id: null });
+        ok('draft does not touch stock', db.stockQty(branchId, unit.product_id) === qtyBefore - 1);
+
+        /* ---------------- send ---------------- */
+        var qtyAtSend = db.stockQty(branchId, unit.product_id);
+        stock.returnToSupplier(unit.id, { type: 'supplier_return', id: ret.id }, 'Sent on ' + ret.return_no);
+        db.update('supplier_returns', ret.id, { status: 'sent', sent_at: utils.now() });
+        ok('sending a defective unit does not double-deduct stock', db.stockQty(branchId, unit.product_id) === qtyAtSend, 'qty=' + db.stockQty(branchId, unit.product_id));
+        ok('unit is with the supplier', db.find('product_imeis', unit.id).status === 'returned_to_supplier');
+        ok('a movement records the hand-over', db.all('stock_movements').some(function (m) { return m.movement_type === 'supplier_return' && m.imei_id === unit.id; }));
+        throws('a unit already with the supplier cannot be sent again', function () { stock.returnToSupplier(unit.id, {}, ''); }, 'cannot be sent back');
+
+        /* ---------------- settle with a credit note ---------------- */
+        ledger.supplier(supplierId, branchId, 'return', unit.cost_price, 0, { referenceType: 'supplier_return', referenceId: ret.id, notes: 'Credit for ' + ret.return_no });
+        db.update('supplier_returns', ret.id, { status: 'completed', credit_amount: unit.cost_price, completed_at: utils.now() });
+        var supplierAfter = db.find('suppliers', supplierId).balance;
+        ok('credit note reduces what we owe', Math.abs(supplierAfter - (supplierBefore - unit.cost_price)) < 0.01,
+          supplierBefore + ' -> ' + supplierAfter);
+        var lastTx = db.all('supplier_transactions').slice(-1)[0];
+        ok('ledger row balances', Math.abs(lastTx.balance_after - supplierAfter) < 0.01);
+
+        /* ---------------- replacement flow ---------------- */
+        var unit2 = db.all('product_imeis').filter(function (i) { return i.branch_id === branchId && i.status === 'available'; })[0];
+        var p2 = db.find('products', unit2.product_id);
+        var qty2 = db.stockQty(branchId, unit2.product_id);
+        stock.markDefective(unit2.id, 'No power');
+        stock.returnToSupplier(unit2.id, {}, '');
+        var newSerial = ABM.db.serialType(p2) === 'serial' ? 'RPL' + Date.now().toString(36).toUpperCase() : '350000000000097';
+        throws('a bad serial is refused', function () { stock.receiveReplacement(unit2.id, '123', {}, ''); }, 'IMEI');
+        var fresh = stock.receiveReplacement(unit2.id, newSerial, { type: 'supplier_return', id: ret.id }, 'Swapped');
+        ok('replacement unit is created and sellable', fresh.status === 'available');
+        ok('replacement is back in stock', db.stockQty(branchId, unit2.product_id) === qty2, 'qty=' + db.stockQty(branchId, unit2.product_id) + ' expected ' + qty2);
+        ok('replacement keeps the original cost', fresh.cost_price === unit2.cost_price);
+        ok('old unit is written off', db.find('product_imeis', unit2.id).status === 'scrapped');
+        ok('replacement links back to the faulty unit', fresh.replaced_imei_id === unit2.id);
+
+        /* ---------------- non-serialized goods ---------------- */
+        var acc = db.all('products').filter(function (p) { return !db.isSerialized(p) && db.isStockTracked(p) && db.stockQty(branchId, p.id) > 3; })[0];
+        var accBefore = db.stockQty(branchId, acc.id);
+        stock.removeForSupplierReturn(branchId, acc.id, 2, { type: 'supplier_return', id: ret.id }, 'Damaged box');
+        ok('quantity goods leave stock when sent', db.stockQty(branchId, acc.id) === accBefore - 2, accBefore + ' -> ' + db.stockQty(branchId, acc.id));
+        throws('cannot send back more than we hold', function () { stock.removeForSupplierReturn(branchId, acc.id, 99999, {}, ''); }, 'Insufficient stock');
+
+        /* ---------------- scrap ---------------- */
+        var unit3 = db.all('product_imeis').filter(function (i) { return i.branch_id === branchId && i.status === 'available'; })[0];
+        var qty3 = db.stockQty(branchId, unit3.product_id);
+        stock.scrapImei(unit3.id, { type: 'supplier_return', id: ret.id }, 'Beyond repair');
+        ok('scrapping a sellable unit removes it from stock', db.stockQty(branchId, unit3.product_id) === qty3 - 1);
+        ok('scrapped units are not sellable', !stock.SELLABLE.includes(db.find('product_imeis', unit3.id).status));
+        ok('scrapped unit cannot be sold', !stock.findSellable(db.find('product_imeis', unit3.id).imei, branchId));
+
+        /* ---------------- reporting consistency ---------------- */
+        var faulty = db.all('product_imeis').filter(function (i) { return i.status === 'defective'; });
+        ok('faulty units no longer sit in sellable stock', faulty.every(function (i) {
+          return !stock.SELLABLE.includes(i.status);
+        }));
+        ok('supplier return movements are typed', db.all('stock_movements').some(function (m) { return m.movement_type === 'supplier_replacement'; }));
+        ok('write-offs are typed', db.all('stock_movements').some(function (m) { return m.movement_type === 'scrap'; }));
+
+      } catch (e) { fails++; L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

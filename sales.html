@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Sales History · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="sales" data-title="Sales History" data-perm="sales.view">
+  <main x-data="salesPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Sales History</h2>
+        <p class="page-subtitle">
+          <span x-text="ABM.utils.num(tiles.invoices)"></span> invoice<span x-text="tiles.invoices === 1 ? '' : 's'"></span> · <span x-text="$money(tiles.revenue, {decimals:0})"></span> · <b x-text="scopeLabel"></b>
+          <span x-show="isCashier"> · showing your own sales</span>
+        </p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a href="returns.html" class="btn btn-secondary" x-show="canReturnsList"><span x-html="ABM.icon('return')"></span>Returns</a>
+        <a href="pos.html" class="btn btn-money" x-show="canPos"><span x-html="ABM.icon('cart')"></span>New Sale</a>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
+      <a :href="'report-sales.html?' + range.query" class="stat stat-accent" title="Open the sales report for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Invoices</div><div class="stat-value" x-text="ABM.utils.num(tiles.invoices)"></div></div>
+          <span class="chip chip-navy !w-9 !h-9" x-html="ABM.icon('receipt','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(tiles.units)"></span> units<span x-show="tiles.voided"> · <span class="text-rose-600 font-semibold" x-text="tiles.voided + ' void'"></span></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'report-sales.html?' + range.query" class="stat stat-money" title="Open the sales report for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Revenue</div><div class="stat-value" x-text="$money(tiles.revenue, {decimals:0})"></div></div>
+          <span class="chip chip-money !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">avg <span x-text="$money(tiles.invoices ? tiles.revenue / tiles.invoices : 0, {decimals:0})"></span> / invoice</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="selfLink({ method: 'cash' })" class="stat" title="Show cash-paid invoices">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Cash</div><div class="stat-value" x-text="$money(tiles.cash, {decimals:0})"></div></div>
+          <span class="chip chip-money !w-9 !h-9" x-html="ABM.icon('wallet','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.cashCount"></span> cash payment<span x-text="tiles.cashCount === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="selfLink({ method: 'digital' })" class="stat" title="Show card / wallet / bank-paid invoices">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Card / digital</div><div class="stat-value" x-text="$money(tiles.digital, {decimals:0})"></div></div>
+          <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('card','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">card, JazzCash, EasyPaisa, bank</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="selfLink({ method: 'credit' })" class="stat stat-warning" title="Show invoices with an outstanding balance">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">On ledger</div><div class="stat-value" :class="tiles.ledger > 0 && 'text-amber-700'" x-text="$money(tiles.ledger, {decimals:0})"></div></div>
+          <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('users','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.ledgerCount"></span> credit invoice<span x-text="tiles.ledgerCount === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'returns.html?' + range.query" class="stat stat-danger" title="Open returns for this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Returns</div><div class="stat-value" x-text="ABM.utils.num(tiles.returns)"></div></div>
+          <span class="chip chip-danger !w-9 !h-9" x-html="ABM.icon('return','w-4 h-4')"></span>
+        </div>
+        <div class="stat-meta">refunded <span class="font-semibold text-rose-600" x-text="$money(tiles.returnsAmount, {decimals:0})"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div class="relative md:col-span-4">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Invoice no, customer name or phone…" x-model.debounce.200ms="q" aria-label="Search sales">
+          </div>
+          <select class="select md:col-span-2" x-model="f.status" aria-label="Status">
+            <option value="">All statuses</option>
+            <option value="completed">Completed</option>
+            <option value="partially_returned">Partial return</option>
+            <option value="returned">Returned</option>
+            <option value="void">Void</option>
+          </select>
+          <select class="select md:col-span-2" x-model="f.method" aria-label="Payment method">
+            <option value="">All payments</option>
+            <option value="cash">Cash</option>
+            <option value="card">Card</option>
+            <option value="jazzcash">JazzCash</option>
+            <option value="easypaisa">EasyPaisa</option>
+            <option value="bank_transfer">Bank transfer</option>
+            <option value="store_credit">Store credit</option>
+            <option value="digital">Card / digital (any)</option>
+            <option value="split">Split payment</option>
+            <option value="credit">On ledger (due)</option>
+          </select>
+          <select class="select md:col-span-2" x-model="f.cashier" aria-label="Cashier" x-show="!isCashier">
+            <option value="">All cashiers</option>
+            <template x-for="u in cashiers" :key="u.id"><option :value="u.id" x-text="u.name + (u.is_active ? '' : ' (inactive)')"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="scope" aria-label="Branch" x-show="isSuperAdmin">
+            <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            <option value="all">All branches</option>
+          </select>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <div class="text-slate-500"><b class="text-slate-800" x-text="filtered.length"></b> invoice<span x-text="filtered.length === 1 ? '' : 's'"></span> match · total <b class="text-slate-800" x-text="$money(filteredTotal, {decimals:0})"></b></div>
+          <template x-if="f.customer">
+            <span class="badge badge-navy badge-lg">Customer: <span x-text="ABM.db.customerName(f.customer)"></span><button type="button" class="ml-1 hover:text-rose-600" @click="f.customer = ''" aria-label="Clear customer filter" x-html="ABM.icon('x','w-3 h-3')"></button></span>
+          </template>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Invoices</div><div class="card-subtitle" x-text="range.label + ' · ' + scopeLabel"></div></div>
+        <div class="text-xs text-slate-500 hidden sm:block">Newest first</div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Invoice</th>
+              <th class="hidden sm:table-cell">Date / time</th>
+              <th>Customer</th>
+              <th class="hidden 2xl:table-cell">Cashier</th>
+              <th class="num hidden xl:table-cell">Items</th>
+              <th class="num">Total</th>
+              <th class="num hidden md:table-cell">Due</th>
+              <th class="hidden sm:table-cell">Payment</th>
+              <th class="hidden md:table-cell">Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="r.status === 'void' && 'opacity-60'">
+                <td>
+                  <a :href="'sale-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.invoice_no"></a>
+                  <div class="text-xs text-slate-400 sm:hidden whitespace-nowrap" x-text="ABM.utils.datetime(r.sale_date)"></div>
+                  <div class="mt-0.5 md:hidden"><span x-html="$badge(r.status)" x-show="r.status !== 'completed'"></span></div>
+                </td>
+                <td class="hidden sm:table-cell whitespace-nowrap"><div class="text-slate-800" x-text="$date(r.sale_date)"></div><div class="text-xs text-slate-400" x-text="ABM.utils.time(r.sale_date)"></div></td>
+                <td>
+                  <div class="min-w-0 max-w-[12rem]">
+                    <template x-if="!r.isWalkin"><a :href="'customer-view.html?id=' + r.customer_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate" x-text="r.customerName"></a></template>
+                    <template x-if="r.isWalkin"><div class="font-medium text-slate-600 truncate" x-text="r.customerName"></div></template>
+                    <div class="text-xs text-slate-400 truncate" x-text="r.customerPhone || (r.branchCode + ' · ' + r.items + ' item' + (r.items === 1 ? '' : 's'))"></div>
+                  </div>
+                </td>
+                <td class="hidden 2xl:table-cell text-slate-600 whitespace-nowrap" x-text="r.cashier"></td>
+                <td class="num hidden xl:table-cell"><span x-text="r.units"></span><span class="text-xs text-slate-400" x-show="r.items !== r.units" x-text="' / ' + r.items + ' lines'"></span></td>
+                <td class="num font-semibold whitespace-nowrap">
+                  <div x-text="$money(r.total)"></div>
+                  <div class="text-xs font-normal text-slate-400" x-show="r.status !== 'void' && r.paid_amount > 0 && r.paid_amount < r.total" x-text="'paid ' + $money(r.paid_amount, {decimals:0})"></div>
+                  <div class="text-xs text-rose-600 md:hidden" x-show="r.due_amount > 0" x-text="'due ' + $money(r.due_amount, {decimals:0})"></div>
+                </td>
+                <td class="num hidden md:table-cell whitespace-nowrap"><span :class="r.due_amount > 0 ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-text="r.due_amount > 0 ? $money(r.due_amount) : '—'"></span></td>
+                <td class="hidden sm:table-cell">
+                  <div class="flex flex-wrap gap-1">
+                    <template x-if="r.split"><span :title="r.methods.map(m => ABM.ui.statusLabel(m)).join(' + ')" x-html="$badge('split', 'Split')"></span></template>
+                    <template x-if="!r.split && r.methods.length"><span x-html="$badge(r.methods[0])"></span></template>
+                    <template x-if="r.due_amount > 0"><span x-html="$badge('credit', 'Khata')"></span></template>
+                    <template x-if="!r.methods.length && !(r.due_amount > 0)"><span class="text-slate-400 text-xs">—</span></template>
+                  </div>
+                </td>
+                <td class="hidden md:table-cell"><span x-html="$badge(r.status)"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'sale-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="View invoice" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canPrint"><a :href="'invoice.html?id=' + r.id + '&layout=thermal'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print thermal receipt (80 mm)" x-html="ABM.icon('printer','w-4 h-4')"></a></template>
+                    <template x-if="canPrint"><a :href="'invoice.html?id=' + r.id + '&layout=a4'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print A4 invoice" x-html="ABM.icon('document','w-4 h-4')"></a></template>
+                    <template x-if="canReturn && r.returnable"><a :href="'sale-view.html?id=' + r.id + '&return=1'" class="btn btn-ghost btn-sm btn-icon text-amber-700" title="Return items" x-html="ABM.icon('return','w-4 h-4')"></a></template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="10">
+                <div class="empty">
+                  <span x-html="ABM.icon('receipt')"></span>
+                  <div class="empty-title">No invoices found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No sales were recorded in this period. Try a wider date range.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="!rows.length && range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <a href="pos.html" class="btn btn-money btn-sm" x-show="canPos">New sale</a>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function salesPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const DIGITAL = ['card', 'jazzcash', 'easypaisa', 'bank_transfer'];
+      const user = session.user() || {};
+      return {
+        user,
+        isSuperAdmin: session.isSuperAdmin(),
+        // without "everyone's sales" a user only sees the invoices they rang up themselves
+        isCashier: !session.can('sales.all'),
+        canReturn: session.can('returns.add'),
+        canReturnsList: session.can('returns.view'),
+        canPrint: session.can('sales.print'),
+        canPos: session.can('pos.view'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        scope: String(session.branchId() || ''),
+        range: null,
+        rows: [],
+        tiles: { invoices: 0, voided: 0, units: 0, revenue: 0, cash: 0, cashCount: 0, digital: 0, ledger: 0, ledgerCount: 0, returns: 0, returnsAmount: 0 },
+        q: '',
+        f: { status: '', method: '', cashier: '', customer: '' },
+        page: 1,
+
+        get scopeLabel() { return this.scope === 'all' ? 'all branches' : db.branchName(this.scope); },
+        get cashiers() {
+          const withSales = new Set(this.rows.map((r) => String(r.user_id)));
+          return utils.sortBy(db.all('users').filter((u) => ABM.roles.has(u.role, 'pos.view') && (withSales.has(String(u.id)) || (u.is_active && (ABM.roles.isFull(u.role) || this.scope === 'all' || String(u.branch_id) === this.scope)))), 'name');
+        },
+
+        init() {
+          this.range = ABM.range('today', () => this.compute(), 'sales');
+          const qs = utils.qs;
+          if (this.isSuperAdmin && qs('branch') && (qs('branch') === 'all' || this.branches.some((b) => String(b.id) === qs('branch')))) this.scope = qs('branch');
+          ['status', 'method', 'cashier', 'customer'].forEach((k) => { if (qs(k)) this.f[k] = qs(k); });
+          if (qs('q')) this.q = qs('q');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('f', () => { this.page = 1; });
+          this.$watch('scope', () => { this.page = 1; this.compute(); });
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(row) { return this.scope === 'all' || String(row.branch_id) === String(this.scope); },
+        compute() {
+          const r = this.range;
+          const itemsBySale = utils.groupBy(db.all('sale_items'), 'sale_id');
+          const paysBySale = utils.groupBy(db.all('sale_payments'), 'sale_id');
+          const sales = db.all('sales').filter((s) => this.inScope(s) && r.contains(s.sale_date) && (!this.isCashier || String(s.user_id) === String(user.id)));
+          this.rows = utils.sortBy(sales.map((s) => {
+            const its = itemsBySale[s.id] || [];
+            const pays = paysBySale[s.id] || [];
+            const cust = db.customer(s.customer_id);
+            const methods = [...new Set(pays.map((p) => p.method))];
+            return {
+              ...s,
+              items: its.length,
+              units: its.reduce((a, i) => a + (Number(i.quantity) || 0), 0),
+              customerName: db.customerName(s.customer_id),
+              customerPhone: cust ? cust.phone : '',
+              isWalkin: !cust || !!cust.is_walkin,
+              cashier: db.userName(s.user_id),
+              branchCode: db.branchCode(s.branch_id),
+              pays, methods, split: methods.length > 1,
+              cashAmt: utils.sum(pays.filter((p) => p.method === 'cash'), 'amount'),
+              digitalAmt: utils.sum(pays.filter((p) => DIGITAL.includes(p.method)), 'amount'),
+              returnable: s.status !== 'void' && its.some((i) => i.quantity - (i.returned_quantity || 0) > 0),
+            };
+          }), 'sale_date', 'desc');
+          const live = this.rows.filter((s) => s.status !== 'void');
+          const returns = db.all('sale_returns').filter((x) => this.inScope(x) && r.contains(x.return_date) && (!this.isCashier || live.some((s) => s.id === x.sale_id)));
+          this.tiles = {
+            invoices: live.length, voided: this.rows.length - live.length, units: live.reduce((a, s) => a + s.units, 0),
+            revenue: utils.sum(live, 'total'), cash: utils.sum(live, 'cashAmt'), cashCount: live.filter((s) => s.cashAmt > 0).length,
+            digital: utils.sum(live, 'digitalAmt'), ledger: utils.sum(live, 'due_amount'), ledgerCount: live.filter((s) => s.due_amount > 0).length,
+            returns: returns.length, returnsAmount: utils.sum(returns, 'refund_amount'),
+          };
+        },
+        get hasFilters() { return !!(this.q || this.f.status || this.f.method || this.f.cashier || this.f.customer); },
+        clearFilters() { this.q = ''; this.f = { status: '', method: '', cashier: '', customer: '' }; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const f = this.f;
+          return this.rows.filter((r) => {
+            if (f.status && r.status !== f.status) return false;
+            if (f.cashier && String(r.user_id) !== String(f.cashier)) return false;
+            if (f.customer && String(r.customer_id) !== String(f.customer)) return false;
+            if (f.method) {
+              if (f.method === 'credit') { if (!(r.due_amount > 0)) return false; }
+              else if (f.method === 'split') { if (!r.split) return false; }
+              else if (f.method === 'digital') { if (!r.methods.some((m) => DIGITAL.includes(m))) return false; }
+              else if (!r.methods.includes(f.method)) return false;
+            }
+            if (q && ![r.invoice_no, r.customerName, r.customerPhone, r.cashier].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotal() { return utils.sum(this.filtered.filter((r) => r.status !== 'void'), 'total'); },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() {
+          const { page, pages } = this.pager; const out = [];
+          for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n);
+          return out;
+        },
+        /** Link back to this page with the current range/scope plus extra filters (used by the tiles). */
+        selfLink(extra = {}) {
+          const p = new URLSearchParams(this.range.query);
+          if (this.isSuperAdmin) p.set('branch', this.scope);
+          Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+          return 'sales.html?' + p.toString();
+        },
+        exportCsv() {
+          const cols = [
+            { label: 'Invoice', key: 'invoice_no' }, { label: 'Date', value: (r) => utils.datetime(r.sale_date) }, { label: 'Branch', key: 'branchCode' },
+            { label: 'Customer', key: 'customerName' }, { label: 'Phone', key: 'customerPhone' }, { label: 'Cashier', key: 'cashier' },
+            { label: 'Lines', key: 'items' }, { label: 'Units', key: 'units' }, { label: 'Subtotal', key: 'subtotal' }, { label: 'Discount', key: 'discount_amount' },
+            { label: 'Tax', key: 'tax_amount' }, { label: 'Total', key: 'total' }, { label: 'Paid', key: 'paid_amount' }, { label: 'Due', key: 'due_amount' },
+            { label: 'Payment', value: (r) => r.methods.map((m) => ui.statusLabel(m)).join(' + ') + (r.due_amount > 0 ? (r.methods.length ? ' + ' : '') + 'Ledger' : '') },
+            { label: 'Status', value: (r) => ui.statusLabel(r.status) },
+          ];
+          const v = this.range.value;
+          if (!utils.download('sales-' + (v.from || 'all') + '-to-' + (v.to || 'today') + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' invoice' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

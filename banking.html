@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Bank Accounts · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="banking" data-title="Bank Accounts" data-perm="banking.view">
+  <main x-data="bankingPage()" @keydown.escape.window="closeAll()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Bank accounts</h2>
+        <p class="page-subtitle">Where the banked money actually sits · <span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="cheques.html" class="btn btn-secondary"><span x-html="ABM.icon('document')"></span>Cheques<span class="badge badge-amber ml-1" x-show="dueCheques" x-text="dueCheques"></span></a>
+        <template x-if="canManage"><button type="button" class="btn btn-secondary" @click="openMove('deposit')"><span x-html="ABM.icon('plus')"></span>Deposit</button></template>
+        <template x-if="canManage"><button type="button" class="btn btn-secondary" @click="openMove('transfer')"><span x-html="ABM.icon('transfer')"></span>Transfer</button></template>
+        <template x-if="canAdd"><button type="button" class="btn btn-primary" @click="openAccount()"><span x-html="ABM.icon('building')"></span>Add account</button></template>
+      </div>
+    </div>
+
+    <!-- Period filter -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div class="stat stat-accent">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">In the bank</div><div class="stat-value" x-text="$money(k.total, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('building')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="accounts.length"></span> account<span x-text="accounts.length === 1 ? '' : 's'"></span><span x-show="k.closed"> · <span x-text="k.closed"></span> closed</span></div>
+      </div>
+      <div class="stat stat-money">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Money in · <span x-text="periodShort"></span></div><div class="stat-value text-emerald-700" x-text="$money(k.in, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('trend-up')"></span>
+        </div>
+        <div class="stat-meta">deposits, transfers in and cleared cheques</div>
+      </div>
+      <div class="stat stat-warning">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Money out · <span x-text="periodShort"></span></div><div class="stat-value text-amber-700" x-text="$money(k.out, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('trend-down')"></span>
+        </div>
+        <div class="stat-meta">payments, withdrawals and charges</div>
+      </div>
+      <a href="cheques.html?status=open" class="stat" :class="k.chequeValue ? 'stat-danger' : 'stat-money'" title="Open the cheque register">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Cheques not cleared</div><div class="stat-value" x-text="$money(k.chequeValue, {decimals:0})"></div></div>
+          <span class="chip" :class="k.chequeValue ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('document')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.chequeCount"></span> cheque<span x-text="k.chequeCount === 1 ? '' : 's'"></span> waiting<span x-show="dueCheques"> · <b class="text-rose-600" x-text="dueCheques"></b> due now</span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Accounts -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
+      <template x-for="a in accounts" :key="a.id">
+        <div class="card" :class="!a.is_active && 'opacity-60'">
+          <div class="card-body">
+            <div class="flex items-start gap-3">
+              <span class="chip chip-navy flex-none" x-html="ABM.icon('building')"></span>
+              <div class="min-w-0 flex-1">
+                <a :href="'bank-account-view.html?id=' + a.id" class="font-bold text-slate-900 hover:text-navy-700 block truncate" x-text="a.name"></a>
+                <div class="text-xs text-slate-500 truncate" x-text="a.bank_name + ' · ' + (a.account_type === 'savings' ? 'Savings' : 'Current')"></div>
+              </div>
+              <span class="badge flex-none" :class="a.is_active ? 'badge-green' : 'badge-slate'" x-text="a.is_active ? 'Active' : 'Closed'"></span>
+            </div>
+            <div class="mt-3 rounded-xl bg-slate-50 border border-slate-200 p-3">
+              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Balance</div>
+              <div class="text-2xl font-extrabold tabular text-slate-900" x-text="$money(a.balance)"></div>
+              <div class="text-xs text-slate-500 mt-0.5"><span x-text="a.txnCount"></span> entr<span x-text="a.txnCount === 1 ? 'y' : 'ies'"></span> · <span x-text="a.branch_id ? ABM.db.branchName(a.branch_id) : 'all branches'"></span></div>
+            </div>
+            <dl class="mt-3 text-xs space-y-1">
+              <div class="flex justify-between gap-3"><dt class="text-slate-500">Title</dt><dd class="text-slate-700 truncate" x-text="a.account_title"></dd></div>
+              <div class="flex justify-between gap-3"><dt class="text-slate-500">Account</dt><dd class="mono text-slate-700 truncate" x-text="a.account_no"></dd></div>
+              <div class="flex justify-between gap-3" x-show="a.iban"><dt class="text-slate-500">IBAN</dt><dd class="mono text-slate-700 truncate" x-text="a.iban"></dd></div>
+            </dl>
+            <div class="flex flex-wrap gap-1.5 mt-3">
+              <a :href="'bank-account-view.html?id=' + a.id" class="btn btn-secondary btn-sm"><span x-html="ABM.icon('eye','w-4 h-4')"></span>Statement</a>
+              <template x-if="canManage && a.is_active"><button type="button" class="btn btn-ghost btn-sm" @click="openMove('deposit', a.id)">Deposit</button></template>
+              <template x-if="canManage && a.is_active"><button type="button" class="btn btn-ghost btn-sm" @click="openMove('withdrawal', a.id)">Withdraw</button></template>
+              <template x-if="canManage"><button type="button" class="btn btn-ghost btn-sm btn-icon ml-auto" title="Edit account" @click="openAccount(a.id)" x-html="ABM.icon('edit','w-4 h-4')"></button></template>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template x-if="!accounts.length">
+        <div class="card">
+          <div class="card-body empty py-10">
+            <span x-html="ABM.icon('building')"></span>
+            <div class="empty-title">No bank account yet</div>
+            <div class="text-sm mt-1">Add the account your day-end deposits go into, so banked cash stops disappearing.</div>
+            <template x-if="canAdd"><button type="button" class="btn btn-primary btn-sm mt-4" @click="openAccount()">Add account</button></template>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Recent movement -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Bank movement</div><div class="card-subtitle" x-text="'Everything in this period · ' + range.label"></div></div>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary btn-sm" @click="exportCsv()" :disabled="!txns.length"><span x-html="ABM.icon('download','w-4 h-4')"></span>Export</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Account</th>
+              <th>What</th>
+              <th class="hidden md:table-cell">Reference</th>
+              <th class="num">In</th>
+              <th class="num">Out</th>
+              <th class="num hidden lg:table-cell">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="t in pager.items" :key="t.id">
+              <tr :class="t.reversed_by && 'opacity-60 line-through'">
+                <td class="whitespace-nowrap text-slate-600"><div x-text="$date(t.txn_date)"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(t.created_at)"></div></td>
+                <td><a :href="'bank-account-view.html?id=' + t.account_id" class="font-medium text-navy-700 hover:underline truncate block max-w-[10rem]" x-text="t.accountName"></a></td>
+                <td>
+                  <span x-html="$badge(t.type)"></span>
+                  <div class="text-[11px] text-slate-500 truncate max-w-[12rem]" x-show="t.party" x-text="t.party"></div>
+                </td>
+                <td class="hidden md:table-cell text-slate-600 truncate max-w-[14rem]"><span x-text="t.reference || '—'"></span><span class="text-slate-400" x-show="t.notes"> · <span x-text="t.notes"></span></span></td>
+                <td class="num tabular whitespace-nowrap text-emerald-700 font-semibold" x-text="t.signed > 0 ? $money(t.amount, {decimals:0}) : '—'"></td>
+                <td class="num tabular whitespace-nowrap text-amber-700 font-semibold" x-text="t.signed < 0 ? $money(t.amount, {decimals:0}) : '—'"></td>
+                <td class="num tabular whitespace-nowrap hidden lg:table-cell text-slate-700" x-text="$money(t.balance_after, {decimals:0})"></td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="7" class="empty py-8 text-sm">No bank movement in this period.</td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="txns.length">
+            <tr>
+              <td colspan="4">Totals · <span x-text="txns.length"></span> entr<span x-text="txns.length === 1 ? 'y' : 'ies'"></span></td>
+              <td class="num tabular text-emerald-700 whitespace-nowrap" x-text="$money(k.in, {decimals:0})"></td>
+              <td class="num tabular text-amber-700 whitespace-nowrap" x-text="$money(k.out, {decimals:0})"></td>
+              <td class="hidden lg:table-cell num tabular" x-text="$money(k.net, {decimals:0})"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deposit / withdraw / transfer -->
+    <div x-show="move.open" x-cloak class="modal-backdrop" @click.self="move.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="moveTitle">
+        <form @submit.prevent="saveMove()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="moveTitle" x-text="move.kind === 'deposit' ? 'Deposit into the bank' : move.kind === 'withdrawal' ? 'Withdraw from the bank' : 'Move between accounts'"></div>
+              <div class="text-xs text-slate-500" x-text="move.kind === 'deposit' ? 'Cash from the shop going into the account.' : move.kind === 'withdrawal' ? 'Cash coming out of the account for the shop.' : 'Your own money moving between two accounts.'"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="move.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="btn-group w-full">
+              <button type="button" class="btn btn-sm flex-1" :class="move.kind === 'deposit' && 'active'" @click="move.kind = 'deposit'">Deposit</button>
+              <button type="button" class="btn btn-sm flex-1" :class="move.kind === 'withdrawal' && 'active'" @click="move.kind = 'withdrawal'">Withdraw</button>
+              <button type="button" class="btn btn-sm flex-1" :class="move.kind === 'transfer' && 'active'" @click="move.kind = 'transfer'">Transfer</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div :class="move.kind === 'transfer' ? '' : 'sm:col-span-2'">
+                <label class="label" for="mv-acc" x-text="move.kind === 'transfer' ? 'From account' : 'Account'"></label>
+                <select id="mv-acc" class="select" x-model="move.account_id" :class="move.errors.account && 'is-invalid'">
+                  <template x-for="a in activeAccounts" :key="a.id"><option :value="String(a.id)" x-text="a.name + ' · ' + ABM.utils.money(a.balance, {decimals:0})"></option></template>
+                </select>
+                <p class="field-error" x-show="move.errors.account" x-text="move.errors.account"></p>
+              </div>
+              <div x-show="move.kind === 'transfer'">
+                <label class="label" for="mv-to">To account</label>
+                <select id="mv-to" class="select" x-model="move.to_id" :class="move.errors.to && 'is-invalid'">
+                  <option value="">Choose…</option>
+                  <template x-for="a in activeAccounts.filter(a => String(a.id) !== String(move.account_id))" :key="a.id"><option :value="String(a.id)" x-text="a.name"></option></template>
+                </select>
+                <p class="field-error" x-show="move.errors.to" x-text="move.errors.to"></p>
+              </div>
+              <div>
+                <label class="label" for="mv-amount">Amount <span class="req">*</span></label>
+                <div class="input-group"><input id="mv-amount" x-ref="mvAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="move.amount" :class="move.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="move.errors.amount" x-text="move.errors.amount"></p>
+              </div>
+              <div>
+                <label class="label" for="mv-date">Date</label>
+                <input id="mv-date" type="date" class="input" x-model="move.date" :max="today">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="mv-ref">Reference</label>
+                <input id="mv-ref" type="text" class="input" x-model="move.reference" placeholder="Deposit slip number, transaction id…" maxlength="60">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="mv-notes">Notes</label>
+                <input id="mv-notes" type="text" class="input" x-model="move.notes" placeholder="Optional" maxlength="160">
+              </div>
+            </div>
+            <div class="alert alert-info" x-show="move.kind === 'deposit'"><span x-html="ABM.icon('info')"></span><span>Day-end and shift closings already bank their own cash — use this for anything else that goes in.</span></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="move.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="move.busy"><span x-html="ABM.icon('check')"></span>Record</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Account form -->
+    <div x-show="acc.open" x-cloak class="modal-backdrop" @click.self="acc.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="accTitle">
+        <form @submit.prevent="saveAccount()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="accTitle" x-text="acc.id ? 'Edit account' : 'Add a bank account'"></div>
+              <div class="text-xs text-slate-500" x-text="acc.id ? 'The balance only changes through deposits, payments and cheques.' : 'Its opening balance becomes the first entry on the statement.'"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="acc.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="ac-name">Name it <span class="req">*</span></label>
+                <input id="ac-name" type="text" class="input" x-model="acc.form.name" :class="acc.errors.name && 'is-invalid'" placeholder="e.g. Meezan — Main Current" maxlength="60">
+                <p class="field-error" x-show="acc.errors.name" x-text="acc.errors.name"></p>
+              </div>
+              <div>
+                <label class="label" for="ac-bank">Bank <span class="req">*</span></label>
+                <input id="ac-bank" type="text" class="input" x-model="acc.form.bank_name" :class="acc.errors.bank_name && 'is-invalid'" placeholder="Meezan Bank" maxlength="60">
+                <p class="field-error" x-show="acc.errors.bank_name" x-text="acc.errors.bank_name"></p>
+              </div>
+              <div>
+                <label class="label" for="ac-type">Type</label>
+                <select id="ac-type" class="select" x-model="acc.form.account_type">
+                  <option value="current">Current</option>
+                  <option value="savings">Savings</option>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="ac-title">Account title</label>
+                <input id="ac-title" type="text" class="input" x-model="acc.form.account_title" placeholder="Abbott Mobiles" maxlength="80">
+              </div>
+              <div>
+                <label class="label" for="ac-no">Account number</label>
+                <input id="ac-no" type="text" class="input mono" x-model="acc.form.account_no" placeholder="0102-0101-0007-3456" maxlength="40">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="ac-iban">IBAN</label>
+                <input id="ac-iban" type="text" class="input mono" x-model="acc.form.iban" placeholder="PK36MEZN0001020101000734" maxlength="40">
+              </div>
+              <div>
+                <label class="label" for="ac-branch">Used by</label>
+                <select id="ac-branch" class="select" x-model="acc.form.branch_id">
+                  <option value="">All branches</option>
+                  <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                </select>
+              </div>
+              <div x-show="!acc.id">
+                <label class="label" for="ac-open">Opening balance</label>
+                <div class="input-group"><input id="ac-open" type="number" min="0" step="0.01" class="input input-money" x-model.number="acc.form.opening_balance"><span class="addon">Rs.</span></div>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="ac-notes">Notes</label>
+                <input id="ac-notes" type="text" class="input" x-model="acc.form.notes" placeholder="Optional" maxlength="160">
+              </div>
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none sm:col-span-2" x-show="acc.id">
+                <input type="checkbox" class="checkbox" x-model="acc.form.is_active">
+                <span>Account is open</span>
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="acc.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="acc.busy"><span x-html="ABM.icon('check')"></span><span x-text="acc.id ? 'Save' : 'Add account'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function bankingPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('banking.add'),
+        canManage: session.can('banking.edit'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        today: utils.today(),
+        range: null, accounts: [], txns: [], page: 1,
+        k: { total: 0, in: 0, out: 0, net: 0, closed: 0, chequeCount: 0, chequeValue: 0 },
+        move: { open: false, kind: 'deposit', account_id: '', to_id: '', amount: '', date: utils.today(), reference: '', notes: '', errors: {}, busy: false },
+        acc: { open: false, id: null, form: {}, errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get scopeLabel() { return this.isSuperAdmin ? 'all branches' : db.branchName(session.branchId()); },
+        get activeAccounts() { return this.accounts.filter((a) => a.is_active); },
+        get dueCheques() { return ABM.bank.cheque.due(this.isSuperAdmin ? null : session.branchId()).length; },
+        get pager() { return utils.paginate(this.txns, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+
+        init() {
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'banking');
+          this.compute();
+          if (utils.qs('new') === '1' && this.canAdd) this.openAccount();
+        },
+        inScope(row) { return this.isSuperAdmin || row.branch_id == null || String(row.branch_id) === String(session.branchId()); },
+        compute() {
+          const counts = {};
+          db.all('bank_transactions').forEach((t) => { counts[t.account_id] = (counts[t.account_id] || 0) + 1; });
+          this.accounts = utils.sortBy(ABM.bank.accounts(this.isSuperAdmin ? null : session.branchId())
+            .map((a) => ({ ...a, txnCount: counts[a.id] || 0 })), (a) => (a.is_active ? 0 : 1) + '|' + a.name);
+          const ids = new Set(this.accounts.map((a) => String(a.id)));
+          this.txns = utils.sortBy(db.all('bank_transactions')
+            .filter((t) => ids.has(String(t.account_id)) && this.range.contains(t.txn_date))
+            .map((t) => ({ ...t, accountName: (db.find('bank_accounts', t.account_id) || {}).name || '—' })),
+          (t) => String(t.txn_date) + '|' + String(t.id).padStart(8, '0'), 'desc');
+          const open = db.all('cheques').filter((c) => ['pending', 'deposited'].includes(c.status) && this.inScope(c));
+          this.k = {
+            total: ABM.bank.total(this.isSuperAdmin ? null : session.branchId()),
+            in: utils.round2(this.txns.filter((t) => t.signed > 0).reduce((s, t) => s + t.amount, 0)),
+            out: utils.round2(this.txns.filter((t) => t.signed < 0).reduce((s, t) => s + t.amount, 0)),
+            net: utils.round2(this.txns.reduce((s, t) => s + t.signed, 0)),
+            closed: this.accounts.filter((a) => !a.is_active).length,
+            chequeCount: open.length, chequeValue: utils.sum(open, 'amount'),
+          };
+        },
+        closeAll() { this.move.open = false; this.acc.open = false; },
+        exportCsv() {
+          const cols = [
+            { label: 'Date', key: 'txn_date' }, { label: 'Account', key: 'accountName' }, { label: 'Type', value: (t) => ui.statusLabel(t.type) },
+            { label: 'Method', value: (t) => ui.statusLabel(t.method) }, { label: 'Reference', key: 'reference' }, { label: 'Party', key: 'party' },
+            { label: 'In', value: (t) => (t.signed > 0 ? t.amount : '') }, { label: 'Out', value: (t) => (t.signed < 0 ? t.amount : '') },
+            { label: 'Balance after', key: 'balance_after' }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('bank-movement-' + utils.today() + '.csv', utils.toCsv(this.txns, cols))) return;
+          ui.success('Exported ' + this.txns.length + ' entr' + (this.txns.length === 1 ? 'y' : 'ies') + '.');
+        },
+
+        /* --------------------------------------------------- money movement */
+        openMove(kind, accountId) {
+          if (!this.canManage) { ui.warn('You do not have permission to move money.'); return; }
+          if (!this.activeAccounts.length) { ui.warn('Add a bank account first.'); return; }
+          this.move = {
+            open: true, kind, account_id: String(accountId || this.activeAccounts[0].id), to_id: '',
+            amount: '', date: utils.today(), reference: '', notes: '', errors: {}, busy: false,
+          };
+          this.$nextTick(() => { if (this.$refs.mvAmount) this.$refs.mvAmount.focus(); });
+        },
+        saveMove() {
+          const m = this.move, e = {};
+          const amt = Number(m.amount);
+          if (!m.account_id) e.account = 'Choose the account.';
+          if (m.amount === '' || m.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          if (m.kind === 'transfer' && !m.to_id) e.to = 'Choose where it is going.';
+          m.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          m.busy = true;
+          try {
+            if (m.kind === 'transfer') {
+              ABM.bank.transfer(m.account_id, m.to_id, amt, { date: m.date, reference: m.reference, notes: m.notes });
+              db.audit('bank.transfer', 'bank_account', m.account_id, `${utils.money(amt)} moved from ${db.find('bank_accounts', m.account_id).name} to ${db.find('bank_accounts', m.to_id).name}`);
+            } else {
+              const fn = m.kind === 'deposit' ? ABM.bank.deposit : ABM.bank.withdraw;
+              fn(m.account_id, amt, { date: m.date, reference: m.reference, notes: m.notes });
+              db.audit('bank.' + m.kind, 'bank_account', m.account_id, `${utils.money(amt)} ${m.kind === 'deposit' ? 'deposited into' : 'withdrawn from'} ${db.find('bank_accounts', m.account_id).name}${m.reference ? ' (' + m.reference + ')' : ''}`);
+            }
+            ui.success('Recorded.');
+            m.open = false;
+            this.compute();
+          } catch (err) { ui.error(err.message || 'Could not record that.'); }
+          finally { m.busy = false; }
+        },
+
+        /* -------------------------------------------------------- accounts */
+        openAccount(id) {
+          if (id ? !this.canManage : !this.canAdd) { ui.warn('You do not have permission to ' + (id ? 'edit bank accounts.' : 'open bank accounts.')); return; }
+          const a = id ? db.find('bank_accounts', id) : null;
+          this.acc = {
+            open: true, id: a ? a.id : null, errors: {}, busy: false,
+            form: a
+              ? { name: a.name, bank_name: a.bank_name, account_title: a.account_title, account_no: a.account_no, iban: a.iban, account_type: a.account_type, branch_id: a.branch_id ? String(a.branch_id) : '', notes: a.notes, is_active: !!a.is_active, opening_balance: a.opening_balance }
+              : { name: '', bank_name: '', account_title: db.setting('company_name', ''), account_no: '', iban: '', account_type: 'current', branch_id: this.isSuperAdmin ? '' : String(session.branchId()), notes: '', is_active: true, opening_balance: 0 },
+          };
+        },
+        saveAccount() {
+          const a = this.acc, f = a.form, e = {};
+          if (!String(f.name || '').trim()) e.name = 'Give the account a name you will recognise.';
+          if (!String(f.bank_name || '').trim()) e.bank_name = 'Which bank is it?';
+          a.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          a.busy = true;
+          try {
+            const patch = {
+              name: String(f.name).trim(), bank_name: String(f.bank_name).trim(), account_title: String(f.account_title || '').trim(),
+              account_no: String(f.account_no || '').trim(), iban: String(f.iban || '').trim().toUpperCase(),
+              account_type: f.account_type === 'savings' ? 'savings' : 'current',
+              branch_id: f.branch_id ? Number(f.branch_id) : null, notes: String(f.notes || '').trim(),
+              is_active: f.is_active ? 1 : 0,
+            };
+            if (a.id) {
+              db.update('bank_accounts', a.id, patch);
+              db.audit('bank.account_update', 'bank_account', a.id, `Bank account ${patch.name} updated`);
+              ui.success('Account saved.');
+            } else {
+              const opening = utils.round2(f.opening_balance);
+              const row = db.insert('bank_accounts', Object.assign({ opening_balance: opening, balance: 0 }, patch));
+              if (opening > 0) ABM.bank.post(row.id, { type: 'opening', amount: opening, date: utils.today(), method: 'online', reference: 'Opening balance', notes: 'Account added' });
+              db.audit('bank.account_create', 'bank_account', row.id, `Bank account ${patch.name} added with ${utils.money(opening)} opening balance`);
+              ui.success('Account added.');
+            }
+            a.open = false;
+            this.compute();
+          } catch (err) { ui.error(err.message || 'Could not save the account.'); }
+          finally { a.busy = false; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

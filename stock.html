@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Branch Stock · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .print-only { display: none; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      main { padding: 0 !important; max-width: none !important; }
+      .card { border: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+      .table thead th, .table tbody td { padding: .35rem .5rem !important; font-size: 11px !important; }
+      .table thead th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .badge { border: 1px solid #cbd5e1; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .table-wrap { overflow: visible !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="stock" data-title="Branch Stock" data-perm="inventory.view">
+  <main x-data="stockPage()" @keydown.escape.window="closeModals()">
+    <!-- Print header -->
+    <div class="print-only mb-4">
+      <div class="text-xl font-extrabold text-slate-900" x-text="companyName + ' — Stock List'"></div>
+      <div class="text-sm text-slate-600"><span x-text="scopeLabel"></span> · printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="userName"></span> · <span x-text="filtered.length"></span> items · value <span x-text="$money(filteredValue)"></span></div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div>
+        <h2 class="page-title">Branch Stock</h2>
+        <p class="page-subtitle">Sellable quantities at <b x-text="scopeLabel"></b> · valued at weighted average cost</p>
+      </div>
+      <div class="page-actions">
+        <template x-if="isSuperAdmin">
+          <select class="select !w-auto pr-8 font-semibold" x-model="branchSel" aria-label="Branch">
+            <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            <option value="all">All branches (matrix)</option>
+          </select>
+        </template>
+        <button type="button" class="btn btn-secondary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canStockTake"><a href="stock-counts.html" class="btn btn-secondary"><span x-html="ABM.icon('calculator')"></span>Stock take</a></template>
+        <template x-if="canPurchase"><a href="purchase-create.html" class="btn btn-money"><span x-html="ABM.icon('truck')"></span>New Purchase</a></template>
+      </div>
+    </div>
+
+    <!-- KPI tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 no-print">
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">SKUs in stock</div><div class="stat-value" x-text="ABM.utils.num(tiles.skus)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-navy-100 text-navy-700 flex items-center justify-center" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta">of <span x-text="rows.length"></span> tracked products</div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Units on hand</div><div class="stat-value" x-text="ABM.utils.num(tiles.units)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center" x-html="ABM.icon('archive')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(tiles.imeiUnits)"></span> serialized (IMEI / serial) · <span x-text="ABM.utils.num(tiles.units - tiles.imeiUnits)"></span> standard</div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Stock value</div><div class="stat-value" x-text="$money(tiles.value, {decimals:0})"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta">retail value <b class="text-slate-800" x-text="$money(tiles.retail, {decimals:0})"></b></div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Low stock</div><div class="stat-value" :class="tiles.low ? 'text-rose-600' : ''" x-text="ABM.utils.num(tiles.low)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.out"></span> out of stock · <button type="button" class="font-semibold text-navy-700 hover:underline" @click="f.status = 'low'">show low</button></div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4 no-print">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div class="relative md:col-span-5">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search product, SKU, barcode, brand…" x-model.debounce.200ms="q" aria-label="Search stock">
+          </div>
+          <select class="select md:col-span-3" x-model="f.category" aria-label="Category">
+            <option value="">All categories</option>
+            <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="f.type" aria-label="Type">
+            <option value="">All types</option>
+            <option value="imei">Serialized (IMEI / serial)</option>
+            <option value="standard">Standard (by quantity)</option>
+          </select>
+          <select class="select md:col-span-2" x-model="f.status" aria-label="Stock status">
+            <option value="">All stock levels</option>
+            <option value="ok">OK (above minimum)</option>
+            <option value="low">Low (at or below minimum)</option>
+            <option value="out">Out of stock</option>
+            <option value="instock">In stock only</option>
+          </select>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" x-show="hasFilters">
+          <span class="text-xs text-slate-500">Filters applied · <span x-text="filtered.length"></span> of <span x-text="rows.length"></span> products</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4 print-area">
+      <div class="card-header no-print">
+        <div><div class="card-title" x-text="matrix ? 'Stock matrix' : 'Stock list'"></div><div class="card-subtitle"><span x-text="filtered.length"></span> product<span x-text="filtered.length === 1 ? '' : 's'"></span> · filtered value <b class="text-slate-700" x-text="$money(filteredValue, {decimals:0})"></b></div></div>
+        <div class="flex items-center gap-2 text-xs text-slate-500">
+          <span class="inline-flex items-center gap-1"><span class="badge badge-green badge-dot">OK</span><span class="badge badge-amber badge-dot">Low</span><span class="badge badge-red badge-dot">Out</span></span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="cursor-pointer select-none" @click="setSort('label')"><span class="inline-flex items-center gap-1">Product <span x-html="sortIcon('label')"></span></span></th>
+              <th class="hidden md:table-cell print:table-cell">Category</th>
+              <th class="hidden sm:table-cell print:table-cell">Type</th>
+              <template x-for="b in scopeBranches" :key="b.id">
+                <th class="num cursor-pointer select-none" x-show="matrix" @click="setSort('b' + b.id)"><span class="inline-flex items-center gap-1" x-text="b.code"></span></th>
+              </template>
+              <th class="num cursor-pointer select-none" @click="setSort('qty')"><span class="inline-flex items-center gap-1"><span x-text="matrix ? 'Total' : 'Qty'"></span> <span x-html="sortIcon('qty')"></span></span></th>
+              <th class="num hidden sm:table-cell print:table-cell">Min</th>
+              <th class="num hidden lg:table-cell print:table-cell" x-show="!matrix">Avg cost</th>
+              <th class="num hidden md:table-cell print:table-cell cursor-pointer select-none" @click="setSort('value')"><span class="inline-flex items-center gap-1">Value <span x-html="sortIcon('value')"></span></span></th>
+              <th class="cursor-pointer select-none" @click="setSort('statusRank')"><span class="inline-flex items-center gap-1">Status <span x-html="sortIcon('statusRank')"></span></span></th>
+              <th class="actions no-print">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="!r.is_active && 'opacity-60'">
+                <td>
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center no-print" :class="r.status === 'out' ? 'bg-rose-100 text-rose-600' : r.status === 'low' ? 'bg-amber-100 text-amber-700' : (r.is_imei_tracked ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500')" x-html="ABM.icon(r.icon,'w-4 h-4')"></span>
+                    <div class="min-w-0">
+                      <a :href="'product-view.html?id=' + r.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate max-w-[16rem]" x-text="r.label"></a>
+                      <div class="text-xs text-slate-500 truncate max-w-[16rem]"><span class="mono" x-text="r.sku"></span> · <span x-text="r.brandName"></span><span x-show="!r.is_active" class="ml-1 badge badge-slate">inactive</span></div>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden md:table-cell print:table-cell text-slate-600" x-text="r.categoryName"></td>
+                <td class="hidden sm:table-cell print:table-cell"><span class="badge" :class="r.is_imei_tracked ? (r.serialType === 'serial' ? 'badge-blue' : 'badge-navy') : 'badge-slate'" x-text="r.serialLabel"></span></td>
+                <template x-for="b in scopeBranches" :key="b.id">
+                  <td class="num" x-show="matrix"><span class="font-semibold tabular" :class="r.per[b.id].qty === 0 ? 'text-rose-600' : r.per[b.id].qty <= r.min_stock ? 'text-amber-700' : 'text-slate-800'" x-text="r.per[b.id].qty"></span></td>
+                </template>
+                <td class="num"><span class="font-bold tabular" :class="r.qty === 0 ? 'text-rose-600' : r.qty <= r.min_stock ? 'text-amber-700' : 'text-slate-900'" x-text="r.qty"></span></td>
+                <td class="num hidden sm:table-cell print:table-cell text-slate-500" x-text="r.min_stock"></td>
+                <td class="num hidden lg:table-cell print:table-cell text-slate-600 whitespace-nowrap" x-show="!matrix" x-text="$money(r.avg)"></td>
+                <td class="num hidden md:table-cell print:table-cell font-semibold whitespace-nowrap" x-text="$money(r.value, {decimals:0})"></td>
+                <td><span x-html="$badge(r.status, r.status === 'ok' ? 'OK' : r.status === 'low' ? 'Low' : 'Out')"></span></td>
+                <td class="actions no-print">
+                  <div class="inline-flex items-center gap-0.5">
+                    <template x-if="!matrix && !r.is_imei_tracked && canAdjust"><button type="button" class="btn btn-soft btn-sm" title="Adjust quantity (stock take)" @click="openAdjust(r)"><span x-html="ABM.icon('scale','w-4 h-4')"></span><span class="hidden lg:inline">Adjust</span></button></template>
+                    <template x-if="r.is_imei_tracked && canImei"><a :href="'imeis.html?product=' + r.id" class="btn btn-soft btn-sm" :title="'Manage ' + r.serialLabel + ' units'"><span x-html="ABM.icon('qr','w-4 h-4')"></span><span class="hidden lg:inline">Units</span></a></template>
+                    <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Stock movements" @click="openMovements(r)" x-html="ABM.icon('clock','w-4 h-4')"></button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="12">
+                <div class="empty">
+                  <span x-html="ABM.icon('archive')"></span>
+                  <div class="empty-title">No products match</div>
+                  <div class="text-sm mt-1">Try a different search or clear the filters.</div>
+                  <div class="mt-4"><button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button></div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td>Total (<span x-text="filtered.length"></span> items)</td>
+              <td class="hidden md:table-cell print:table-cell"></td>
+              <td class="hidden sm:table-cell print:table-cell"></td>
+              <template x-for="b in scopeBranches" :key="b.id"><td class="num tabular" x-show="matrix" x-text="ABM.utils.num(filteredBranchQty(b.id))"></td></template>
+              <td class="num tabular" x-text="ABM.utils.num(filteredQty)"></td>
+              <td class="hidden sm:table-cell print:table-cell"></td>
+              <td class="hidden lg:table-cell print:table-cell" x-show="!matrix"></td>
+              <td class="num hidden md:table-cell print:table-cell whitespace-nowrap" x-text="$money(filteredValue, {decimals:0})"></td>
+              <td></td>
+              <td class="no-print"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500 no-print">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button></template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+    <p class="print-only mt-3 text-[11px] text-slate-500">Only the current page of results is printed when the list is paginated. Use Export CSV for the full list.</p>
+
+    <!-- Adjust modal -->
+    <div x-show="adj.open" x-cloak class="modal-backdrop no-print" @click.self="adj.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="adjTitle">
+        <form @submit.prevent="saveAdjust()" novalidate>
+          <div class="modal-header">
+            <div><div class="modal-title" id="adjTitle">Adjust stock</div><div class="text-xs text-slate-500" x-text="adj.row ? adj.row.label + ' · ' + ABM.db.branchName(adj.branchId) : ''"></div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="adj.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-3"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Current qty</div><div class="text-xl font-bold text-slate-800 tabular" x-text="adj.row ? adj.row.qty : 0"></div></div>
+              <div class="rounded-xl border p-3" :class="adjDiff > 0 ? 'bg-emerald-50 border-emerald-100' : adjDiff < 0 ? 'bg-rose-50 border-rose-100' : 'bg-slate-50 border-slate-200'"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Change</div><div class="text-xl font-bold tabular" :class="adjDiff > 0 ? 'text-emerald-700' : adjDiff < 0 ? 'text-rose-600' : 'text-slate-500'" x-text="(adjDiff > 0 ? '+' : '') + adjDiff"></div></div>
+            </div>
+            <div>
+              <label class="label" for="adj-qty">New quantity <span class="req">*</span></label>
+              <input id="adj-qty" type="number" min="0" step="1" class="input input-lg tabular" x-ref="adjQty" x-model.number="adj.qty" :class="adj.errors.qty && 'is-invalid'">
+              <p class="field-error" x-show="adj.errors.qty" x-text="adj.errors.qty"></p>
+            </div>
+            <div>
+              <label class="label" for="adj-reason">Reason <span class="req">*</span></label>
+              <select id="adj-reason" class="select" x-model="adj.reason" :class="adj.errors.reason && 'is-invalid'">
+                <option value="Stock take / physical count">Stock take / physical count</option>
+                <option value="Damaged">Damaged</option>
+                <option value="Lost / theft">Lost / theft</option>
+                <option value="Found / miscount">Found / miscount</option>
+                <option value="Data entry correction">Data entry correction</option>
+                <option value="Free / promotional">Free / promotional</option>
+                <option value="Other">Other</option>
+              </select>
+              <p class="field-error" x-show="adj.errors.reason" x-text="adj.errors.reason"></p>
+            </div>
+            <div>
+              <label class="label" for="adj-notes">Notes <span class="req" x-show="adj.reason === 'Other'">*</span></label>
+              <input id="adj-notes" type="text" class="input" x-model="adj.notes" :class="adj.errors.notes && 'is-invalid'" placeholder="Reference, counter name, remarks…" maxlength="200">
+              <p class="field-error" x-show="adj.errors.notes" x-text="adj.errors.notes"></p>
+            </div>
+            <div x-show="adjDiff > 0">
+              <label class="label" for="adj-cost">Unit cost for added units <span class="text-slate-400 font-normal">(optional)</span></label>
+              <div class="input-group"><input id="adj-cost" type="number" min="0" step="0.01" class="input" x-model.number="adj.unitCost" :class="adj.errors.unitCost && 'is-invalid'" :placeholder="adj.row ? String(adj.row.avg) : ''"><span class="addon">Rs.</span></div>
+              <p class="field-error" x-show="adj.errors.unitCost" x-text="adj.errors.unitCost"></p>
+              <p class="help" x-show="!adj.errors.unitCost">Leave blank to use the current average cost (<span x-text="adj.row ? $money(adj.row.avg) : ''"></span>). Average cost is recalculated.</p>
+            </div>
+            <p class="text-xs text-slate-500 flex items-start gap-1.5"><span class="flex-none mt-0.5" x-html="ABM.icon('info','w-3.5 h-3.5')"></span><span>An <b>adjustment</b> stock movement is recorded and the action is written to the audit log.</span></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="adj.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="adj.busy || adjDiff === 0"><span x-html="ABM.icon('check')"></span>Apply adjustment</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Movements modal -->
+    <div x-show="mov.open" x-cloak class="modal-backdrop no-print" @click.self="mov.open = false">
+      <div class="modal-panel modal-xl" role="dialog" aria-modal="true" aria-labelledby="movTitle">
+        <div class="modal-header">
+          <div class="min-w-0"><div class="modal-title truncate" id="movTitle" x-text="'Stock movements — ' + (mov.row ? mov.row.label : '')"></div><div class="text-xs text-slate-500">Last 20 entries · <span x-text="scopeLabel"></span> · current qty <b x-text="mov.row ? mov.row.qty : 0"></b></div></div>
+          <div class="flex items-center gap-2">
+            <a :href="mov.row ? 'product-view.html?id=' + mov.row.id : '#'" class="btn btn-ghost btn-sm hidden sm:inline-flex">Full history <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a>
+            <button type="button" class="btn btn-ghost btn-icon" @click="mov.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table table-compact">
+            <thead><tr><th>Date</th><th>Type</th><th class="hidden sm:table-cell" x-show="matrix">Branch</th><th class="num">Qty</th><th class="num hidden md:table-cell">Unit cost</th><th class="num">Balance</th><th class="hidden md:table-cell">Reference</th><th class="hidden lg:table-cell">By</th><th class="hidden lg:table-cell">Notes</th></tr></thead>
+            <tbody>
+              <template x-for="m in mov.list" :key="m.id">
+                <tr>
+                  <td class="whitespace-nowrap text-slate-600"><span x-text="$date(m.created_at)"></span> <span class="text-slate-400 text-xs" x-text="ABM.utils.time(m.created_at)"></span></td>
+                  <td><span class="badge" :class="moveClass(m.movement_type)" x-text="ABM.ui.statusLabel(m.movement_type)"></span></td>
+                  <td class="hidden sm:table-cell" x-show="matrix"><span class="badge badge-slate" x-text="ABM.db.branchCode(m.branch_id)"></span></td>
+                  <td class="num font-semibold" :class="m.quantity > 0 ? 'text-emerald-700' : m.quantity < 0 ? 'text-rose-600' : 'text-slate-500'" x-text="(m.quantity > 0 ? '+' : '') + m.quantity"></td>
+                  <td class="num hidden md:table-cell text-slate-600 whitespace-nowrap" x-text="$money(m.unit_cost, {decimals:0})"></td>
+                  <td class="num tabular" x-text="m.balance_after"></td>
+                  <td class="hidden md:table-cell"><template x-if="m.ref"><a :href="m.ref.href" class="mono text-navy-700 hover:underline" x-text="m.ref.label"></a></template><span x-show="!m.ref" class="text-slate-400">—</span></td>
+                  <td class="hidden lg:table-cell text-slate-500 whitespace-nowrap" x-text="ABM.db.userName(m.user_id)"></td>
+                  <td class="hidden lg:table-cell text-slate-500 truncate max-w-[12rem]" :title="m.notes" x-text="m.notes || '—'"></td>
+                </tr>
+              </template>
+              <template x-if="!mov.list.length"><tr><td colspan="9" class="empty">No movements recorded for this product in scope.</td></tr></template>
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="mov.open = false">Close</button></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function stockPage() {
+      const { db, utils, ui, session, stock } = ABM;
+      const PER_PAGE = 15;
+      const isSuperAdmin = session.isSuperAdmin();
+      const myBranch = session.branchId();
+      return {
+        isSuperAdmin,
+        canAdjust: session.can('inventory.edit'),
+        canImei: session.can('imei.view'),
+        canPurchase: session.can('purchases.add'),
+        canStockTake: session.can('stocktake.view'),
+        companyName: db.setting('company_name') || 'Abbott Mobile',
+        userName: (session.user() || {}).name || '',
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories'), 'name'),
+        branchSel: String(myBranch || ''),
+        rows: [],
+        tiles: { skus: 0, units: 0, imeiUnits: 0, value: 0, retail: 0, low: 0, out: 0 },
+        q: '',
+        f: { category: '', type: '', status: '' },
+        sort: { key: 'label', dir: 'asc' },
+        page: 1,
+        adj: { open: false, busy: false, row: null, branchId: null, qty: 0, reason: 'Stock take / physical count', notes: '', unitCost: '', errors: {} },
+        mov: { open: false, row: null, list: [] },
+
+        init() {
+          if (utils.qs('filter') === 'low') this.f.status = 'low';
+          if (utils.qs('filter') === 'out') this.f.status = 'out';
+          if (utils.qs('category')) this.f.category = utils.qs('category');
+          if (utils.qs('q')) this.q = utils.qs('q');
+          this.refresh();
+          this.$watch('q', () => { this.page = 1; });
+          ['category', 'type', 'status'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('branchSel', () => { this.page = 1; this.refresh(); });
+        },
+        get matrix() { return this.branchSel === 'all'; },
+        get scopeBranches() { return this.matrix ? this.branches : this.branches.filter((b) => String(b.id) === this.branchSel); },
+        get scopeLabel() { return this.matrix ? 'all branches' : db.branchName(Number(this.branchSel)); },
+
+        /* ------------------------------------------------------------ data */
+        refresh() {
+          const bids = this.scopeBranches.map((b) => b.id);
+          const stockRows = db.all('branch_stock');
+          const byKey = new Map(stockRows.map((s) => [s.branch_id + ':' + s.product_id, s]));
+          this.rows = db.all('products').map((p) => {
+            const per = {}; let qty = 0, value = 0;
+            bids.forEach((bid) => { const s = byKey.get(bid + ':' + p.id); const q = s ? s.quantity : 0, avg = s ? s.avg_cost : 0; per[bid] = { qty: q, avg, value: utils.round2(q * avg) }; qty += q; value += per[bid].value; });
+            const single = bids.length === 1 ? per[bids[0]] : null;
+            const status = qty === 0 ? 'out' : qty <= p.min_stock ? 'low' : 'ok';
+            const serialized = db.isSerialized(p);
+            return {
+              ...p, label: db.productLabel(p.id), categoryName: db.categoryName(p.category_id), brandName: db.brandName(p.brand_id),
+              serialType: serialized ? db.serialType(p) : null,
+              serialLabel: serialized ? db.serialLabel(p) : 'Standard',
+              icon: ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : serialized ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube',
+              per, qty, value: utils.round2(value), avg: single ? single.avg : (qty ? utils.round2(value / qty) : 0), status,
+              statusRank: status === 'out' ? 0 : status === 'low' ? 1 : 2, retailValue: utils.round2(qty * p.retail_price),
+            };
+          }).filter((r) => r.is_active || r.qty > 0);
+          const active = this.rows.filter((r) => r.is_active);
+          this.tiles = {
+            skus: this.rows.filter((r) => r.qty > 0).length, units: this.rows.reduce((a, r) => a + r.qty, 0), imeiUnits: this.rows.filter((r) => r.is_imei_tracked).reduce((a, r) => a + r.qty, 0),
+            value: utils.sum(this.rows, 'value'), retail: utils.sum(this.rows, 'retailValue'),
+            low: active.filter((r) => this.matrix ? bids.some((bid) => r.per[bid].qty <= r.min_stock) : r.qty <= r.min_stock).length,
+            out: active.filter((r) => r.qty === 0).length,
+          };
+          if (this.mov.open && this.mov.row) this.openMovements(this.rows.find((r) => r.id === this.mov.row.id) || this.mov.row);
+        },
+        get hasFilters() { return !!(this.q || this.f.category || this.f.type || this.f.status); },
+        clearFilters() { this.q = ''; this.f = { category: '', type: '', status: '' }; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const list = this.rows.filter((r) => {
+            if (this.f.category && String(r.category_id) !== String(this.f.category)) return false;
+            if (this.f.type === 'imei' && !r.is_imei_tracked) return false;
+            if (this.f.type === 'standard' && r.is_imei_tracked) return false;
+            if (this.f.status === 'ok' && r.status !== 'ok') return false;
+            if (this.f.status === 'low' && !(r.qty <= r.min_stock)) return false;
+            if (this.f.status === 'out' && r.qty !== 0) return false;
+            if (this.f.status === 'instock' && r.qty <= 0) return false;
+            if (q && ![r.label, r.sku, r.barcode, r.model, r.brandName, r.categoryName].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+          const { key, dir } = this.sort;
+          const val = (r) => { if (key.startsWith('b') && /^b\d+$/.test(key)) return r.per[Number(key.slice(1))] ? r.per[Number(key.slice(1))].qty : 0; const v = r[key]; return typeof v === 'string' ? v.toLowerCase() : (Number(v) || 0); };
+          return utils.sortBy(list, val, dir);
+        },
+        get filteredValue() { return utils.sum(this.filtered, 'value'); },
+        get filteredQty() { return this.filtered.reduce((a, r) => a + r.qty, 0); },
+        filteredBranchQty(bid) { return this.filtered.reduce((a, r) => a + (r.per[bid] ? r.per[bid].qty : 0), 0); },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: key === 'label' ? 'asc' : 'desc' }; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+        exportCsv() {
+          const cols = [{ label: 'SKU', key: 'sku' }, { label: 'Product', key: 'label' }, { label: 'Category', key: 'categoryName' }, { label: 'Brand', key: 'brandName' }, { label: 'Type', value: (r) => r.serialLabel }];
+          if (this.matrix) this.scopeBranches.forEach((b) => cols.push({ label: 'Qty ' + b.code, value: (r) => r.per[b.id].qty }));
+          cols.push({ label: this.matrix ? 'Total qty' : 'Qty', key: 'qty' }, { label: 'Min stock', key: 'min_stock' }, { label: 'Avg cost', key: 'avg' }, { label: 'Value', key: 'value' }, { label: 'Retail value', key: 'retailValue' }, { label: 'Status', value: (r) => r.status.toUpperCase() });
+          if (!utils.download('stock-' + (this.matrix ? 'all' : db.branchCode(Number(this.branchSel))) + '-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' rows.');
+        },
+        moveClass(type) { return { purchase: 'badge-green', sale: 'badge-navy', sale_return: 'badge-blue', transfer_out: 'badge-amber', transfer_in: 'badge-green', transfer_return: 'badge-amber', repair: 'badge-purple', adjustment: 'badge-purple', opening: 'badge-slate', defective: 'badge-red' }[type] || 'badge-slate'; },
+
+        /* ---------------------------------------------------------- adjust */
+        openAdjust(r) {
+          if (!this.canAdjust || this.matrix || r.is_imei_tracked) return;
+          this.adj = { open: true, busy: false, row: r, branchId: Number(this.branchSel), qty: r.qty, reason: 'Stock take / physical count', notes: '', unitCost: '', errors: {} };
+          this.$nextTick(() => { if (this.$refs.adjQty) { this.$refs.adjQty.focus(); this.$refs.adjQty.select(); } });
+        },
+        get adjDiff() { const q = Number(this.adj.qty); return this.adj.row && Number.isFinite(q) ? q - this.adj.row.qty : 0; },
+        saveAdjust() {
+          const e = {}; const q = Number(this.adj.qty);
+          if (this.adj.qty === '' || !Number.isInteger(q) || q < 0) e.qty = 'Enter a whole number of 0 or more.';
+          if (!this.adj.reason) e.reason = 'Select a reason.';
+          if (this.adj.reason === 'Other' && !String(this.adj.notes || '').trim()) e.notes = 'Please describe the reason.';
+          if (this.adj.unitCost !== '' && (isNaN(Number(this.adj.unitCost)) || Number(this.adj.unitCost) < 0)) e.unitCost = 'Enter an amount of 0 or more.';
+          this.adj.errors = e;
+          if (Object.keys(e).length) return;
+          if (this.adjDiff === 0) { ui.warn('Quantity is unchanged.'); return; }
+          this.adj.busy = true;
+          try {
+            const r = this.adj.row, bid = this.adj.branchId;
+            const reason = this.adj.reason + (String(this.adj.notes || '').trim() ? ' — ' + this.adj.notes.trim() : '');
+            const unitCost = this.adj.unitCost !== '' ? Number(this.adj.unitCost) : null;
+            stock.adjust(bid, r.id, q, reason, unitCost);
+            db.audit('stock.adjust', 'product', r.id, `${r.sku} at ${db.branchCode(bid)}: ${r.qty} -> ${q} (${reason})`);
+            ui.success(`Stock adjusted: ${r.label} is now ${q} at ${db.branchCode(bid)}.`);
+            this.adj.open = false;
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not adjust stock.'); } finally { this.adj.busy = false; }
+        },
+
+        /* ------------------------------------------------------- movements */
+        openMovements(r) {
+          const bids = this.scopeBranches.map((b) => b.id);
+          const salesById = new Map(db.all('sales').map((s) => [s.id, s]));
+          const purchasesById = new Map(db.all('purchases').map((s) => [s.id, s]));
+          const transfersById = new Map(db.all('stock_transfers').map((s) => [s.id, s]));
+          const returnsById = new Map(db.all('sale_returns').map((s) => [s.id, s]));
+          const refFor = (type, id) => {
+            if (!type || !id) return null;
+            if (type === 'sale') { const s = salesById.get(Number(id)); return s ? { label: s.invoice_no, href: 'sale-view.html?id=' + s.id } : null; }
+            if (type === 'purchase') { const s = purchasesById.get(Number(id)); return s ? { label: s.purchase_no, href: 'purchase-view.html?id=' + s.id } : null; }
+            if (type === 'transfer') { const s = transfersById.get(Number(id)); return s ? { label: s.transfer_no, href: 'transfer-view.html?id=' + s.id } : null; }
+            if (type === 'sale_return') { const s = returnsById.get(Number(id)); return s ? { label: s.return_no, href: 'sale-view.html?id=' + s.sale_id } : null; }
+            return null;
+          };
+          const list = db.all('stock_movements').filter((m) => m.product_id == r.id && bids.includes(Number(m.branch_id)));
+          this.mov = { open: true, row: r, list: utils.sortBy(list, (m) => m.created_at + '-' + utils.pad(m.id, 8), 'desc').slice(0, 20).map((m) => ({ ...m, ref: refFor(m.reference_type, m.reference_id) })) };
+        },
+        closeModals() { this.adj.open = false; this.mov.open = false; },
+      };
+    }
+  </script>
+</body>
+</html>

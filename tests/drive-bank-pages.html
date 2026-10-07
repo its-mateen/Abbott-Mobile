@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: bank pages</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the real Alpine components of banking.html, bank-account-view.html and cheques.html,
+    // plus the day-end and shift closings that now bank their cash.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x ? '  [' + x + ']' : '')); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, ui } = ABM;
+      db.reset();
+      ui.toast = () => {}; ui.confirm = async () => true;
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+      const BID = session.branchId();
+
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+
+      await source('banking.html', 'bankingPage');
+      await source('bank-account-view.html', 'bankAccountPage');
+      await source('cheques.html', 'chequesPage');
+
+      /* ========================= 1. the overview ========================= */
+      log('=== TEST 1: banking.html');
+      let page = mk(bankingPage, '?range=all');
+      ok(page.accounts.length >= 2, 'T1: the branch sees its accounts (' + page.accounts.length + ')');
+      ok(page.accounts.every((a) => a.branch_id == null || String(a.branch_id) === String(BID)), 'T1: and no other branch\'s');
+      near(page.k.total, page.accounts.filter((a) => a.is_active).reduce((s, a) => s + a.balance, 0), 'T1: the tile adds the balances up');
+      ok(page.k.in > 0 && page.k.out > 0, 'T1: money in and out are both counted', page.k.in + ' / ' + page.k.out);
+      near(page.k.net, page.k.in - page.k.out, 'T1: net is in minus out');
+      ok(page.txns.length > 0, 'T1: the movement list is populated (' + page.txns.length + ')');
+      ok(page.txns.every((t, i, arr) => i === 0 || arr[i - 1].txn_date >= t.txn_date), 'T1: newest first');
+      ok(page.k.chequeCount > 0, 'T1: uncleared cheques are counted');
+
+      /* ========================= 2. deposits, withdrawals, transfers ========================= */
+      log('=== TEST 2: moving money');
+      const acc = page.activeAccounts[0];
+      const start = ABM.bank.balance(acc.id);
+      page.openMove('deposit', acc.id);
+      eq(page.move.open, true, 'T2: the dialog opens');
+      page.move.amount = '';
+      page.saveMove();
+      ok(!!page.move.errors.amount, 'T2: an empty amount is refused');
+      page.move.amount = 12000; page.move.reference = 'Slip 1';
+      page.saveMove();
+      eq(page.move.open, false, 'T2: a valid deposit saves');
+      near(ABM.bank.balance(acc.id), start + 12000, 'T2: and reaches the account');
+      page.openMove('withdrawal', acc.id);
+      page.move.amount = 2000;
+      page.saveMove();
+      near(ABM.bank.balance(acc.id), start + 10000, 'T2: a withdrawal comes back out');
+
+      const other = page.activeAccounts[1];
+      if (other) {
+        const otherStart = ABM.bank.balance(other.id);
+        page.openMove('transfer', acc.id);
+        page.move.to_id = '';
+        page.move.amount = 5000;
+        page.saveMove();
+        ok(!!page.move.errors.to, 'T2: a transfer needs a destination');
+        page.move.to_id = String(other.id);
+        page.saveMove();
+        near(ABM.bank.balance(acc.id), start + 5000, 'T2: the transfer leaves the first account');
+        near(ABM.bank.balance(other.id), otherStart + 5000, 'T2: and lands in the second');
+      } else { log('NOTE: only one account visible, transfer test skipped'); }
+      ok(db.all('audit_logs').some((a) => a.action === 'bank.deposit'), 'T2: it is audited');
+
+      /* ========================= 3. adding an account ========================= */
+      log('=== TEST 3: a new account');
+      const before = db.all('bank_accounts').length;
+      page.openAccount();
+      page.acc.form.name = '';
+      page.saveAccount();
+      ok(!!page.acc.errors.name, 'T3: an account needs a name');
+      page.acc.form.name = 'Test Bank — Ops';
+      page.acc.form.bank_name = 'Test Bank';
+      page.acc.form.opening_balance = 75000;
+      page.saveAccount();
+      eq(db.all('bank_accounts').length, before + 1, 'T3: the account was created');
+      const made = db.all('bank_accounts').slice(-1)[0];
+      near(made.balance, 75000, 'T3: with its opening balance');
+      ok(db.where('bank_transactions', { account_id: made.id }).some((t) => t.type === 'opening'), 'T3: recorded as an opening entry');
+
+      /* ========================= 4. the statement ========================= */
+      log('=== TEST 4: bank-account-view.html');
+      let stmt = mk(bankAccountPage, '?id=' + acc.id + '&range=all');
+      ok(!!stmt.account, 'T4: the statement opens');
+      ok(stmt.rows.length > 1, 'T4: it lists the entries (' + stmt.rows.length + ')');
+      ok(stmt.rows.every((t, i, arr) => i === 0 || arr[i - 1].txn_date <= t.txn_date), 'T4: oldest first, so the running balance reads properly');
+      eq(stmt.rows[stmt.rows.length - 1].running, ABM.bank.balance(acc.id), 'T4: the last running balance is the account balance');
+      ok(db.where('bank_transactions', { account_id: acc.id }).every((t) => t.type !== 'opening' || t.txn_date <= stmt.rows[1].txn_date), 'T4: the opening entry comes first');
+      const openBefore = stmt.k.unreconciled;
+      const un = stmt.rows.find((t) => !t.reconciled);
+      if (un) {
+        stmt.toggleReconciled(un);
+        eq(stmt.k.unreconciled, openBefore - 1, 'T4: ticking an entry reconciles it');
+        eq(db.find('bank_transactions', un.id).reconciled, 1, 'T4: and it is stored');
+        stmt.toggleReconciled(stmt.rows.find((t) => t.id === un.id));
+        eq(db.find('bank_transactions', un.id).reconciled, 0, 'T4: it can be un-ticked');
+      } else { log('NOTE: everything already reconciled'); }
+      const balBefore = ABM.bank.balance(acc.id);
+      const target = stmt.rows.filter((t) => t.type === 'deposit' && !t.reversed_by).slice(-1)[0];
+      await stmt.reverse(target);
+      near(ABM.bank.balance(acc.id), balBefore - target.amount, 'T4: reversing an entry puts the balance back');
+      ok(!!db.find('bank_transactions', target.id).reversed_by, 'T4: the original is marked reversed');
+      stmt.onlyOpen = true; stmt.compute();
+      ok(stmt.rows.every((t) => !t.reconciled), 'T4: the "not reconciled" filter works');
+
+      /* ========================= 5. the cheque register ========================= */
+      log('=== TEST 5: cheques.html');
+      let chq = mk(chequesPage, '?range=all');
+      ok(chq.rows.length >= 4, 'T5: the register lists cheques (' + chq.rows.length + ')');
+      ok(chq.k.issuedOpen > 0 || chq.k.receivedOpen > 0, 'T5: open cheques are valued');
+      chq.f.dir = 'issued';
+      ok(chq.filtered.every((c) => c.direction === 'issued'), 'T5: the direction filter works');
+      chq.f.dir = ''; chq.f.status = 'open';
+      ok(chq.filtered.every((c) => ['pending', 'deposited'].includes(c.status)), 'T5: the "not cleared" filter works');
+      chq.clearFilters();
+
+      // write one
+      chq.openNew('issued');
+      chq.form.cheque_no = '';
+      chq.saveCheque();
+      ok(!!chq.form.errors.cheque_no, 'T5: a cheque needs a number');
+      chq.form.cheque_no = 'DRV-5001';
+      chq.form.amount = 33000;
+      chq.form.party_type = 'supplier';
+      chq.form.party_id = String(db.all('suppliers')[0].id);
+      chq.saveCheque();
+      eq(chq.form.open, false, 'T5: it saves');
+      const mine = db.all('cheques').slice(-1)[0];
+      eq(mine.status, 'pending', 'T5: as pending');
+      const accBal = ABM.bank.balance(mine.account_id);
+      chq.compute();
+
+      // clear it
+      const row = chq.rows.find((c) => c.id === mine.id);
+      chq.openClear(row);
+      chq.saveAct();
+      near(ABM.bank.balance(mine.account_id), accBal - 33000, 'T5: clearing it takes the money out');
+      eq(db.find('cheques', mine.id).status, 'cleared', 'T5: and marks it cleared');
+
+      // a received cheque that bounces
+      const cust = db.all('customers').find((c) => !c.is_walkin);
+      chq.openNew('received');
+      chq.form.cheque_no = 'DRV-7001';
+      chq.form.amount = 21000;
+      chq.form.party_type = 'customer';
+      chq.form.party_id = String(cust.id);
+      chq.form.bank_name = 'Test Bank';
+      chq.saveCheque();
+      const got = db.all('cheques').slice(-1)[0];
+      chq.compute();
+      chq.openDeposit(chq.rows.find((c) => c.id === got.id));
+      chq.act.account_id = String(acc.id);
+      chq.saveAct();
+      eq(db.find('cheques', got.id).status, 'deposited', 'T5: a received cheque can be deposited');
+      const owed = Number(db.find('customers', cust.id).balance) || 0;
+      const bankAt = ABM.bank.balance(acc.id);
+      chq.compute();
+      chq.openClear(chq.rows.find((c) => c.id === got.id));
+      chq.act.account_id = String(acc.id);
+      chq.saveAct();
+      near(ABM.bank.balance(acc.id), bankAt + 21000, 'T5: clearing it brings the money in');
+      chq.compute();
+      chq.openBounce(chq.rows.find((c) => c.id === got.id));
+      chq.act.reason = '';
+      chq.saveAct();
+      ok(!!chq.act.errors.reason, 'T5: bouncing needs a reason');
+      chq.act.reason = 'Insufficient funds';
+      chq.saveAct();
+      near(ABM.bank.balance(acc.id), bankAt, 'T5: bouncing takes it back out of the bank');
+      near(db.find('customers', cust.id).balance, owed + 21000, 'T5: and the customer owes it again');
+      eq(db.find('cheques', got.id).status, 'bounced', 'T5: the cheque reads bounced');
+
+      /* ========================= 6. day-end banks its cash ========================= */
+      log('=== TEST 6: day-end deposits reach an account');
+      await source('day-end.html', 'dayEndPage');
+      const de = mk(dayEndPage, '');
+      ok(de.bankAccounts.length > 0, 'T6: day-end offers the bank accounts');
+      ok(!!de.bankAccountId, 'T6: and picks one by default');
+      if (de.canClose && !de.readOnly) {
+        de.form.mode = 'direct';
+        de.form.actualDirect = utils.round2(de.fig.expected);
+        de.form.notes = 'Driver close';
+        const dep = Math.min(5000, utils.round2(de.fig.expected));
+        de.form.bank_deposit = dep;
+        de.form.retained_float = 0;
+        de.bankAccountId = String(acc.id);
+        const bankAtClose = ABM.bank.balance(acc.id);
+        await de.closeDay();
+        log('NOTE: expected ' + de.live.expected + ', depositing ' + dep + ', errors ' + JSON.stringify(de.errors));
+        near(ABM.bank.balance(acc.id), bankAtClose + dep, 'T6: closing the day banks the deposit');
+        ok(db.all('bank_transactions').some((t) => t.reference_type === 'daily_closing' && t.amount === dep), 'T6: linked to the closing');
+      } else { log('NOTE: the day was already closed, deposit test skipped'); }
+
+      /* ========================= 7. a shift banks its cash ========================= */
+      log('=== TEST 7: shift close deposits');
+      await source('shift-view.html', 'shiftViewPage');
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'cashier'));
+      const open = ABM.shift.current(session.user().id, session.branchId());
+      if (open) {
+        const sv = mk(shiftViewPage, '?id=' + open.id);
+        ok(sv.bankAccounts.length > 0, 'T7: the shift offers the bank accounts');
+        sv.openClose();
+        sv.close.mode = 'total';
+        sv.close.total = sv.expected;
+        sv.close.banked = 1000;
+        sv.close.bankAccountId = String(sv.bankAccounts[0].id);
+        const shiftBank = ABM.bank.balance(sv.bankAccounts[0].id);
+        sv.saveClose();
+        eq(db.find('cashier_shifts', open.id).status, 'closed', 'T7: the shift closed');
+        near(ABM.bank.balance(sv.bankAccounts[0].id), shiftBank + 1000, 'T7: and its banked cash reached the account');
+        ok(db.all('bank_transactions').some((t) => t.reference_type === 'cashier_shift'), 'T7: linked to the shift');
+      } else { log('NOTE: no open drawer to close'); }
+
+      /* ========================= 8. consistency ========================= */
+      log('=== TEST 8: the books still tie out');
+      ok(db.all('bank_accounts').every((a) => {
+        const sum = db.where('bank_transactions', { account_id: a.id }).reduce((s, t) => s + t.signed, 0);
+        return Math.abs(utils.round2(sum) - utils.round2(a.balance)) < 0.01;
+      }), 'T8: every balance equals its own transactions');
+      ok(db.all('bank_accounts').every((a) => a.balance >= 0), 'T8: no account is overdrawn');
+      ok(db.all('cheques').filter((c) => c.status === 'cleared').every((c) => db.all('bank_transactions').some((t) => String(t.cheque_id) === String(c.id))),
+        'T8: every cleared cheque has its bank entry');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 800);
+  </script>
+</body>
+</html>

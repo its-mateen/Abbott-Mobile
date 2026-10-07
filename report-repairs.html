@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Repairs Report &middot; Abbott Mobile</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="report-repairs" data-title="Repairs Report" data-perm="reports.view">
+  <main x-data="repairsReportPage()">
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Repairs Report</h2>
+        <p class="page-subtitle">Workshop performance &middot; <span x-text="range.label"></span> &middot; <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>Reports</a>
+        <a href="repairs.html" class="btn btn-secondary"><span x-html="ABM.icon('wrench')"></span>Job cards</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!jobs.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" @click="ABM.ui.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+      </div>
+    </div>
+
+    <!-- Toolbar: standard range bar + branch -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-2">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' - ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg" x-text="branch.code + ' - ' + branch.name"></span>
+          </template>
+          <select class="select input-sm !w-auto" x-model="f.tech" aria-label="Technician">
+            <option value="">All technicians</option>
+            <option value="none">Unassigned</option>
+            <template x-for="t in technicians" :key="t.id"><option :value="String(t.id)" x-text="t.name"></option></template>
+          </select>
+          <span class="text-xs text-slate-500 ml-auto"><b class="text-slate-800" x-text="jobs.length"></b> jobs received in this period</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Print header -->
+    <div class="hidden print:block mb-4">
+      <div class="text-lg font-bold" x-text="company"></div>
+      <div class="text-sm">Repairs Report &middot; <span x-text="scopeLabel"></span></div>
+      <div class="text-xs"><span x-text="range.label"></span> &middot; generated <span x-text="ABM.utils.datetime(new Date())"></span></div>
+    </div>
+
+    <div class="print-area">
+      <!-- KPI tiles -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <a :href="'repairs.html?' + range.query" class="stat stat-accent" title="Open the job card list">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Jobs received</div><div class="stat-value" x-text="ABM.utils.num(k.received)"></div></div>
+            <span class="chip chip-navy" x-html="ABM.icon('wrench')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="k.delivered"></span> delivered &middot; <span x-text="k.cancelled"></span> cancelled</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a :href="'repairs.html?status=delivered&' + range.query" class="stat stat-money" title="Open delivered jobs">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Repair revenue</div><div class="stat-value" x-text="$money(k.revenue, {decimals:0})"></div></div>
+            <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="k.deliveredInRange"></span> jobs delivered in this period &middot; avg <b x-text="$money(k.avgTicket, {decimals:0})"></b></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="report-profit-loss.html" class="stat stat-warning" title="Open profit &amp; loss">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Gross profit</div><div class="stat-value" x-text="$money(k.grossProfit, {decimals:0})"></div></div>
+            <span class="chip chip-warning" x-html="ABM.icon('chart')"></span>
+          </div>
+          <div class="stat-meta">parts cost <b class="text-rose-600" x-text="$money(k.partsCost, {decimals:0})"></b> &middot; margin <span x-text="k.margin + '%'"></span></div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+        <a href="repairs.html?status=overdue" class="stat stat-danger" title="Open overdue jobs">
+          <div class="flex items-start justify-between gap-2">
+            <div class="min-w-0"><div class="stat-label">Overdue now</div><div class="stat-value" :class="k.overdue ? 'text-rose-600' : ''" x-text="ABM.utils.num(k.overdue)"></div></div>
+            <span class="chip chip-danger" x-html="ABM.icon('clock')"></span>
+          </div>
+          <div class="stat-meta"><span x-text="k.open"></span> jobs open &middot; <span x-text="k.ready"></span> ready for pickup</div>
+          <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+        </a>
+      </div>
+
+      <!-- Secondary strip -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+        <a :href="'repairs.html?' + range.query" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+          <span class="chip chip-info !w-9 !h-9" x-html="ABM.icon('clock','w-4 h-4')"></span>
+          <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Avg turnaround</div><div class="text-sm font-bold text-slate-900 truncate" x-text="k.avgDays ? k.avgDays + (k.avgDays === 1 ? ' day' : ' days') : '-'"></div></div>
+        </a>
+        <a :href="'repairs.html?' + range.query" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+          <span class="chip chip-money !w-9 !h-9" x-html="ABM.icon('wrench','w-4 h-4')"></span>
+          <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Labor revenue</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.labor, {decimals:0})"></div></div>
+        </a>
+        <a href="report-inventory.html?type=repair" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+          <span class="chip chip-warning !w-9 !h-9" x-html="ABM.icon('cube','w-4 h-4')"></span>
+          <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Parts billed</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.parts, {decimals:0})"></div></div>
+        </a>
+        <a href="report-balance-sheet.html" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0">
+          <span class="chip chip-danger !w-9 !h-9" x-html="ABM.icon('banknotes','w-4 h-4')"></span>
+          <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Unpaid dues</div><div class="text-sm font-bold text-slate-900 truncate" x-text="$money(k.dues, {decimals:0})"></div></div>
+        </a>
+      </div>
+
+      <!-- Charts -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div class="card lg:col-span-2">
+          <div class="card-header"><div><div class="card-title">Jobs received</div><div class="card-subtitle" x-text="chartSubtitle"></div></div></div>
+          <div class="card-body"><div class="h-56 sm:h-64"><canvas id="daysChart"></canvas></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><div class="card-title">Status funnel</div><div class="card-subtitle">Where this period's jobs stand now</div></div></div>
+          <div class="card-body"><div class="h-56 sm:h-64"><canvas id="statusChart"></canvas></div></div>
+        </div>
+      </div>
+
+      <!-- By technician -->
+      <div class="card mt-4">
+        <div class="card-header"><div><div class="card-title">By technician</div><div class="card-subtitle">Based on jobs received in this period</div></div></div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Technician</th>
+                <th class="num">Jobs</th>
+                <th class="num">Delivered</th>
+                <th class="num">Revenue</th>
+                <th class="num hidden md:table-cell">Parts cost</th>
+                <th class="num hidden lg:table-cell">Gross profit</th>
+                <th class="num hidden sm:table-cell">Avg days</th>
+                <th class="hidden lg:table-cell w-32">On time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="r in byTech" :key="r.key">
+                <tr>
+                  <td>
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="avatar w-7 h-7 text-[11px] flex-none" x-text="ABM.utils.initials(r.name)"></span>
+                      <div class="min-w-0">
+                        <div class="font-medium text-slate-800 truncate" x-text="r.name"></div>
+                        <div class="text-[11px] text-slate-400" x-text="r.branch"></div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="num font-semibold" x-text="r.jobs"></td>
+                  <td class="num text-slate-600" x-text="r.delivered"></td>
+                  <td class="num font-semibold whitespace-nowrap" x-text="$money(r.revenue, {decimals:0})"></td>
+                  <td class="num hidden md:table-cell text-rose-600 whitespace-nowrap" x-text="$money(r.partsCost, {decimals:0})"></td>
+                  <td class="num hidden lg:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(r.profit, {decimals:0})"></td>
+                  <td class="num hidden sm:table-cell text-slate-600" x-text="r.avgDays === null ? '-' : r.avgDays"></td>
+                  <td class="hidden lg:table-cell">
+                    <div class="flex items-center gap-2">
+                      <div class="progress flex-1" :class="r.onTime >= 80 ? 'progress-money' : ''"><div :style="'width:' + r.onTime + '%'"></div></div>
+                      <span class="text-xs text-slate-500 w-9 text-right" x-text="r.delivered ? r.onTime + '%' : '-'"></span>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!byTech.length">
+                <tr><td colspan="8" class="empty">No repair jobs were received in this period.</td></tr>
+              </template>
+            </tbody>
+            <tfoot x-show="byTech.length">
+              <tr>
+                <td>Total</td>
+                <td class="num" x-text="k.received"></td>
+                <td class="num" x-text="k.deliveredOfReceived"></td>
+                <td class="num whitespace-nowrap" x-text="$money(k.revenueOfReceived, {decimals:0})"></td>
+                <td class="num hidden md:table-cell whitespace-nowrap" x-text="$money(k.partsCostOfReceived, {decimals:0})"></td>
+                <td class="num hidden lg:table-cell whitespace-nowrap" x-text="$money(k.revenueOfReceived - k.partsCostOfReceived, {decimals:0})"></td>
+                <td class="num hidden sm:table-cell" x-text="k.avgDays || '-'"></td>
+                <td class="hidden lg:table-cell"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Device type & problem category -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+        <div class="card">
+          <div class="card-header"><div><div class="card-title">By device type</div><div class="card-subtitle">What comes through the door</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Device</th><th class="num">Jobs</th><th class="num hidden sm:table-cell">Delivered</th><th class="num">Revenue</th><th class="num hidden md:table-cell">Avg days</th></tr></thead>
+              <tbody>
+                <template x-for="r in byDevice" :key="r.key">
+                  <tr>
+                    <td><div class="flex items-center gap-2 min-w-0"><span class="text-slate-400 flex-none" x-html="ABM.icon(r.icon,'w-4 h-4')"></span><span class="font-medium text-slate-800 truncate" x-text="r.name"></span></div></td>
+                    <td class="num font-semibold" x-text="r.jobs"></td>
+                    <td class="num hidden sm:table-cell text-slate-600" x-text="r.delivered"></td>
+                    <td class="num whitespace-nowrap" x-text="$money(r.revenue, {decimals:0})"></td>
+                    <td class="num hidden md:table-cell text-slate-600" x-text="r.avgDays === null ? '-' : r.avgDays"></td>
+                  </tr>
+                </template>
+                <template x-if="!byDevice.length"><tr><td colspan="5" class="empty">No jobs in this period.</td></tr></template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div><div class="card-title">By problem</div><div class="card-subtitle">Grouped from the reported fault</div></div></div>
+          <div class="table-wrap">
+            <table class="table">
+              <thead><tr><th>Problem</th><th class="num">Jobs</th><th class="num">Revenue</th><th class="num hidden sm:table-cell">Avg days</th><th class="hidden md:table-cell w-28">Share</th></tr></thead>
+              <tbody>
+                <template x-for="r in byProblem" :key="r.key">
+                  <tr>
+                    <td class="font-medium text-slate-800" x-text="r.name"></td>
+                    <td class="num font-semibold" x-text="r.jobs"></td>
+                    <td class="num whitespace-nowrap" x-text="$money(r.revenue, {decimals:0})"></td>
+                    <td class="num hidden sm:table-cell text-slate-600" x-text="r.avgDays === null ? '-' : r.avgDays"></td>
+                    <td class="hidden md:table-cell"><div class="progress"><div :style="'width:' + r.share + '%'"></div></div></td>
+                  </tr>
+                </template>
+                <template x-if="!byProblem.length"><tr><td colspan="5" class="empty">No jobs in this period.</td></tr></template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Overdue jobs -->
+      <div class="card mt-4">
+        <div class="card-header">
+          <div><div class="card-title">Overdue jobs</div><div class="card-subtitle">Promised date has passed and the device is not ready</div></div>
+          <a href="repairs.html" class="btn btn-ghost btn-sm no-print">Open job cards <span x-html="ABM.icon('arrow-right','w-4 h-4')"></span></a>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Customer</th>
+                <th class="hidden md:table-cell">Device</th>
+                <th class="hidden sm:table-cell">Promised</th>
+                <th class="num">Late by</th>
+                <th class="hidden lg:table-cell">Technician</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="j in overdueJobs" :key="j.id">
+                <tr>
+                  <td>
+                    <a :href="'repair-view.html?id=' + j.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="j.job_no"></a>
+                    <div class="text-[11px] text-slate-400" x-show="j.priority === 'urgent'">Urgent</div>
+                  </td>
+                  <td><div class="font-medium text-slate-800 truncate max-w-[9rem]" x-text="j.customerName"></div><div class="text-[11px] text-slate-400 md:hidden truncate max-w-[9rem]" x-text="j.device"></div></td>
+                  <td class="hidden md:table-cell text-slate-600 truncate max-w-[14rem]" x-text="j.device"></td>
+                  <td class="hidden sm:table-cell text-slate-600 whitespace-nowrap" x-text="$date(j.promised_at)"></td>
+                  <td class="num"><span class="badge badge-red" x-text="j.lateDays + ' d'"></span></td>
+                  <td class="hidden lg:table-cell text-slate-600 truncate max-w-[10rem]" x-text="j.techName"></td>
+                  <td><span x-html="$badge(j.status)"></span></td>
+                </tr>
+              </template>
+              <template x-if="!overdueJobs.length">
+                <tr><td colspan="7">
+                  <div class="empty">
+                    <span x-html="ABM.icon('check-circle')"></span>
+                    <div class="empty-title">Nothing is overdue</div>
+                    <div class="text-sm mt-1">Every open job is still within its promised date.</div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function repairsReportPage() {
+      const { db, utils, ui, session } = ABM;
+      const STATUS_FLOW = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'ready', 'delivered', 'cancelled'];
+      const PROBLEMS = [
+        { key: 'screen', name: 'Screen & display', re: /screen|display|lcd|glass|touch|flicker|pixel/i },
+        { key: 'port', name: 'Charging port', re: /port|connector|jack/i },
+        { key: 'battery', name: 'Battery & charging', re: /batter|charg|power|drain|swell/i },
+        { key: 'thermal', name: 'Overheating & service', re: /overheat|heating|fan|thermal|shutting/i },
+        { key: 'input', name: 'Keyboard & buttons', re: /key|keyboard|button/i },
+        { key: 'upgrade', name: 'Upgrade & components', re: /upgrade|ssd|ram|storage|slow/i },
+        { key: 'liquid', name: 'Liquid & physical damage', re: /liquid|water|drop|dent/i },
+        { key: 'software', name: 'Software & data', re: /software|boot|logo|windows|flash|corrupt|data|recovery|os/i },
+      ];
+      const DEVICE_ICON = { mobile: 'phone', tablet: 'desktop', smartwatch: 'clock', laptop: 'laptop', desktop: 'desktop' };
+      const days = (a, b) => { const x = utils.parseDate(a), y = utils.parseDate(b); return x && y ? Math.max(0, Math.round((y - x) / 86400000)) : null; };
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branch: session.branch() || { code: '', name: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        technicians: db.all('users').filter((u) => ABM.roles.ticked(u.role, 'repairs.work')),
+        company: db.setting('company_name', 'Abbott Mobile'),
+        range: null, f: { branch: 'all', tech: '' },
+        jobs: [], delivered: [], byTech: [], byDevice: [], byProblem: [], overdueJobs: [],
+        statusCounts: {}, dayCounts: [], chartSubtitle: '', charts: {},
+        k: { received: 0, delivered: 0, deliveredInRange: 0, deliveredOfReceived: 0, cancelled: 0, open: 0, ready: 0, overdue: 0, revenue: 0, revenueOfReceived: 0, partsCost: 0, partsCostOfReceived: 0, parts: 0, labor: 0, grossProfit: 0, margin: 0, avgDays: 0, avgTicket: 0, dues: 0 },
+
+        get scopeLabel() { return this.f.branch === 'all' ? 'All branches' : db.branchName(this.f.branch); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); this.f.branch = (b === 'all' || this.branches.some((x) => String(x.id) === b)) ? b : 'all'; }
+          const t = utils.qs('tech'); if (t && db.find('users', t)) this.f.tech = String(t);
+          this.range = ABM.range('this_month', () => this.refresh(), 'report-repairs');
+          this.refresh();
+          ABM.theme.onChange(() => this.drawCharts());
+          ['branch', 'tech'].forEach((key) => this.$watch('f.' + key, () => this.refresh()));
+        },
+
+        refresh() { this.compute(); this.$nextTick(() => this.drawCharts()); },
+
+        inScope(j) { return this.f.branch === 'all' ? true : String(j.branch_id) === String(this.f.branch); },
+        matchTech(j) {
+          if (!this.f.tech) return true;
+          if (this.f.tech === 'none') return !j.technician_id;
+          return String(j.technician_id) === String(this.f.tech);
+        },
+        problemOf(text) { const t = String(text || ''); const hit = PROBLEMS.find((p) => p.re.test(t)); return hit || { key: 'other', name: 'Other' }; },
+
+        compute() {
+          const all = db.all('repair_jobs').filter((j) => this.inScope(j) && this.matchTech(j));
+          const items = utils.groupBy(db.all('repair_items'), 'job_id');
+          const partsCostOf = (j) => utils.sum((items[j.id] || []).filter((i) => i.type === 'part'), (i) => (Number(i.unit_cost) || 0) * (Number(i.quantity) || 0));
+          const partsOf = (j) => utils.sum((items[j.id] || []).filter((i) => i.type === 'part'), 'total');
+          const laborOf = (j) => utils.sum((items[j.id] || []).filter((i) => i.type === 'labor'), 'total');
+
+          const received = all.filter((j) => this.range.contains(j.received_at));
+          const deliveredInRange = all.filter((j) => j.delivered_at && this.range.contains(j.delivered_at));
+          this.jobs = utils.sortBy(received, (j) => String(j.received_at || ''), 'desc');
+          this.delivered = deliveredInRange;
+
+          const now = new Date();
+          const open = all.filter((j) => !['delivered', 'cancelled'].includes(j.status));
+          const overdue = open.filter((j) => j.promised_at && utils.parseDate(j.promised_at) < now && j.status !== 'ready');
+          const turnarounds = deliveredInRange.map((j) => days(j.received_at, j.delivered_at)).filter((d) => d !== null);
+          const revenue = utils.sum(deliveredInRange, 'total');
+          const partsCost = utils.round2(deliveredInRange.reduce((a, j) => a + partsCostOf(j), 0));
+          const deliveredOfReceived = received.filter((j) => j.status === 'delivered');
+
+          this.k = {
+            received: received.length,
+            delivered: received.filter((j) => j.status === 'delivered').length,
+            deliveredInRange: deliveredInRange.length,
+            deliveredOfReceived: deliveredOfReceived.length,
+            cancelled: received.filter((j) => j.status === 'cancelled').length,
+            open: open.length, ready: open.filter((j) => j.status === 'ready').length, overdue: overdue.length,
+            revenue, revenueOfReceived: utils.sum(deliveredOfReceived, 'total'),
+            partsCost, partsCostOfReceived: utils.round2(deliveredOfReceived.reduce((a, j) => a + partsCostOf(j), 0)),
+            parts: utils.round2(deliveredInRange.reduce((a, j) => a + partsOf(j), 0)),
+            labor: utils.round2(deliveredInRange.reduce((a, j) => a + laborOf(j), 0)),
+            grossProfit: utils.round2(revenue - partsCost),
+            margin: revenue ? Math.round((revenue - partsCost) / revenue * 100) : 0,
+            avgDays: turnarounds.length ? Math.round(turnarounds.reduce((a, b) => a + b, 0) / turnarounds.length * 10) / 10 : 0,
+            avgTicket: deliveredInRange.length ? utils.round2(revenue / deliveredInRange.length) : 0,
+            dues: utils.sum(all.filter((j) => j.status !== 'cancelled'), 'due_amount'),
+          };
+
+          /* ---- by technician (jobs received in range) ---- */
+          const techGroups = utils.groupBy(received, (j) => j.technician_id || 'none');
+          this.byTech = Object.keys(techGroups).map((key) => {
+            const list = techGroups[key];
+            const done = list.filter((j) => j.status === 'delivered');
+            const ts = done.map((j) => days(j.received_at, j.delivered_at)).filter((d) => d !== null);
+            const onTime = done.filter((j) => j.promised_at && j.delivered_at && utils.parseDate(j.delivered_at) <= utils.parseDate(j.promised_at)).length;
+            const rev = utils.sum(done, 'total');
+            const pc = utils.round2(done.reduce((a, j) => a + partsCostOf(j), 0));
+            const u = key === 'none' ? null : db.find('users', key);
+            return {
+              key: String(key), name: u ? u.name : 'Unassigned', branch: u && u.branch_id ? db.branchName(u.branch_id) : 'Not assigned yet',
+              jobs: list.length, delivered: done.length, revenue: rev, partsCost: pc, profit: utils.round2(rev - pc),
+              avgDays: ts.length ? Math.round(ts.reduce((a, b) => a + b, 0) / ts.length * 10) / 10 : null,
+              onTime: done.length ? Math.round(onTime / done.length * 100) : 0,
+            };
+          }).sort((a, b) => b.jobs - a.jobs);
+
+          /* ---- by device type ---- */
+          const devGroups = utils.groupBy(received, (j) => j.device_type || 'other');
+          this.byDevice = Object.keys(devGroups).map((key) => {
+            const list = devGroups[key];
+            const done = list.filter((j) => j.status === 'delivered');
+            const ts = done.map((j) => days(j.received_at, j.delivered_at)).filter((d) => d !== null);
+            return {
+              key, name: db.deviceTypeLabel(key), icon: DEVICE_ICON[key] || 'cube',
+              jobs: list.length, delivered: done.length, revenue: utils.sum(done, 'total'),
+              avgDays: ts.length ? Math.round(ts.reduce((a, b) => a + b, 0) / ts.length * 10) / 10 : null,
+            };
+          }).sort((a, b) => b.jobs - a.jobs);
+
+          /* ---- by problem category ---- */
+          const probGroups = utils.groupBy(received, (j) => this.problemOf(j.problem_description).key);
+          const maxJobs = Math.max(1, ...Object.values(probGroups).map((l) => l.length));
+          this.byProblem = Object.keys(probGroups).map((key) => {
+            const list = probGroups[key];
+            const done = list.filter((j) => j.status === 'delivered');
+            const ts = done.map((j) => days(j.received_at, j.delivered_at)).filter((d) => d !== null);
+            const def = PROBLEMS.find((p) => p.key === key);
+            return {
+              key, name: def ? def.name : 'Other', jobs: list.length, revenue: utils.sum(done, 'total'),
+              avgDays: ts.length ? Math.round(ts.reduce((a, b) => a + b, 0) / ts.length * 10) / 10 : null,
+              share: Math.round(list.length / maxJobs * 100),
+            };
+          }).sort((a, b) => b.jobs - a.jobs);
+
+          /* ---- overdue list ---- */
+          this.overdueJobs = utils.sortBy(overdue.map((j) => ({
+            ...j, customerName: db.customerName(j.customer_id), device: [j.brand, j.model, j.color].filter(Boolean).join(' '),
+            techName: j.technician_id ? db.userName(j.technician_id) : 'Unassigned',
+            lateDays: Math.max(1, Math.round((new Date() - utils.parseDate(j.promised_at)) / 86400000)),
+          })), 'lateDays', 'desc');
+
+          /* ---- chart data ---- */
+          const counts = {};
+          STATUS_FLOW.forEach((s) => { counts[s] = 0; });
+          received.forEach((j) => { counts[j.status] = (counts[j.status] || 0) + 1; });
+          this.statusCounts = counts;
+
+          const iso = this.range.days();
+          const byMonth = iso.length > 62;
+          const buckets = byMonth ? [...new Set(iso.map((d) => d.slice(0, 7)))] : iso;
+          const keyOf = (d) => (byMonth ? String(d).slice(0, 7) : String(d).slice(0, 10));
+          this.chartSubtitle = (byMonth ? 'By month' : 'By day') + ' - ' + this.range.label;
+          this.dayCounts = buckets.map((b) => ({
+            label: byMonth ? utils.date(b + '-01', 'short') : utils.date(b, 'short'),
+            value: received.filter((j) => keyOf(j.received_at) === b).length,
+          }));
+        },
+
+        drawCharts() {
+          if (!window.Chart) return;
+          const dayEl = document.getElementById('daysChart');
+          const statusEl = document.getElementById('statusChart');
+          if (!dayEl || !statusEl) return;
+          const tc = ABM.theme.chart();
+          Object.values(this.charts).forEach((c) => { try { c.destroy(); } catch (e) { /* ignore */ } });
+          this.charts = {};
+          Chart.defaults.color = tc.tick;
+          Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+          this.charts.days = new Chart(dayEl, {
+            type: 'bar',
+            data: { labels: this.dayCounts.map((d) => d.label), datasets: [{ label: 'Jobs received', data: this.dayCounts.map((d) => d.value), backgroundColor: tc.primary, borderRadius: 4 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { grid: { display: false }, ticks: { color: tc.tick, maxTicksLimit: 12 } }, y: { beginAtZero: true, ticks: { color: tc.tick, precision: 0 }, grid: { color: tc.grid } } } },
+          });
+          const labels = STATUS_FLOW.filter((s) => (this.statusCounts[s] || 0) > 0);
+          const colors = { received: tc.warn, diagnosing: tc.info, awaiting_approval: tc.warn, awaiting_parts: tc.violet, in_progress: tc.primary, ready: tc.money, delivered: tc.money, cancelled: tc.danger };
+          this.charts.status = new Chart(statusEl, {
+            type: 'bar',
+            data: { labels: labels.map((s) => ABM.ui.statusLabel(s)), datasets: [{ label: 'Jobs', data: labels.map((s) => this.statusCounts[s] || 0), backgroundColor: labels.map((s) => colors[s] || tc.primary), borderRadius: 4 }] },
+            options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { color: tc.tick, precision: 0 }, grid: { color: tc.grid } }, y: { grid: { display: false }, ticks: { color: tc.tick } } } },
+          });
+        },
+
+        exportCsv() {
+          const cols = [
+            { label: 'Job No', key: 'job_no' }, { label: 'Received', value: (j) => utils.datetime(j.received_at) },
+            { label: 'Branch', value: (j) => db.branchCode(j.branch_id) }, { label: 'Customer', value: (j) => db.customerName(j.customer_id) },
+            { label: 'Device', value: (j) => [db.deviceTypeLabel(j.device_type), j.brand, j.model].filter(Boolean).join(' ') },
+            { label: 'Serial', key: 'serial' }, { label: 'Problem', key: 'problem_description' },
+            { label: 'Problem group', value: (j) => this.problemOf(j.problem_description).name },
+            { label: 'Technician', value: (j) => (j.technician_id ? db.userName(j.technician_id) : 'Unassigned') },
+            { label: 'Status', value: (j) => ui.statusLabel(j.status) }, { label: 'Priority', key: 'priority' },
+            { label: 'Promised', value: (j) => utils.date(j.promised_at) }, { label: 'Delivered', value: (j) => utils.date(j.delivered_at) },
+            { label: 'Turnaround days', value: (j) => (j.delivered_at ? days(j.received_at, j.delivered_at) : '') },
+            { label: 'Parts', key: 'total_parts' }, { label: 'Labor', key: 'total_labor' }, { label: 'Discount', key: 'discount' },
+            { label: 'Total', key: 'total' }, { label: 'Paid', key: 'paid_amount' }, { label: 'Due', key: 'due_amount' },
+          ];
+          if (!utils.download('repairs-report-' + utils.today() + '.csv', utils.toCsv(this.jobs, cols))) return;
+          ui.success('Exported ' + this.jobs.length + ' job' + (this.jobs.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

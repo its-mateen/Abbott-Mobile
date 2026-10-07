@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: platform roles/nav/branch</title></head>
+<body data-public>
+<pre id="out">running…</pre>
+<script src="../assets/js/data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script>
+(function () {
+  const L = (s) => { console.log('DRIVE ' + s); };
+  let fails = 0;
+  const ok = (cond, msg) => { L((cond ? 'PASS  ' : 'FAIL  ') + msg); if (!cond) fails++; };
+
+  ABM.db.reset();
+  const db = ABM.db, S = ABM.session;
+
+  // ---------------------------------------------------------------- page -> data-perm map (scraped from every *.html)
+  const PAGES = {
+    'audit-log.html': 'audit.view', 'branches.html': 'branches.manage', 'categories.html': 'categories.manage',
+    'closings.html': 'closing.view', 'customer-view.html': 'customers.view', 'customers.html': 'customers.view',
+    'dashboard.html': 'dashboard.view', 'day-end.html': 'closing.view', 'expenses.html': 'expenses.view',
+    'imeis.html': 'imei.manage', 'invoice.html': 'sales.print', 'online-order-view.html': 'orders.view',
+    'online-orders.html': 'orders.view', 'pos.html': 'pos.access', 'product-view.html': 'products.view',
+    'products.html': 'products.view', 'profile.html': '', 'purchase-create.html': 'purchases.manage',
+    'purchase-view.html': 'purchases.view', 'purchases.html': 'purchases.view', 'repair-create.html': 'repairs.create',
+    'repair-view.html': 'repairs.view', 'repairs.html': 'repairs.view', 'report-balance-sheet.html': 'reports.branch',
+    'report-expenses.html': 'reports.branch', 'report-imei-history.html': 'reports.branch', 'report-inventory.html': 'reports.branch',
+    'report-online-sales.html': 'reports.branch', 'report-payables.html': 'reports.branch', 'report-profit-loss.html': 'reports.branch',
+    'report-receivables.html': 'reports.branch', 'report-repairs.html': 'reports.branch', 'report-sales.html': 'reports.branch',
+    'report-stock-valuation.html': 'reports.branch', 'reports.html': 'reports.branch', 'returns.html': 'sales.return',
+    'sale-view.html': 'sales.view', 'sales.html': 'sales.view', 'settings.html': 'settings.manage',
+    'stock.html': 'inventory.view', 'supplier-view.html': 'suppliers.view', 'suppliers.html': 'suppliers.view',
+    'transfer-create.html': 'transfers.request', 'transfer-view.html': 'transfers.view', 'transfers.html': 'transfers.view',
+    'users.html': 'staff.view', 'website.html': 'website.manage',
+  };
+  const MUST_BLOCK = {
+    cashier: ['branches.html', 'users.html', 'settings.html', 'reports.html', 'report-sales.html', 'report-profit-loss.html', 'day-end.html', 'closings.html'],
+    technician: ['settings.html', 'reports.html', 'report-sales.html', 'report-profit-loss.html', 'report-balance-sheet.html', 'report-receivables.html', 'report-payables.html', 'day-end.html', 'closings.html', 'branches.html'],
+    branch_manager: ['branches.html', 'settings.html'],
+  };
+  const HOME = { super_admin: 'dashboard.html', branch_manager: 'dashboard.html', cashier: 'pos.html', technician: 'repairs.html' };
+
+  const navKeysFor = () => {
+    const out = [];
+    (ABM.nav || []).forEach((sec) => (sec.items || []).forEach((it) => { if (!it.perm || S.can(it.perm)) out.push(it.key); }));
+    return out;
+  };
+
+  ['admin', 'manager', 'cashier', 'technician', 'sana', 'usman', 'faraz'].forEach((uname) => {
+    const u = db.all('users').find((x) => x.username === uname);
+    if (!u) { ok(false, 'seed user ' + uname + ' missing'); return; }
+    S.logout(); S.login(u);
+    const role = S.role();
+    L('--- ' + uname + ' (' + role + ') branch=' + S.branchId() + ' ---');
+    ok(S.homeFor(role) === HOME[role], uname + ' home = ' + S.homeFor(role) + ' (expected ' + HOME[role] + ')');
+    L('  nav: ' + navKeysFor().join(','));
+    const allowed = Object.keys(PAGES).filter((p) => !PAGES[p] || S.can(PAGES[p]));
+    L('  pages allowed (' + allowed.length + '/' + Object.keys(PAGES).length + '): ' + allowed.join(' '));
+    (MUST_BLOCK[role] || []).forEach((p) => {
+      ok(!(PAGES[p] && S.can(PAGES[p])), uname + ' must be BLOCKED from ' + p + ' (perm=' + PAGES[p] + ')');
+    });
+    // every nav item the role sees must point at a page the role can open
+    (ABM.nav || []).forEach((sec) => (sec.items || []).forEach((it) => {
+      if (it.perm && !S.can(it.perm)) return;
+      if (it.external) return;
+      const pagePerm = PAGES[it.href];
+      ok(pagePerm === undefined || !pagePerm || S.can(pagePerm),
+        uname + ' nav "' + it.label + '" -> ' + it.href + ' openable (page perm ' + pagePerm + ')');
+    }));
+    // reverse: pages the role CAN open but has no nav route to (informational)
+    const navHrefs = [];
+    (ABM.nav || []).forEach((sec) => (sec.items || []).forEach((it) => { if (!it.perm || S.can(it.perm)) navHrefs.push(it.href); }));
+    const orphan = Object.keys(PAGES).filter((p) => PAGES[p] && S.can(PAGES[p]) && navHrefs.indexOf(p) < 0
+      && !/^(sale-view|customer-view|product-view|supplier-view|purchase-view|transfer-view|repair-view|repair-create|online-order-view|transfer-create|purchase-create|invoice|report-|closings)/.test(p));
+    if (orphan.length) L('  ORPHAN (allowed but not in sidebar): ' + orphan.join(' '));
+  });
+
+  // ---------------------------------------------------------------- branch scoping data sanity
+  L('--- branch scoping data ---');
+  const b1 = 1, b2 = 2;
+  const counts = (bid) => ({
+    sales: db.where('sales', (r) => r.branch_id === bid).length,
+    repairs: db.where('repair_jobs', (r) => r.branch_id === bid).length,
+    expenses: db.where('expenses', (r) => r.branch_id === bid).length,
+    closings: db.where('daily_closings', (r) => r.branch_id === bid).length,
+    stock: db.where('branch_stock', (r) => r.branch_id === bid).length,
+    purchases: db.where('purchases', (r) => r.branch_id === bid).length,
+    orders: db.where('online_orders', (r) => r.branch_id === bid).length,
+  });
+  const c1 = counts(b1), c2 = counts(b2);
+  L('  branch1 ' + JSON.stringify(c1));
+  L('  branch2 ' + JSON.stringify(c2));
+  // online orders are fulfilled by one branch (cms.site.commerce.fulfil_branch_id), so branch 2 is not expected to have any
+  Object.keys(c2).filter((k) => k !== 'orders').forEach((k) => ok(c2[k] > 0, 'branch 2 has ' + k + ' rows (' + c2[k] + ')'));
+
+  // ---------------------------------------------------------------- demo data sanity
+  L('--- demo data sanity ---');
+  const t = ABM.utils.today();
+  ok(db.all('products').filter((p) => p.is_active).length > 10, 'active products = ' + db.all('products').filter((p) => p.is_active).length);
+  ok(db.all('sales').length > 10, 'sales = ' + db.all('sales').length);
+  const todaySales = db.where('sales', (s) => String(s.sale_date).slice(0, 10) === t);
+  ok(todaySales.length > 0, "sales dated today (" + t + ") = " + todaySales.length);
+  ok(db.where('sales', (s) => String(s.sale_date).slice(0, 10) === t && s.branch_id === 2).length > 0,
+     'branch 2 sales dated today = ' + db.where('sales', (s) => String(s.sale_date).slice(0, 10) === t && s.branch_id === 2).length);
+  ok(db.where('expenses', (e) => String(e.expense_date).slice(0, 10) === t).length > 0,
+     'expenses dated today = ' + db.where('expenses', (e) => String(e.expense_date).slice(0, 10) === t).length);
+  ok(db.where('repair_jobs', (j) => ['received','diagnosing','awaiting_approval','awaiting_parts','in_progress','ready'].includes(j.status)).length > 0, 'open repair jobs = ' + db.where('repair_jobs', (j) => !['delivered','cancelled'].includes(j.status)).length);
+  ok(db.all('online_orders').length > 0, 'online orders = ' + db.all('online_orders').length);
+  ok(db.all('repair_requests').length > 0, 'repair requests = ' + db.all('repair_requests').length);
+  const cms = db.cms();
+  ok(!!(cms && cms.site && cms.site.name), 'cms.site.name = ' + (cms && cms.site && cms.site.name));
+  ok((cms.site.featured_product_ids || []).length > 0, 'cms featured products = ' + (cms.site.featured_product_ids || []).length);
+  ok((cms.pages || []).length > 0, 'cms pages = ' + (cms.pages || []).length);
+
+  // NaN / Invalid Date sweep over every numeric + date field in every collection
+  L('--- NaN / Invalid Date sweep ---');
+  const MONEY = /(_amount|total|price|cost|balance|subtotal|paid_|due_|_fee|qty|quantity|opening_|expected_|actual_|discrepancy|deposit|float)/i;
+  const DATEF = /(_date|_at)$/;
+  let nanHits = 0, badDates = 0;
+  Object.keys(db.raw()).forEach((coll) => {
+    const rows = db.raw()[coll];
+    if (!Array.isArray(rows)) return;
+    rows.forEach((r) => {
+      if (!r || typeof r !== 'object') return;
+      Object.keys(r).forEach((k) => {
+        const v = r[k];
+        if (MONEY.test(k) && !DATEF.test(k) && v !== null && v !== undefined && typeof v !== 'object' && Number.isNaN(Number(v))) { nanHits++; if (nanHits < 6) L('  NaN ' + coll + '#' + r.id + '.' + k + ' = ' + v); }
+        if (DATEF.test(k) && v) { const d = new Date(v); if (isNaN(d.getTime())) { badDates++; if (badDates < 6) L('  BADDATE ' + coll + '#' + r.id + '.' + k + ' = ' + v); } }
+      });
+    });
+  });
+  ok(nanHits === 0, 'no NaN numeric fields in seed (' + nanHits + ')');
+  ok(badDates === 0, 'no unparsable date fields in seed (' + badDates + ')');
+
+  // money/date formatter sanity
+  ok(ABM.utils.money(0) === 'Rs. 0.00', 'money(0) = ' + ABM.utils.money(0));
+  ok(ABM.utils.money(null).indexOf('NaN') < 0, 'money(null) = ' + ABM.utils.money(null));
+  ok(ABM.utils.money(undefined).indexOf('NaN') < 0, 'money(undefined) = ' + ABM.utils.money(undefined));
+  ok(ABM.utils.date('') !== 'Invalid Date', "date('') = " + ABM.utils.date(''));
+  ok(String(ABM.utils.date(null)).indexOf('Invalid') < 0, 'date(null) = ' + ABM.utils.date(null));
+  ok(String(ABM.utils.datetime(undefined)).indexOf('Invalid') < 0, 'datetime(undefined) = ' + ABM.utils.datetime(undefined));
+
+  // badge vocabulary: every distinct status value across collections must produce a badge class
+  L('--- badge vocabulary ---');
+  const statuses = new Set();
+  ['sales', 'purchases', 'stock_transfers', 'repair_jobs', 'online_orders', 'product_imeis', 'daily_closings', 'repair_requests'].forEach((c) => {
+    db.all(c).forEach((r) => { if (r.status) statuses.add(r.status); });
+  });
+  const NEUTRAL = ['cancelled']; // grey on purpose: a closed, inactive outcome
+  const unknown = [];
+  [...statuses].sort().forEach((s) => {
+    const h = ABM.ui.badge(s);
+    if (!/badge-[a-z]+/.test(h) || (/badge-slate["\s]/.test(h) && !NEUTRAL.includes(s))) unknown.push(s + ' => ' + h);
+  });
+  L('  statuses: ' + [...statuses].sort().join(', '));
+  ok(unknown.length === 0, 'every seeded status maps to a coloured badge' + (unknown.length ? ' — unmapped: ' + unknown.join(' | ') : ''));
+
+  document.getElementById('out').textContent = fails ? 'FAIL (' + fails + ')' : 'PASS';
+  console.log('RESULT: ' + (fails ? 'FAIL (' + fails + ' checks)' : 'PASS'));
+})();
+</script>
+</body>
+</html>

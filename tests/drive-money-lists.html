@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>DRIVE money / lists + role scoping</title></head>
+<body>
+<pre id="log"></pre>
+<script>
+/* QA driver — customers.html + suppliers.html KPIs/filters, and branch scoping for a branch manager. */
+const TAG = 'DRIVE';
+let fails = 0, checks = 0;
+const L = (...a) => { const s = a.join(' '); console.log(TAG + ' ' + s); document.getElementById('log').textContent += s + '\n'; };
+const ok = (cond, msg, extra) => { checks++; if (!cond) { fails++; L('FAIL ' + msg + (extra ? '  [' + extra + ']' : '')); } else L('ok   ' + msg + (extra ? '  [' + extra + ']' : '')); };
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const near = (a, b, tol) => Math.abs(r2(a) - r2(b)) <= (tol === undefined ? 0.01 : tol);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function load(url, opts) {
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    const f = document.createElement('iframe');
+    f.width = 1400; f.height = 900;
+    f.onload = () => {
+      const w = f.contentWindow;
+      if (opts.plain) return resolve({ f, w, st: null });
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        let st = null;
+        try { const el = w.document.querySelector('main[x-data]'); if (el) st = (w.Alpine && w.Alpine.$data) ? w.Alpine.$data(el) : (el._x_dataStack || [])[0]; } catch (e) {}
+        if (st) { clearInterval(t); resolve({ f, w, st }); }
+        else if (n > 200) { clearInterval(t); reject(new Error('no alpine on ' + url)); }
+      }, 25);
+    };
+    f.src = url;
+    document.body.appendChild(f);
+  });
+}
+(async function () {
+  try {
+    const boot = await load('autologin.html?as=admin&reset=1', { plain: true });
+    const A = boot.w.ABM, U = A.utils, DB = A.db;
+    const TODAY = U.today();
+
+    /* ---------- customers.html ---------- */
+    const pc = await load('../customers.html');
+    const C = pc.st;
+    const posBal = r2(DB.all('customers').filter((c) => !c.is_walkin && Number(c.balance) > 0).reduce((a, c) => a + Number(c.balance), 0));
+    const negBal = r2(Math.abs(DB.all('customers').filter((c) => Number(c.balance) < 0).reduce((a, c) => a + Number(c.balance), 0)));
+    ok(near(C.k.receivable, posBal), 'customers KPI receivable == Σ positive balances', C.k.receivable + ' vs ' + posBal);
+    ok(near(C.k.storeCredit, negBal), 'customers KPI store credit == Σ negative balances', C.k.storeCredit + ' vs ' + negBal);
+    ok(C.k.debtors === DB.all('customers').filter((c) => !c.is_walkin && Number(c.balance) > 0).length, 'debtor count matches', C.k.debtors);
+    ok(C.counts.dues === DB.all('customers').filter((c) => Number(c.balance) > 0).length, 'Has dues tab count matches', C.counts.dues);
+    ok(C.counts.credit === DB.all('customers').filter((c) => Number(c.balance) < 0).length, 'Store credit tab count matches', C.counts.credit);
+    C.filter = 'dues'; await sleep(60);
+    ok(C.filtered.every((c) => c.balance > 0), 'Has dues tab only lists customers who owe', C.filtered.length + ' rows');
+    ok(near(C.filteredTotals.due, posBal), 'tab footer total == Σ positive balances', C.filteredTotals.due + ' vs ' + posBal);
+    C.filter = 'credit'; await sleep(60);
+    ok(C.filtered.every((c) => c.balance < 0), 'Store credit tab only lists credit holders', C.filtered.length + ' rows');
+    C.filter = 'all'; C.q = 'kashif'; await sleep(60);
+    ok(C.filtered.length >= 1 && C.filtered.every((c) => /kashif/i.test(c.name)), 'search filters by name', C.filtered.map((c) => c.name).join(','));
+    C.q = '';
+    // range bar drives the period stats, not the balances
+    C.range.set('today'); await sleep(120);
+    const todaySales = DB.all('sales').filter((s) => s.status !== 'void' && Number(s.branch_id) === 1 && String(s.sale_date).slice(0, 10) === TODAY);
+    const todayUnits = todaySales.length;
+    ok(C.rows.reduce((a, c) => a + c.sales, 0) === todayUnits, 'Today: per-customer sale counts add up to today\'s sales', C.rows.reduce((a, c) => a + c.sales, 0) + ' vs ' + todayUnits);
+    ok(near(C.k.receivable, posBal), 'balances are NOT filtered by the date range (khata is a running balance)', C.k.receivable);
+    C.range.set('this_month'); await sleep(120);
+    const monthSales = DB.all('sales').filter((s) => s.status !== 'void' && Number(s.branch_id) === 1 && String(s.sale_date).slice(0, 7) === TODAY.slice(0, 7)).length;
+    ok(C.rows.reduce((a, c) => a + c.sales, 0) === monthSales, 'This Month: per-customer sale counts add up', C.rows.reduce((a, c) => a + c.sales, 0) + ' vs ' + monthSales);
+    ok(monthSales > todayUnits, 'This Month is wider than Today', monthSales + ' > ' + todayUnits);
+
+    // create / edit / guard delete  (assert against the PAGE's own ABM instance)
+    const DC = pc.w.ABM.db;
+    const n0 = DC.all('customers').length;
+    C.openCreate(); await sleep(60);
+    C.form.data.name = 'QA Driver Customer'; C.form.data.phone = '0300-1234567'; C.form.data.credit_limit = 50000;
+    C.save(); await sleep(150);
+    const made = DC.all('customers').slice(-1)[0];
+    ok(DC.all('customers').length === n0 + 1 && made.name === 'QA Driver Customer', 'customer created', made.name);
+    ok(Number(made.balance) === 0 && Number(made.is_walkin) === 0, 'new customer starts with a zero balance', made.balance);
+    const aud = DC.all('audit_logs').slice(-1)[0];
+    ok(aud.action === 'customer.create', 'audit customer.create', aud.action);
+    C.openEdit({ id: made.id }); await sleep(80);
+    C.form.data.phone = '123'; C.save(); await sleep(80);
+    ok(!!C.form.errors.phone, 'short phone rejected', C.form.errors.phone);
+    C.form.data.phone = '0300-1234567'; C.form.data.credit_limit = 75000; C.save(); await sleep(150);
+    ok(Number(DC.find('customers', made.id).credit_limit) === 75000, 'customer edit saved', DC.find('customers', made.id).credit_limit);
+    const walkin = DC.all('customers').find((c) => c.is_walkin);
+    ok(!!walkin && C.usage(walkin.id).ok === false, 'walk-in customer is protected from deletion', C.usage(walkin.id).reasons.join(','));
+    const withLedger = DC.all('customers').find((c) => !c.is_walkin && DC.all('customer_transactions').some((t) => String(t.customer_id) === String(c.id)));
+    ok(C.usage(withLedger.id).ok === false, 'a customer with ledger history cannot be deleted', C.usage(withLedger.id).reasons.join(', '));
+    ok(C.usage(made.id).ok === true, 'a brand new customer with no history can be deleted');
+
+    /* ---------- suppliers.html ---------- */
+    const ps = await load('../suppliers.html');
+    const S = ps.st;
+    const supPos = r2(DB.all('suppliers').filter((s) => Number(s.balance) > 0).reduce((a, s) => a + Number(s.balance), 0));
+    ok(near(S.k.payable, supPos), 'suppliers KPI payable == Σ positive balances', S.k.payable + ' vs ' + supPos);
+    const rawOpenBills = DB.all('purchases').filter((p) => p.status !== 'cancelled' && r2((Number(p.total) || 0) - (Number(p.paid_amount) || 0)) > 0.01).length;
+    L('  suppliers KPIs: ' + JSON.stringify(S.k));
+    ok(S.rows.length === DB.all('suppliers').length, 'every supplier is listed', S.rows.length);
+    S.f && (S.q = 'hall'); await sleep(60);
+    ok(S.filtered.every((x) => /hall/i.test(x.name + ' ' + (x.contact_person || ''))), 'supplier search filters', S.filtered.map((x) => x.name).join(','));
+    S.q = ''; await sleep(60);
+
+    /* ---------- role scoping: branch manager at B2 ---------- */
+    await load('autologin.html?as=sana', { plain: true });
+    const pe = await load('../expenses.html');
+    const E = pe.st, DE = pe.w.ABM;
+    ok(Number(DE.session.branchId()) === 2, 'logged in as the B2 manager', DE.session.branchId());
+    ok(E.rows.every((r) => Number(r.branch_id) === 2), 'manager only sees B2 expenses', E.rows.length + ' rows');
+    ok(E.isSuperAdmin === false && Number(E.scopeBranchId) === 2, 'expense scope is locked to the manager branch', E.scopeBranchId);
+    const pd = await load('../day-end.html?branch=1');
+    ok(Number(pd.st.branchId) === 2, 'manager cannot open another branch day-end via ?branch=1', pd.st.branchId);
+    const pcl = await load('../closings.html?branch=1');
+    ok(Number(pcl.st.scopeBranchId) === 2 && pcl.st.rows.every((r) => Number(r.branch_id) === 2), 'closings register is locked to the manager branch', pcl.st.scopeBranchId);
+    const b2Tx = DE.db.all('customer_transactions').filter((t) => Number(t.branch_id) === 2);
+    const mixedId = b2Tx.length ? b2Tx[0].customer_id : DE.db.all('customers').filter((c) => !c.is_walkin)[0].id;
+    const pcv = await load('../customer-view.html?id=' + mixedId);
+    const allTx = pcv.w.ABM.db.all('customer_transactions').filter((t) => String(t.customer_id) === String(mixedId));
+    ok(pcv.st.showBranch === false, 'branch column hidden for a single-branch user');
+    ok(pcv.st.ledger.length > 0 && pcv.st.ledger.every((t) => Number(t.branch_id) === 2), 'customer ledger rows are scoped to the manager branch', pcv.st.ledger.length + ' of ' + allTx.length + ' rows');
+
+    L('checks=' + checks + ' fails=' + fails);
+    L('RESULT: ' + (fails ? 'FAIL' : 'PASS'));
+  } catch (e) { L('EXCEPTION ' + (e && e.message) + '\n' + (e && e.stack)); L('RESULT: FAIL'); }
+})();
+</script>
+</body>
+</html>

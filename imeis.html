@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>IMEI Registry · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="imeis" data-title="IMEI &amp; Serial Registry" data-perm="imei.view">
+  <main x-data="imeisPage()" @keydown.escape.window="closeModals()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">IMEI &amp; Serial Registry</h2>
+        <p class="page-subtitle"><span x-text="ABM.utils.num(registeredCount)"></span> units registered (IMEI &amp; serial numbers) · showing <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <button type="button" class="btn btn-primary" x-show="canRegister" @click="openRegister()"><span x-html="ABM.icon('plus')"></span>Register units</button>
+      </div>
+    </div>
+
+    <!-- KPI tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Units in stock</div><div class="stat-value" x-text="ABM.utils.num(tiles.inStock)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center" x-html="ABM.icon('phone')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.available"></span> available · <span x-text="tiles.returned"></span> open box · value <b class="text-slate-800" x-text="$money(tiles.value, {decimals:0})"></b></div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">In transit</div><div class="stat-value" x-text="ABM.utils.num(tiles.inTransit)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center" x-html="ABM.icon('transfer')"></span>
+        </div>
+        <div class="stat-meta">between branches · <a href="transfers.html" class="font-semibold text-navy-700 hover:underline">transfers</a></div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Defective</div><div class="stat-value" :class="tiles.defective ? 'text-rose-600' : ''" x-text="ABM.utils.num(tiles.defective)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center" x-html="ABM.icon('x-circle')"></span>
+        </div>
+        <div class="stat-meta">not counted in stock · <button type="button" class="font-semibold text-navy-700 hover:underline" @click="f.status = 'defective'">show</button><span x-show="tiles.voided"> · <button type="button" class="font-semibold text-navy-700 hover:underline" @click="f.status = 'voided'" x-text="tiles.voided + ' voided'"></button></span></div>
+      </div>
+      <div class="stat">
+        <div class="flex items-start justify-between gap-2">
+          <div><div class="stat-label">Sold this month</div><div class="stat-value" x-text="ABM.utils.num(tiles.soldMonth)"></div></div>
+          <span class="w-10 h-10 rounded-xl bg-navy-100 text-navy-700 flex items-center justify-center" x-html="ABM.icon('receipt')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.soldTotal"></span> sold all-time</div>
+      </div>
+    </div>
+
+    <!-- Lookup -->
+    <div class="card mt-4">
+      <div class="card-body">
+        <form class="flex flex-col sm:flex-row gap-2" @submit.prevent="lookup()">
+          <div class="relative flex-1 min-w-0">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('scan','w-5 h-5')"></span>
+            <input type="text" class="input input-lg pl-11 mono" placeholder="Scan or type an IMEI / serial number to look it up…" x-model="look.q" x-ref="lookupInput" @input="onLookupInput()" maxlength="40" autocomplete="off" aria-label="IMEI or serial number lookup">
+          </div>
+          <div class="flex gap-2">
+            <button type="submit" class="btn btn-primary btn-lg flex-1 sm:flex-none"><span x-html="ABM.icon('search')"></span>Lookup</button>
+            <button type="button" class="btn btn-secondary btn-lg" x-show="look.q || look.result || look.notFound" @click="clearLookup()" aria-label="Clear lookup" x-html="ABM.icon('x')"></button>
+          </div>
+        </form>
+        <p class="help mt-2">Auto-searches once 15 digits are entered · matches an IMEI, a second IMEI or a serial number · press <span class="kbd">Enter</span> to search.</p>
+
+        <!-- Result card -->
+        <template x-if="look.result">
+          <div class="mt-4 rounded-xl border border-navy-100 bg-navy-50/60 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="mono text-lg font-bold text-slate-900 tracking-wide break-all" x-text="look.result.shownImei"></div>
+                <div class="text-xs text-slate-500 break-all" x-show="look.result.shownImei2">IMEI 2: <span class="mono" x-text="look.result.shownImei2"></span></div>
+                <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span x-html="$badge(look.result.status)"></span>
+                  <span class="badge badge-slate" x-text="ABM.db.branchName(look.result.branch_id)"></span>
+                  <template x-if="look.result.grade"><span class="badge" :class="gradeClass(look.result.grade)" x-text="'Grade ' + look.result.grade"></span></template>
+                  <template x-if="look.result.battery_health != null && look.result.battery_health !== ''"><span class="badge badge-slate" x-text="'Battery ' + look.result.battery_health + '%'"></span></template>
+                  <span x-html="ptaBadge(look.result.pta)"></span>
+                  <span class="text-xs text-slate-500" x-show="look.result.matchedOn === 'imei2'">(matched on IMEI 2)</span>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-2">
+                <a :href="historyHref(look.result)" class="btn btn-secondary btn-sm"><span x-html="ABM.icon('clock','w-4 h-4')"></span>History</a>
+                <template x-if="canAct(look.result) && look.result.status !== 'voided'"><button type="button" class="btn btn-soft btn-sm" @click="openEdit(look.result)"><span x-html="ABM.icon('edit','w-4 h-4')"></span>Edit unit</button></template>
+                <template x-if="canAct(look.result) && isSellable(look.result.status)"><button type="button" class="btn btn-danger-soft btn-sm" @click="openStatus(look.result, 'defective')"><span x-html="ABM.icon('x-circle','w-4 h-4')"></span>Mark defective</button></template>
+                <template x-if="canAct(look.result) && look.result.status === 'defective'"><button type="button" class="btn btn-soft btn-sm" @click="openStatus(look.result, 'restore')"><span x-html="ABM.icon('refresh','w-4 h-4')"></span>Restore</button></template>
+                <template x-if="canVoidRow(look.result)"><button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="openVoid(look.result)" :title="look.result.voidable.ok ? 'Registered by mistake: take it off stock and keep it on record as voided' : look.result.voidable.reason"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Void</button></template>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mt-4 text-sm">
+              <div class="rounded-lg bg-white border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Product</div><a :href="'product-view.html?id=' + look.result.product_id" class="font-semibold text-navy-700 hover:underline block truncate" x-text="look.result.label"></a><div class="text-xs text-slate-500 truncate" x-text="look.result.brandName + ' · ' + look.result.sku"></div></div>
+              <div class="rounded-lg bg-white border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Cost / selling price</div><div class="font-semibold text-slate-800 tabular" x-text="$money(look.result.cost_price)"></div><div class="text-xs text-slate-500">sells at <b class="text-slate-700" x-text="$money(look.result.price, {decimals:0})"></b> <span x-text="look.result.customPrice ? '(unit price)' : '(product price)'"></span></div></div>
+              <div class="rounded-lg bg-white border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Purchase</div><template x-if="look.result.purchase"><div><a :href="look.result.purchase.href" class="mono font-semibold text-navy-700 hover:underline" x-text="look.result.purchase.label"></a><div class="text-xs text-slate-500 truncate" x-text="look.result.purchase.sub"></div></div></template><div x-show="!look.result.purchase" class="text-slate-500">Registered <span x-text="$date(look.result.created_at)"></span><div class="text-xs">opening stock / manual</div></div></div>
+              <div class="rounded-lg bg-white border border-slate-200 p-3 min-w-0"><div class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Sale</div><template x-if="look.result.sale"><div><a :href="look.result.sale.href" class="mono font-semibold text-navy-700 hover:underline" x-text="look.result.sale.label"></a><div class="text-xs text-slate-500 truncate" x-text="look.result.sale.sub"></div></div></template><template x-if="!look.result.sale && look.result.transfer"><div><a :href="look.result.transfer.href" class="mono font-semibold text-navy-700 hover:underline" x-text="look.result.transfer.label"></a><div class="text-xs text-slate-500 truncate" x-text="look.result.transfer.sub"></div></div></template><div x-show="!look.result.sale && !look.result.transfer" class="text-slate-500">Not sold yet</div></div>
+            </div>
+            <p class="mt-3 text-xs text-slate-600" x-show="look.result.accessories"><span class="font-semibold">Accessories:</span> <span x-text="look.result.accessories"></span></p>
+            <p class="mt-1 text-xs text-slate-600" x-show="look.result.notes"><span class="font-semibold">Notes:</span> <span x-text="look.result.notes"></span></p>
+            <p class="mt-1 text-xs text-rose-700" x-show="look.result.status === 'voided'"><span class="font-semibold">Voided</span> <span x-text="look.result.voided_at ? $date(look.result.voided_at) : ''"></span><span x-show="look.result.void_reason" x-text="' · ' + look.result.void_reason"></span></p>
+            <p class="mt-1 text-xs text-slate-500" x-show="canVoidRow(look.result) && !look.result.voidable.ok"><span class="font-semibold">Cannot be voided:</span> <span x-text="look.result.voidable.reason"></span></p>
+          </div>
+        </template>
+        <template x-if="look.notFound">
+          <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0"><span class="text-amber-700 flex-none" x-html="ABM.icon('warning')"></span><div class="text-sm min-w-0 break-all"><b class="mono" x-text="look.notFound"></b> is not registered in the system.</div></div>
+            <button type="button" class="btn btn-primary btn-sm" x-show="canRegister" @click="openRegister(look.notFound)"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Register it</button>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Registered</span>
+          <div class="range-bar">
+            <div class="tabs-pill">
+              <template x-for="p in range.presets" :key="p.key">
+                <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+              </template>
+            </div>
+            <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+              <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+              <span class="text-xs text-slate-500">to</span>
+              <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+            </div>
+            <span class="range-label" x-text="range.label"></span>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-12 gap-2">
+          <div class="relative col-span-2 md:col-span-4">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search IMEI / serial (partial) or product…" x-model.debounce.200ms="q" aria-label="Search units">
+          </div>
+          <select class="select col-span-2 md:col-span-4" x-model="f.product" aria-label="Product">
+            <option value="">All products</option>
+            <template x-for="p in imeiProducts" :key="p.id"><option :value="String(p.id)" x-text="p.label"></option></template>
+          </select>
+          <select class="select" :class="isSuperAdmin ? 'md:col-span-2' : 'col-span-2 md:col-span-4'" x-model="f.brand" aria-label="Brand">
+            <option value="">All brands</option>
+            <template x-for="b in brands" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+          </select>
+          <template x-if="isSuperAdmin">
+            <select class="select md:col-span-2" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <select class="select md:col-span-4" x-model="f.status" aria-label="Status">
+            <option value="">All statuses (not voided)</option>
+            <option value="available">Available</option>
+            <option value="returned">Returned (open box)</option>
+            <option value="sold">Sold</option>
+            <option value="in_transit">In transit</option>
+            <option value="defective">Defective</option>
+            <option value="missing">Missing (stock take / transit)</option>
+            <option value="returned_to_supplier">With supplier</option>
+            <option value="scrapped">Written off</option>
+            <option value="voided">Voided (registered by mistake)</option>
+          </select>
+          <select class="select md:col-span-4" x-model="f.grade" aria-label="Grade">
+            <option value="">All grades</option>
+            <template x-for="g in GRADES" :key="g.key"><option :value="g.key" x-text="'Grade ' + g.label"></option></template>
+            <option value="none">Not graded</option>
+          </select>
+          <select class="select col-span-2 md:col-span-4" x-model="f.pta" aria-label="PTA status">
+            <option value="">All PTA statuses</option>
+            <template x-for="o in PTA" :key="o.key"><option :value="o.key" x-text="o.label"></option></template>
+          </select>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500" x-show="hasFilters">
+          <span>Active filters:</span>
+          <span class="badge badge-navy" x-show="f.product" x-text="'Product: ' + productLabel(f.product)"></span>
+          <span class="badge badge-navy" x-show="f.brand" x-text="'Brand: ' + ABM.db.brandName(f.brand)"></span>
+          <span class="badge badge-navy" x-show="f.status" x-text="'Status: ' + ABM.ui.statusLabel(f.status)"></span>
+          <span class="badge badge-navy" x-show="f.grade" x-text="'Grade: ' + (f.grade === 'none' ? 'not graded' : f.grade)"></span>
+          <span class="badge badge-navy" x-show="f.pta" x-text="'PTA: ' + ptaLabel(f.pta)"></span>
+          <span class="badge badge-navy" x-show="q" x-text="'Search: ' + q"></span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div class="min-w-0"><div class="card-title">Registered units</div><div class="card-subtitle"><span x-text="ABM.utils.num(filtered.length)"></span> unit<span x-text="filtered.length === 1 ? '' : 's'"></span> match · <span x-text="range.preset === 'all' ? 'registered any time' : 'registered ' + range.label"></span></div></div>
+        <div class="flex items-center gap-1.5 text-xs text-slate-500">Luhn check: <span class="badge" :class="luhnOn ? 'badge-green' : 'badge-slate'" x-text="luhnOn ? 'On' : 'Off'"></span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead><tr>
+            <th class="cursor-pointer select-none" @click="setSort('imei')"><span class="inline-flex items-center gap-1">IMEI / Serial <span x-html="sortIcon('imei')"></span></span></th>
+            <th class="cursor-pointer select-none" @click="setSort('label')"><span class="inline-flex items-center gap-1">Product <span x-html="sortIcon('label')"></span></span></th>
+            <th class="hidden md:table-cell">Branch</th>
+            <th class="cursor-pointer select-none" @click="setSort('status')"><span class="inline-flex items-center gap-1">Status <span x-html="sortIcon('status')"></span></span></th>
+            <th class="hidden lg:table-cell cursor-pointer select-none" @click="setSort('grade')"><span class="inline-flex items-center gap-1">Condition <span x-html="sortIcon('grade')"></span></span></th>
+            <th class="num hidden lg:table-cell cursor-pointer select-none" @click="setSort('cost_price')"><span class="inline-flex items-center gap-1">Cost / price <span x-html="sortIcon('cost_price')"></span></span></th>
+            <th class="hidden 2xl:table-cell cursor-pointer select-none" @click="setSort('created_at')"><span class="inline-flex items-center gap-1">Registered <span x-html="sortIcon('created_at')"></span></span></th>
+            <th class="hidden md:table-cell cursor-pointer select-none" @click="setSort('created_at')"><span class="inline-flex items-center gap-1">Reference <span class="2xl:hidden text-slate-400 font-normal normal-case">/ date</span> <span class="2xl:hidden" x-html="sortIcon('created_at')"></span></span></th>
+            <th class="actions">Actions</th>
+          </tr></thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr>
+                <td>
+                  <a :href="historyHref(r)" class="mono font-semibold hover:underline whitespace-nowrap" :class="r.status === 'voided' ? 'text-slate-400 line-through' : 'text-navy-700'" x-text="r.shownImei"></a>
+                  <div class="mono text-[11px] text-slate-500 whitespace-nowrap" x-show="r.shownImei2" x-text="'IMEI 2 ' + r.shownImei2"></div>
+                  <div class="flex flex-wrap items-center gap-1 mt-0.5 lg:hidden" x-show="r.grade || r.showPta || r.battery_health != null">
+                    <template x-if="r.grade"><span class="badge" :class="gradeClass(r.grade)" x-text="r.grade"></span></template>
+                    <span x-html="ptaBadge(r.pta)"></span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 truncate max-w-[10rem]" x-show="r.notes" x-text="r.notes" :title="r.notes"></div>
+                </td>
+                <td><a :href="'product-view.html?id=' + r.product_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[14rem]" x-text="r.label"></a><div class="text-xs text-slate-500 truncate max-w-[14rem]" x-text="r.brandName + ' · ' + r.sku"></div></td>
+                <td class="hidden md:table-cell"><span class="badge badge-slate" x-text="ABM.db.branchCode(r.branch_id)"></span></td>
+                <td><span x-html="$badge(r.status)"></span></td>
+                <td class="hidden lg:table-cell">
+                  <div class="flex flex-wrap items-center gap-1">
+                    <template x-if="r.grade"><span class="badge" :class="gradeClass(r.grade)" x-text="'Grade ' + r.grade"></span></template>
+                    <span x-html="ptaBadge(r.pta)"></span>
+                    <span class="text-xs text-slate-400" x-show="!r.grade && !r.showPta">—</span>
+                  </div>
+                  <div class="text-[11px] text-slate-500 whitespace-nowrap" x-show="r.battery_health != null && r.battery_health !== ''" x-text="'Battery ' + r.battery_health + '%'"></div>
+                </td>
+                <td class="num hidden lg:table-cell whitespace-nowrap"><div class="text-slate-600" x-text="$money(r.cost_price, {decimals:0})"></div><div class="text-[11px]" :class="r.customPrice ? 'font-semibold text-emerald-700' : 'text-slate-400'" :title="r.customPrice ? 'Unit selling price' : 'Product retail price'" x-text="'sells ' + $money(r.price, {decimals:0})"></div></td>
+                <td class="hidden 2xl:table-cell text-slate-500 whitespace-nowrap" x-text="$date(r.created_at)"></td>
+                <td class="hidden md:table-cell"><template x-if="r.ref"><a :href="r.ref.href" class="mono text-navy-700 hover:underline whitespace-nowrap" x-text="r.ref.label"></a></template><span x-show="!r.ref" class="text-slate-400">—</span><div class="2xl:hidden text-[11px] text-slate-500 whitespace-nowrap" x-text="'reg. ' + $date(r.created_at)"></div></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="historyHref(r)" class="btn btn-ghost btn-sm btn-icon" title="History" x-html="ABM.icon('clock','w-4 h-4')"></a>
+                    <template x-if="canAct(r) && r.status !== 'voided'"><button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit unit (IMEI, cost, grade, PTA, price, notes)" @click="openEdit(r)" x-html="ABM.icon('edit','w-4 h-4')"></button></template>
+                    <template x-if="canAct(r) && isSellable(r.status)"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Mark defective" @click="openStatus(r, 'defective')" x-html="ABM.icon('x-circle','w-4 h-4')"></button></template>
+                    <template x-if="canAct(r) && r.status === 'defective'"><button type="button" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Restore to stock" @click="openStatus(r, 'restore')" x-html="ABM.icon('refresh','w-4 h-4')"></button></template>
+                    <template x-if="r.status === 'defective' && ABM.session.can('supplier_returns.add')">
+                      <a :href="'supplier-return-create.html?unit=' + r.id" class="btn btn-ghost btn-sm btn-icon text-amber-700" title="Send back to supplier" x-html="ABM.icon('return','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="r.status === 'missing' && canAct(r)"><button type="button" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Unit found — put it back in stock" @click="openStatus(r, 'found')" x-html="ABM.icon('check-circle','w-4 h-4')"></button></template>
+                    <template x-if="canVoidRow(r) && r.voidable.ok"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Void — registered by mistake" @click="openVoid(r)" x-html="ABM.icon('trash','w-4 h-4')"></button></template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('qr')"></span>
+                  <div class="empty-title">No units match</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? (range.preset === 'all' ? 'Try a different search or clear the filters.' : 'Nothing registered in the period ' + range.label + ' matches — try All.') : 'Register your first units to get started.'"></div>
+                  <div class="mt-4 flex flex-wrap justify-center gap-2">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-primary btn-sm" x-show="canRegister" @click="openRegister()">Register units</button>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n"><button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button></template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Register IMEIs modal -->
+    <div x-show="reg.open" x-cloak class="modal-backdrop" @click.self="reg.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="regTitle">
+        <form @submit.prevent="register()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0"><div class="modal-title" id="regTitle" x-text="!reg.product_id ? 'Register units' : (regSerialType === 'imei' ? 'Register IMEIs' : 'Register serial numbers')"></div><div class="text-xs text-slate-500">Opening stock / manual registration — purchases register units automatically.</div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="reg.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="rg-product">Product <span class="req">*</span></label>
+                <select id="rg-product" class="select" x-ref="regProduct" x-model="reg.product_id" :class="reg.errors.product_id && 'is-invalid'" @change="onRegProductChange()">
+                  <option value="">Select a serialized product…</option>
+                  <template x-for="p in imeiProducts.filter(p => p.is_active)" :key="p.id"><option :value="String(p.id)" x-text="p.label + ' — ' + p.sku + ' · ' + ABM.db.serialLabel(p)"></option></template>
+                </select>
+                <p class="field-error" x-show="reg.errors.product_id" x-text="reg.errors.product_id"></p>
+              </div>
+              <div>
+                <label class="label" for="rg-branch">Branch <span class="req">*</span></label>
+                <template x-if="isSuperAdmin">
+                  <select id="rg-branch" class="select" x-model="reg.branch_id" :class="reg.errors.branch_id && 'is-invalid'">
+                    <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                </template>
+                <template x-if="!isSuperAdmin"><input id="rg-branch" type="text" class="input" :value="ABM.db.branchName(reg.branch_id)" disabled></template>
+                <p class="field-error" x-show="reg.errors.branch_id" x-text="reg.errors.branch_id"></p>
+              </div>
+              <div>
+                <label class="label" for="rg-cost">Unit cost <span class="req">*</span></label>
+                <div class="input-group"><input id="rg-cost" type="number" min="0" step="0.01" class="input" x-model.number="reg.unit_cost" :class="reg.errors.unit_cost && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="reg.errors.unit_cost" x-text="reg.errors.unit_cost"></p>
+                <p class="help" x-show="!reg.errors.unit_cost">Defaults to the product's cost price.</p>
+              </div>
+            </div>
+
+            <!-- Condition of this batch (optional) -->
+            <div class="rounded-xl border border-slate-200">
+              <button type="button" class="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-slate-700" @click="reg.showDetails = !reg.showDetails" :aria-expanded="reg.showDetails ? 'true' : 'false'">
+                <span class="min-w-0 truncate">Condition, PTA &amp; accessories <span class="font-normal text-slate-500">(optional · every unit in this batch)</span></span>
+                <span class="flex-none" x-html="ABM.icon(reg.showDetails ? 'chevron-up' : 'chevron-down','w-4 h-4')"></span>
+              </button>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 px-3 pb-3" x-show="reg.showDetails" x-cloak>
+                <div>
+                  <label class="label" for="rg-grade">Grade</label>
+                  <select id="rg-grade" class="select" x-model="reg.grade">
+                    <option value="">Not graded</option>
+                    <template x-for="g in GRADES" :key="g.key"><option :value="g.key" x-text="g.label"></option></template>
+                  </select>
+                </div>
+                <div>
+                  <label class="label" for="rg-battery">Battery %</label>
+                  <input id="rg-battery" type="number" min="0" max="100" step="1" class="input" x-model="reg.battery_health" :class="reg.errors.battery_health && 'is-invalid'" placeholder="e.g. 92">
+                  <p class="field-error" x-show="reg.errors.battery_health" x-text="reg.errors.battery_health"></p>
+                </div>
+                <div class="col-span-2">
+                  <label class="label" for="rg-pta">PTA status</label>
+                  <select id="rg-pta" class="select" x-model="reg.pta_status">
+                    <template x-for="o in PTA" :key="o.key"><option :value="o.key" x-text="o.label"></option></template>
+                  </select>
+                </div>
+                <div class="col-span-2 sm:col-span-4">
+                  <label class="label" for="rg-acc">Accessories</label>
+                  <input id="rg-acc" type="text" class="input" x-model="reg.accessories" maxlength="200" placeholder="e.g. Box, charger, cable">
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div class="min-w-0">
+                <label class="label" for="rg-scan">Scan one at a time</label>
+                <div class="relative">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('scan','w-4 h-4')"></span>
+                  <input id="rg-scan" type="text" :inputmode="regSerialType === 'imei' ? 'numeric' : 'text'" class="input pl-9 mono" :placeholder="reg.pair && reg.waiting ? 'Now scan IMEI 2 and press Enter' : 'Scan and press Enter'" x-model="reg.scan" x-ref="regScan" @keydown.enter.prevent="appendScan()" maxlength="40" autocomplete="off">
+                </div>
+                <label class="mt-2 flex items-center gap-2 text-sm text-slate-600" x-show="regSerialType === 'imei'">
+                  <input type="checkbox" class="checkbox" x-model="reg.pair" @change="reg.waiting = false"> Dual-SIM: scan IMEI 2 after each IMEI 1
+                </label>
+                <p class="help" x-text="reg.pair && regSerialType === 'imei' ? 'Every second scan is added as IMEI 2 of the line above it.' : 'Each scan is appended to the list on the right.'"></p>
+                <label class="label mt-4" for="rg-text">Or paste — one <span x-text="regSerialLabel"></span> per line</label>
+                <textarea id="rg-text" class="textarea mono" rows="8" x-model="reg.text" :placeholder="regPlaceholder" spellcheck="false"></textarea>
+                <p class="help" x-show="regSerialType === 'imei'">Dual-SIM phone: put IMEI 2 after a comma — <span class="mono">IMEI 1, IMEI 2</span>.</p>
+                <p class="field-error" x-show="reg.errors.text" x-text="reg.errors.text"></p>
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                  <span class="label !mb-0">Validation</span>
+                  <div class="flex items-center gap-1.5">
+                    <span class="badge badge-green" x-text="parsed.valid + ' valid'"></span>
+                    <span class="badge" :class="parsed.invalid ? 'badge-red' : 'badge-slate'" x-text="parsed.invalid + ' invalid'"></span>
+                  </div>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 max-h-64 overflow-y-auto scroll-thin divide-y divide-slate-100">
+                  <template x-for="(l, i) in parsed.lines" :key="i">
+                    <div class="flex items-center justify-between gap-2 px-3 py-1.5 text-sm">
+                      <div class="flex items-center gap-2 min-w-0"><span class="flex-none" :class="l.error ? 'text-rose-600' : 'text-emerald-600'" x-html="ABM.icon(l.error ? 'x-circle' : 'check-circle','w-4 h-4')"></span><div class="min-w-0"><div class="mono truncate" :class="l.error ? 'text-rose-700' : 'text-slate-800'" x-text="l.imei"></div><div class="mono text-[11px] text-slate-500 truncate" x-show="l.imei2" x-text="'IMEI 2 ' + l.imei2"></div></div></div>
+                      <span class="text-xs text-right" :class="l.error ? 'text-rose-600 font-medium' : 'text-slate-400'" x-text="l.error || 'OK'"></span>
+                    </div>
+                  </template>
+                  <div x-show="!parsed.lines.length" class="px-3 py-8 text-center text-sm text-slate-400" x-text="'Scanned or pasted ' + (regSerialType === 'imei' ? 'IMEIs' : 'serial numbers') + ' appear here with a live check.'"></div>
+                </div>
+                <div class="flex flex-wrap items-center justify-between gap-2 mt-2 text-xs text-slate-500">
+                  <span x-text="'Checks: ' + (regSerialType === 'imei' ? '15 digits · ' + (luhnOn ? 'Luhn' : 'Luhn (off in Settings)') : '4–40 letters / digits / - _ . /') + ' · not already registered · no duplicates'"></span>
+                  <button type="button" class="btn btn-ghost btn-sm" x-show="parsed.invalid" @click="removeInvalid()"><span x-html="ABM.icon('trash','w-4 h-4')"></span>Remove invalid</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <div class="mr-auto text-sm text-slate-600 self-center" x-show="parsed.valid && reg.product_id">Total cost <b class="text-slate-900" x-text="$money(parsed.valid * (Number(reg.unit_cost) || 0))"></b></div>
+            <button type="button" class="btn btn-secondary" @click="reg.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="reg.busy || !parsed.valid || parsed.invalid > 0"><span x-html="ABM.icon('check')"></span><span x-text="'Register' + (parsed.valid ? ' ' + parsed.valid : '') + ' unit' + (parsed.valid === 1 ? '' : 's')"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Edit unit modal -->
+    <div x-show="ed.open" x-cloak class="modal-backdrop" @click.self="ed.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+        <form @submit.prevent="saveEdit()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0"><div class="modal-title" id="edTitle">Edit unit</div><div class="text-xs text-slate-500 truncate"><span class="mono" x-text="ed.row && ed.row.imei"></span> · <span x-text="ed.row && ed.row.label"></span> · <span x-text="ed.row && ABM.db.branchCode(ed.row.branch_id)"></span></div></div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="ed.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="alert alert-info" x-show="ed.locks.id"><span x-html="ABM.icon('info')"></span><div>The <span x-text="ed.serialLabel"></span> can no longer be changed: <span x-text="ed.locks.id"></span></div></div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="ed-imei" x-text="ed.serialLabel"></label>
+                <input id="ed-imei" type="text" class="input mono" x-model="ed.form.imei" :inputmode="ed.serialType === 'imei' ? 'numeric' : 'text'" :disabled="!!ed.locks.id" :class="ed.errors.imei && 'is-invalid'" maxlength="40" autocomplete="off" x-ref="edImei">
+                <p class="field-error" x-show="ed.errors.imei" x-text="ed.errors.imei"></p>
+                <p class="help" x-show="!ed.errors.imei && !ed.locks.id">Fix a typo. Checked like a new registration and must be unique.</p>
+              </div>
+              <div x-show="ed.serialType === 'imei'">
+                <label class="label" for="ed-imei2">IMEI 2 <span class="text-slate-400 font-normal">(dual-SIM)</span></label>
+                <input id="ed-imei2" type="text" class="input mono" x-model="ed.form.imei2" inputmode="numeric" :disabled="!!ed.locks.id && !!(ed.row && ed.row.imei2)" :class="ed.errors.imei2 && 'is-invalid'" maxlength="20" autocomplete="off" placeholder="Optional">
+                <p class="field-error" x-show="ed.errors.imei2" x-text="ed.errors.imei2"></p>
+              </div>
+              <div>
+                <label class="label" for="ed-cost">Unit cost</label>
+                <div class="input-group"><input id="ed-cost" type="number" min="0" step="0.01" class="input" x-model="ed.form.cost_price" :disabled="!!ed.locks.cost" :class="ed.errors.cost_price && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="ed.errors.cost_price" x-text="ed.errors.cost_price"></p>
+                <p class="help" x-show="!ed.errors.cost_price && ed.locks.cost" x-text="'Fixed: ' + ed.locks.cost"></p>
+                <p class="help" x-show="!ed.errors.cost_price && !ed.locks.cost" x-text="costHelp"></p>
+              </div>
+              <div>
+                <label class="label" for="ed-price">Unit selling price</label>
+                <div class="input-group"><input id="ed-price" type="number" min="0" step="1" class="input" x-model="ed.form.sale_price" :class="ed.errors.sale_price && 'is-invalid'" :placeholder="ed.row ? String(ed.row.retail_price || '') : ''"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="ed.errors.sale_price" x-text="ed.errors.sale_price"></p>
+                <p class="help" x-show="!ed.errors.sale_price" x-text="priceHelp"></p>
+              </div>
+              <div>
+                <label class="label" for="ed-grade">Grade</label>
+                <select id="ed-grade" class="select" x-model="ed.form.grade">
+                  <option value="">Not graded</option>
+                  <template x-for="g in GRADES" :key="g.key"><option :value="g.key" x-text="g.label"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="ed-battery">Battery health %</label>
+                <input id="ed-battery" type="number" min="0" max="100" step="1" class="input" x-model="ed.form.battery_health" :class="ed.errors.battery_health && 'is-invalid'" placeholder="e.g. 92">
+                <p class="field-error" x-show="ed.errors.battery_health" x-text="ed.errors.battery_health"></p>
+              </div>
+              <div>
+                <label class="label" for="ed-pta">PTA status</label>
+                <select id="ed-pta" class="select" x-model="ed.form.pta_status">
+                  <template x-for="o in PTA" :key="o.key"><option :value="o.key" x-text="o.label"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="ed-acc">Accessories</label>
+                <input id="ed-acc" type="text" class="input" x-model="ed.form.accessories" maxlength="200" placeholder="e.g. Box, charger, cable">
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="ed-notes">Notes</label>
+                <textarea id="ed-notes" class="textarea" rows="3" x-model="ed.form.notes" maxlength="500" placeholder="Condition, warranty card, remarks…"></textarea>
+                <p class="help"><span x-text="(ed.form.notes || '').length"></span>/500</p>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="ed.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="ed.busy"><span x-html="ABM.icon('check')"></span>Save changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Void unit modal -->
+    <div x-show="vd.open" x-cloak class="modal-backdrop" @click.self="vd.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="vdTitle">
+        <form @submit.prevent="saveVoid()" novalidate>
+          <div class="modal-body">
+            <div class="flex items-start gap-3">
+              <div class="flex-none w-10 h-10 rounded-full flex items-center justify-center bg-rose-100 text-rose-600" x-html="ABM.icon('warning','w-5 h-5')"></div>
+              <div class="min-w-0 flex-1">
+                <h3 class="text-base font-bold text-slate-900" id="vdTitle">Void this unit?</h3>
+                <p class="text-sm text-slate-600 mt-1 break-all"><span class="mono font-semibold" x-text="vd.row && vd.row.imei"></span> · <span x-text="vd.row && vd.row.label"></span></p>
+                <template x-if="vd.check.ok">
+                  <p class="text-sm text-slate-600 mt-1">Only for a unit registered by mistake. It comes off stock at <b x-text="vd.row ? ABM.db.branchName(vd.row.branch_id) : ''"></b> at its own cost of <b x-text="vd.row ? $money(vd.row.cost_price) : ''"></b> (a recount correction) and stays on record as voided. Its number is freed so the right unit can be registered.</p>
+                </template>
+                <template x-if="!vd.check.ok">
+                  <div class="alert alert-warning mt-2"><span x-html="ABM.icon('warning')"></span><div x-text="'This unit cannot be voided: ' + vd.check.reason"></div></div>
+                </template>
+                <div class="mt-3" x-show="vd.check.ok">
+                  <label class="label" for="vd-reason">Why was it registered by mistake? <span class="req">*</span></label>
+                  <textarea id="vd-reason" class="textarea" rows="3" x-ref="vdReason" x-model="vd.reason" :class="vd.error && 'is-invalid'" placeholder="e.g. Registered under the wrong model / scanned twice" maxlength="300"></textarea>
+                  <p class="field-error" x-show="vd.error" x-text="vd.error"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="vd.open = false" x-text="vd.check.ok ? 'Cancel' : 'Close'"></button>
+            <button type="submit" class="btn btn-danger" x-show="vd.check.ok" :disabled="vd.busy"><span x-html="ABM.icon('trash')"></span>Void unit</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Mark defective / restore modal -->
+    <div x-show="st.open" x-cloak class="modal-backdrop" @click.self="st.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true">
+        <form @submit.prevent="saveStatus()" novalidate>
+          <div class="modal-body">
+            <div class="flex items-start gap-3">
+              <div class="flex-none w-10 h-10 rounded-full flex items-center justify-center" :class="st.action === 'defective' ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-700'" x-html="ABM.icon(st.action === 'defective' ? 'warning' : 'refresh','w-5 h-5')"></div>
+              <div class="min-w-0 flex-1">
+                <h3 class="text-base font-bold text-slate-900" x-text="st.action === 'defective' ? 'Mark unit as defective?' : st.action === 'found' ? 'Unit found — put it back in stock?' : 'Restore unit to stock?'"></h3>
+                <p class="text-sm text-slate-600 mt-1 break-all"><span class="mono font-semibold" x-text="st.row && st.row.imei"></span> · <span x-text="st.row && st.row.label"></span></p>
+                <p class="text-sm text-slate-600 mt-1" x-text="st.action === 'defective' ? 'The unit will be removed from sellable stock at ' + (st.row ? ABM.db.branchName(st.row.branch_id) : '') + ' and a stock movement will be recorded.' : st.action === 'found' ? 'It was written off by a stock take. Stock at ' + (st.row ? ABM.db.branchName(st.row.branch_id) : '') + ' goes back up by 1 and a count gain is recorded.' : 'The unit becomes available again at ' + (st.row ? ABM.db.branchName(st.row.branch_id) : '') + ' and stock increases by 1.'"></p>
+                <div class="mt-3">
+                  <label class="label" for="st-notes">Reason / notes <span class="req" x-show="st.action === 'defective'">*</span></label>
+                  <textarea id="st-notes" class="textarea" rows="3" x-ref="stNotes" x-model="st.notes" :class="st.error && 'is-invalid'" :placeholder="st.action === 'defective' ? 'e.g. Dead pixel, sent to service centre' : st.action === 'found' ? 'e.g. Found in the display cabinet' : 'e.g. Repaired and tested OK'"></textarea>
+                  <p class="field-error" x-show="st.error" x-text="st.error"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="st.open = false">Cancel</button>
+            <button type="submit" class="btn" :class="st.action === 'defective' ? 'btn-danger' : 'btn-primary'" :disabled="st.busy" x-text="st.action === 'defective' ? 'Mark defective' : st.action === 'found' ? 'Put back in stock' : 'Restore to stock'"></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function imeisPage() {
+      const { db, utils, ui, session, stock } = ABM;
+      const PER_PAGE = 15;
+      const isSuperAdmin = session.isSuperAdmin();
+      const myBranch = session.branchId();
+      const GRADES = [{ key: 'A', label: 'A · Like new' }, { key: 'B', label: 'B · Good' }, { key: 'C', label: 'C · Fair' }, { key: 'D', label: 'D · Heavy wear / faults' }];
+      const PTA = [{ key: 'approved', label: 'PTA approved' }, { key: 'non_pta', label: 'Non-PTA' }, { key: 'unknown', label: 'PTA unknown' }, { key: 'not_applicable', label: 'Not applicable' }];
+      const PTA_DEVICES = ['mobile', 'tablet', 'smartwatch'];
+      /** Movements that bring a unit onto the books for the first time. */
+      const REG_TYPES = ['opening', 'purchase'];
+      /** A correction made on this page (cost fix, void) is booked against the unit itself. */
+      const SELF_REF = 'product_imei';
+      /** PTA of a unit: its own, else the product's, else unknown for phones / not applicable for laptops. */
+      const productPta = (p) => (p && p.pta_status) || (p && (PTA_DEVICES.includes(p.device_type) || (!p.device_type && db.serialType(p) === 'imei')) ? 'unknown' : 'not_applicable');
+      const list = (v) => (Array.isArray(v) ? v : (typeof v === 'string' && v ? v.split(/[\s,]+/) : []));
+      const push = (map, key, val) => { const a = map.get(key); if (a) a.push(val); else map.set(key, [val]); };
+      return {
+        GRADES, PTA,
+        canEdit: session.can('imei.edit'),
+        canRegister: session.can('imei.add'),
+        canVoid: session.can('imei.delete'),
+        isSuperAdmin,
+        branches: db.all('branches').filter((b) => b.is_active),
+        brands: utils.sortBy(db.all('brands'), 'name'),
+        imeiProducts: [],
+        luhnOn: !!db.setting('imei_luhn_check'),
+        approvalLimit: Number(db.setting('adjustment_approval_limit', 50000)) || 0,
+        allRows: [],
+        rows: [],
+        tiles: { inStock: 0, available: 0, returned: 0, value: 0, inTransit: 0, defective: 0, soldMonth: 0, soldTotal: 0, voided: 0 },
+        range: null,
+        q: '',
+        f: { product: '', brand: '', branch: String(myBranch || 'all'), status: '', grade: '', pta: '' },
+        sort: { key: 'created_at', dir: 'desc' },
+        page: 1,
+        look: { q: '', result: null, notFound: '' },
+        reg: { open: false, busy: false, product_id: '', branch_id: String(myBranch || ''), unit_cost: '', scan: '', text: '', errors: {}, pair: false, waiting: false, showDetails: false, grade: '', battery_health: '', pta_status: 'unknown', accessories: '' },
+        st: { open: false, busy: false, action: 'defective', row: null, notes: '', error: '' },
+        ed: { open: false, busy: false, row: null, serialType: 'imei', serialLabel: 'IMEI', locks: { id: '', cost: '' }, form: {}, errors: {} },
+        vd: { open: false, busy: false, row: null, reason: '', error: '', check: { ok: false, reason: '' } },
+
+        init() {
+          this.imeiProducts = utils.sortBy(db.all('products').filter((p) => p.is_imei_tracked || p.is_serialized).map((p) => ({ ...p, label: db.productLabel(p.id) })), 'label');
+          this.range = ABM.range('all', () => { this.page = 1; }, 'imeis');
+          const pre = utils.qs('product');
+          if (pre && this.imeiProducts.some((p) => String(p.id) === String(pre))) this.f.product = String(pre);
+          if (utils.qs('status')) this.f.status = utils.qs('status');
+          if (GRADES.some((g) => g.key === utils.qs('grade')) || utils.qs('grade') === 'none') this.f.grade = utils.qs('grade');
+          if (PTA.some((o) => o.key === utils.qs('pta'))) this.f.pta = utils.qs('pta');
+          if (utils.qs('imei')) { this.look.q = utils.qs('imei'); }
+          // a deep link names the units it wants — never hide them behind a remembered period
+          if (['product', 'status', 'imei', 'grade', 'pta'].some((k) => utils.qs(k)) && !utils.qs('range')) this.range.preset = 'all';
+          this.refresh();
+          if (this.look.q) this.lookup();
+          this.$watch('q', () => { this.page = 1; });
+          ['product', 'brand', 'branch', 'status', 'grade', 'pta'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => this.refresh());
+        },
+        get scopeBranchIds() { return this.f.branch === 'all' ? this.branches.map((b) => b.id) : [Number(this.f.branch)]; },
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(Number(this.f.branch)); },
+        get registeredCount() { return this.rows.filter((r) => r.status !== 'voided').length; },
+        inScope(branchId) { return this.scopeBranchIds.includes(Number(branchId)); },
+        isSellable(status) { return stock.SELLABLE.includes(status); },
+        productLabel(id) { return db.productLabel(id); },
+        ptaLabel(k) { const o = PTA.find((x) => x.key === k); return o ? o.label : utils.titleCase(k); },
+        gradeClass(g) { return ({ A: 'badge-green', B: 'badge-blue', C: 'badge-amber', D: 'badge-red' })[g] || 'badge-slate'; },
+        ptaBadge(k) {
+          if (!k || k === 'not_applicable') return '';
+          return ui.badge(k === 'unknown' ? 'pending' : k, k === 'approved' ? 'PTA' : k === 'non_pta' ? 'Non-PTA' : 'PTA ?');
+        },
+        historyHref(r) { return r.status === 'voided' ? 'report-imei-history.html?unit=' + r.id : 'report-imei-history.html?imei=' + encodeURIComponent(r.imei); },
+
+        /* ------------------------------------------------------------ data */
+        /** Everything that has happened to every unit, indexed once per refresh. */
+        buildIndex() {
+          const moves = new Map(), saleItems = new Map(), returnItems = new Map(), supplierItems = new Map(), transfers = new Map();
+          db.all('stock_movements').forEach((m) => { if (m.imei_id != null) push(moves, Number(m.imei_id), m); });
+          db.all('sale_items').forEach((s) => { if (s.imei_id != null) push(saleItems, Number(s.imei_id), s); });
+          db.all('sale_return_items').forEach((r) => { if (r.imei_id != null) push(returnItems, Number(r.imei_id), r); });
+          db.all('supplier_return_items').forEach((r) => { if (r.imei_id != null) push(supplierItems, Number(r.imei_id), r); });
+          db.all('transfer_items').forEach((t) => (t.imei_ids || []).forEach((id) => transfers.set(Number(id), t.transfer_id)));
+          const repairSerials = new Set(db.all('repair_jobs').map((j) => String(j.serial || '').toUpperCase()).filter(Boolean));
+          const counts = new Map(db.all('stock_counts').map((c) => [Number(c.id), c]));
+          const countScans = new Map(), countMissing = new Map();
+          db.all('stock_count_items').forEach((it) => {
+            const c = counts.get(Number(it.count_id)); if (!c) return;
+            list(it.scanned).forEach((s) => push(countScans, String(s).toUpperCase(), c));
+            list(it.missing_ids).forEach((id) => push(countMissing, Number(id), c));
+          });
+          return { moves, saleItems, returnItems, supplierItems, transfers, repairSerials, countScans, countMissing };
+        },
+        /** What a unit has been through — decides what may still be corrected or voided. */
+        facts(i, idx) {
+          const moves = idx.moves.get(Number(i.id)) || [];
+          const has = (types) => moves.some((m) => types.includes(m.movement_type));
+          const ids = [i.imei, i.imei2].filter(Boolean).map((s) => String(s).toUpperCase());
+          const counts = ids.reduce((a, s) => a.concat(idx.countScans.get(s) || []), []).concat(idx.countMissing.get(Number(i.id)) || []);
+          const openCount = counts.find((c) => !['completed', 'cancelled'].includes(c.status));
+          return {
+            moves,
+            sold: (idx.saleItems.get(Number(i.id)) || []).length > 0 || !!i.sale_item_id || has(['sale']),
+            returned: (idx.returnItems.get(Number(i.id)) || []).length > 0 || has(['sale_return']),
+            transferred: idx.transfers.has(Number(i.id)) || has(['transfer_out', 'transfer_in', 'transfer_return', 'transit_loss']),
+            repaired: ids.some((s) => idx.repairSerials.has(s)) || has(['repair']),
+            supplier: (idx.supplierItems.get(Number(i.id)) || []).length > 0 || has(['supplier_return', 'supplier_replacement', 'scrap']),
+            counted: counts.length > 0 || has(['count_in', 'count_out']),
+            openCount: openCount ? (openCount.count_no || 'a count in progress') : '',
+            // anything besides the registration itself and this page's own corrections
+            extra: moves.filter((m) => !REG_TYPES.includes(m.movement_type) && m.reference_type !== SELF_REF).length > 0,
+            // has it ever been off the shelf? (a cost correction takes it off and puts it straight back)
+            leftStock: moves.some((m) => Number(m.quantity) < 0 && m.reference_type !== SELF_REF),
+          };
+        },
+        /** Why the identifier (IMEI / serial) can no longer be changed, or ''. */
+        idLock(i, h) {
+          if (h.sold || h.returned) return 'this unit has been sold, so the number is on an invoice.';
+          if (h.transferred) return 'this unit has been moved between branches.';
+          if (h.repaired) return 'this unit has a repair history.';
+          if (h.supplier) return 'this unit has been through a supplier return.';
+          if (h.openCount) return 'this unit is on ' + h.openCount + ', which is still open.';
+          return '';
+        },
+        /** Why the cost can no longer be changed, or ''. */
+        costLock(i, h) {
+          if (i.status !== 'available') return 'the unit is not on the shelf (' + ui.statusLabel(i.status).toLowerCase() + ').';
+          if (h.leftStock || h.sold || h.transferred) return 'the unit has already left stock once, so its cost is on the books.';
+          return '';
+        },
+        /** May this unit be voided as "registered by mistake"? */
+        voidCheck(i, h) {
+          const no = (reason) => ({ ok: false, reason });
+          if (i.status === 'voided') return no('it is already voided.');
+          if (i.status !== 'available') return no('only a unit on the shelf can be voided — this one is ' + ui.statusLabel(i.status).toLowerCase() + '.');
+          if (h.sold || h.returned) return no('it has been sold.');
+          if (h.transferred) return no('it has been moved between branches.');
+          if (h.repaired) return no('it has a repair history.');
+          if (h.supplier) return no('it has been through a supplier return.');
+          if (h.counted) return no('it has been through a stock take.');
+          if (h.extra) return no('it has stock history beyond its registration (for example marked defective and restored).');
+          if (i.purchase_item_id) {
+            const pi = db.find('purchase_items', i.purchase_item_id); const pu = pi && db.find('purchases', pi.purchase_id);
+            return no('it came in on purchase ' + (pu ? pu.purchase_no : '') + ' — cancel that purchase, or send the unit back through Supplier Returns, so the supplier balance stays right.');
+          }
+          if (this.approvalLimit > 0 && Number(i.cost_price) > this.approvalLimit && !session.can('inventory.approve')) return no('its cost (' + utils.money(i.cost_price, { decimals: 0 }) + ') is above the adjustment approval limit of ' + utils.money(this.approvalLimit, { decimals: 0 }) + ' — someone who can approve large adjustments has to void it.');
+          return { ok: true, reason: '' };
+        },
+        refresh() {
+          const products = new Map(db.all('products').map((p) => [p.id, p]));
+          const salesById = new Map(db.all('sales').map((s) => [s.id, s]));
+          const saleItemsById = new Map(db.all('sale_items').map((s) => [s.id, s]));
+          const purchaseItemsById = new Map(db.all('purchase_items').map((s) => [s.id, s]));
+          const purchasesById = new Map(db.all('purchases').map((s) => [s.id, s]));
+          const transfersById = new Map(db.all('stock_transfers').map((s) => [s.id, s]));
+          const returnsById = new Map(db.all('sale_returns').map((s) => [s.id, s]));
+          const idx = this.buildIndex();
+          const returnByImei = new Map();
+          db.all('sale_return_items').forEach((r) => { if (r.imei_id) returnByImei.set(Number(r.imei_id), r.return_id); });
+
+          const all = db.all('product_imeis').map((i) => {
+            const p = products.get(Number(i.product_id)) || {};
+            let ref = null, sale = null, transfer = null, purchase = null;
+            if (i.sale_item_id) { const si = saleItemsById.get(Number(i.sale_item_id)); const s = si && salesById.get(Number(si.sale_id)); if (s) sale = { label: s.invoice_no, href: 'sale-view.html?id=' + s.id, sub: utils.date(s.sale_date) + ' · ' + db.customerName(s.customer_id) }; }
+            if (idx.transfers.has(i.id)) { const t = transfersById.get(idx.transfers.get(i.id)); if (t) transfer = { label: t.transfer_no, href: 'transfer-view.html?id=' + t.id, sub: db.branchCode(t.from_branch_id) + ' → ' + db.branchCode(t.to_branch_id) + ' · ' + ABM.ui.statusLabel(t.status), status: t.status, to: t.to_branch_id }; }
+            if (i.purchase_item_id) { const pi = purchaseItemsById.get(Number(i.purchase_item_id)); const pu = pi && purchasesById.get(Number(pi.purchase_id)); if (pu) purchase = { label: pu.purchase_no, href: 'purchase-view.html?id=' + pu.id, sub: utils.date(pu.purchase_date) + ' · ' + db.supplierName(pu.supplier_id) }; }
+            if (i.status === 'sold' && sale) ref = sale;
+            else if (i.status === 'in_transit' && transfer) ref = { label: transfer.label + ' → ' + db.branchCode(transfer.to), href: transfer.href };
+            else if ((i.status === 'returned' || i.status === 'defective') && returnByImei.has(i.id)) { const r = returnsById.get(returnByImei.get(i.id)); if (r) ref = { label: r.return_no, href: 'sale-view.html?id=' + r.sale_id }; }
+            if (!ref && purchase) ref = purchase;
+            const hist = this.facts(i, idx);
+            const pta = i.pta_status || productPta(p);
+            const customPrice = Number(i.sale_price) > 0;
+            const voided = i.status === 'voided';
+            return {
+              ...i, label: db.productLabel(i.product_id), sku: p.sku || '', brand_id: p.brand_id, brandName: db.brandName(p.brand_id), retail_price: p.retail_price || 0,
+              ref, sale, transfer, purchase, hist, pta, showPta: pta !== 'not_applicable', customPrice, price: customPrice ? Number(i.sale_price) : (Number(p.retail_price) || 0),
+              grade: i.grade || '', shownImei: voided ? (i.voided_imei || i.imei) : i.imei, shownImei2: voided ? (i.voided_imei2 || '') : (i.imei2 || ''),
+              voidable: this.voidCheck(i, hist),
+            };
+          });
+          this.allRows = all;
+          this.rows = all.filter((i) => this.inScope(i.branch_id));
+
+          // tiles (scoped)
+          const sellable = this.rows.filter((i) => this.isSellable(i.status));
+          const month = utils.today().slice(0, 7);
+          const soldMonth = db.all('sale_items').filter((si) => si.imei_id).filter((si) => { const s = salesById.get(Number(si.sale_id)); return s && s.status !== 'void' && this.inScope(s.branch_id) && String(s.sale_date).slice(0, 7) === month; }).length;
+          this.tiles = {
+            inStock: sellable.length, available: sellable.filter((i) => i.status === 'available').length, returned: sellable.filter((i) => i.status === 'returned').length,
+            value: utils.sum(sellable, 'cost_price'), inTransit: this.rows.filter((i) => i.status === 'in_transit').length, defective: this.rows.filter((i) => i.status === 'defective').length,
+            soldMonth, soldTotal: this.rows.filter((i) => i.status === 'sold').length, voided: this.rows.filter((i) => i.status === 'voided').length,
+          };
+          if (this.look.result) { const again = all.find((r) => r.id === this.look.result.id); this.look.result = again ? { ...again, matchedOn: this.look.result.matchedOn } : null; }
+        },
+        get hasFilters() { return !!(this.q || this.f.product || this.f.brand || this.f.status || this.f.grade || this.f.pta); },
+        clearFilters() { this.q = ''; this.f.product = ''; this.f.brand = ''; this.f.status = ''; this.f.grade = ''; this.f.pta = ''; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const f = this.f;
+          const list = this.rows.filter((r) => {
+            if (f.product && String(r.product_id) !== String(f.product)) return false;
+            if (f.brand && String(r.brand_id) !== String(f.brand)) return false;
+            // voided units (registered by mistake) stay out of sight unless asked for
+            if (f.status ? r.status !== f.status : r.status === 'voided') return false;
+            if (f.grade && (f.grade === 'none' ? !!r.grade : r.grade !== f.grade)) return false;
+            if (f.pta && r.pta !== f.pta) return false;
+            if (this.range && !this.range.contains(r.created_at)) return false;
+            if (q && ![r.shownImei, r.shownImei2, r.label, r.sku, r.brandName].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+          const { key, dir } = this.sort;
+          return utils.sortBy(list, (r) => (key === 'imei' ? String(r.shownImei).toLowerCase() : typeof r[key] === 'string' ? r[key].toLowerCase() : Number(r[key]) || 0), dir);
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: key === 'created_at' ? 'desc' : 'asc' }; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+        exportCsv() {
+          const cols = [
+            { label: 'IMEI / Serial', key: 'shownImei' }, { label: 'IMEI 2', key: 'shownImei2' }, { label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Brand', key: 'brandName' },
+            { label: 'Branch', value: (r) => db.branchCode(r.branch_id) }, { label: 'Status', value: (r) => ABM.ui.statusLabel(r.status) },
+            { label: 'Grade', key: 'grade' }, { label: 'Battery %', value: (r) => (r.battery_health == null ? '' : r.battery_health) }, { label: 'PTA', value: (r) => this.ptaLabel(r.pta) }, { label: 'Accessories', key: 'accessories' },
+            { label: 'Cost', key: 'cost_price' }, { label: 'Selling price', key: 'price' }, { label: 'Unit price set', value: (r) => (r.customPrice ? 'Yes' : 'No') },
+            { label: 'Registered', value: (r) => utils.date(r.created_at, 'iso') }, { label: 'Reference', value: (r) => (r.ref ? r.ref.label : '') }, { label: 'Notes', key: 'notes' },
+            { label: 'Void reason', key: 'void_reason' },
+          ];
+          const v = this.range.value;
+          if (!utils.download('imeis-' + (v.from || 'all') + '-to-' + (v.to || utils.today()) + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' units.');
+        },
+
+        /* ---------------------------------------------------------- lookup */
+        onLookupInput() { const v = this.look.q.trim(); if (v.length === 15 && /^\d{15}$/.test(v)) this.lookup(); else if (!v) { this.look.result = null; this.look.notFound = ''; } },
+        lookup() {
+          const v = this.look.q.trim().replace(/\s+/g, '');
+          this.look.result = null; this.look.notFound = '';
+          if (!v) return;
+          // lookup searches the whole registry (any branch) so staff can locate a unit; actions stay branch-scoped.
+          // A live unit wins over an earlier record of the same number that was voided.
+          const u = v.toUpperCase();
+          const eq = (x) => String(x || '').toUpperCase() === u;
+          const hit = this.allRows.find((r) => eq(r.imei)) || this.allRows.find((r) => eq(r.imei2)) || this.allRows.find((r) => r.status === 'voided' && (eq(r.shownImei) || eq(r.shownImei2)));
+          if (!hit) { this.look.notFound = v; return; }
+          if (!this.canAct(hit)) ui.warn('This unit is held by ' + db.branchName(hit.branch_id) + ' — view only.');
+          this.look.result = { ...hit, matchedOn: eq(hit.imei) || eq(hit.shownImei) ? 'imei' : 'imei2' };
+        },
+        canAct(row) { return !!row && this.canEdit && (isSuperAdmin || Number(row.branch_id) === Number(myBranch)); },
+        canVoidRow(row) { return !!row && this.canVoid && row.status === 'available' && (isSuperAdmin || Number(row.branch_id) === Number(myBranch)); },
+        clearLookup() { this.look = { q: '', result: null, notFound: '' }; this.$nextTick(() => this.$refs.lookupInput && this.$refs.lookupInput.focus()); },
+
+        /* -------------------------------------------------------- register */
+        openRegister(prefill) {
+          if (!this.canRegister) { ui.error('Your role is not allowed to register units.'); return; }
+          this.reg = { open: true, busy: false, product_id: this.f.product || '', branch_id: String(isSuperAdmin ? (this.f.branch !== 'all' ? this.f.branch : myBranch) : myBranch), unit_cost: '', scan: '', text: prefill ? String(prefill) : '', errors: {}, pair: false, waiting: false, showDetails: false, grade: '', battery_health: '', pta_status: 'unknown', accessories: '' };
+          this.onRegProductChange();
+          this.$nextTick(() => { const el = this.reg.product_id ? this.$refs.regScan : this.$refs.regProduct; if (el) el.focus(); });
+        },
+        onRegProductChange() {
+          const p = db.find('products', this.reg.product_id);
+          if (p) { this.reg.unit_cost = p.cost_price; this.reg.pta_status = productPta(p); if (p.condition && p.condition !== 'new') this.reg.showDetails = true; }
+          if (this.regSerialType !== 'imei') { this.reg.pair = false; this.reg.waiting = false; }
+        },
+        /** Validation follows the SELECTED product: IMEI products need 15 digits, serial products 4–40 alphanumerics. */
+        get regProduct() { return this.reg.product_id ? db.find('products', this.reg.product_id) : null; },
+        get regSerialType() { return this.regProduct ? db.serialType(this.regProduct) : 'imei'; },
+        get regSerialLabel() { return this.regProduct ? db.serialLabel(this.regProduct) : 'IMEI'; },
+        get regPlaceholder() {
+          if (this.regSerialType === 'imei') return '351234567890123\n861234567890124, 861234567890132';
+          const pre = (this.regProduct && this.regProduct.serial_prefix) || 'DL5420';
+          return pre + 'ABC1234\n' + pre + 'ABC1235';
+        },
+        /** "IMEI 1, IMEI 2" (comma, semicolon, tab or |), or two 15-digit numbers separated by a space. */
+        splitLine(raw, type) {
+          const parts = String(raw).split(/[,;|\t]+/).map((s) => s.trim()).filter(Boolean);
+          if (type === 'imei' && parts.length === 1) {
+            const sp = parts[0].split(/\s+/);
+            if (sp.length === 2 && /^\d{15}$/.test(sp[0]) && /^\d{15}$/.test(sp[1])) return sp;
+            const d = parts[0].replace(/\s+/g, '');
+            if (/^\d{30}$/.test(d)) return [d.slice(0, 15), d.slice(15)];
+          }
+          return parts;
+        },
+        /** Every identifier on the books (IMEI and IMEI 2 of every unit), upper-cased — optionally leaving one unit out. */
+        knownIds(exceptId) {
+          const s = new Map();
+          db.all('product_imeis').forEach((i) => { if (String(i.id) === String(exceptId)) return; [i.imei, i.imei2].forEach((v) => { if (v) s.set(String(v).toUpperCase(), i); }); });
+          return s;
+        },
+        imeiFormatError(v) {
+          if (!/^\d{15}$/.test(v)) return 'Not 15 digits';
+          if (this.luhnOn && !utils.luhnValid(v)) return 'Luhn check failed';
+          return '';
+        },
+        get parsed() {
+          const product = this.regProduct;
+          const type = this.regSerialType;
+          const known = this.knownIds(null);
+          const lines = String(this.reg.text || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+          const seen = new Set();
+          const out = lines.map((raw) => {
+            const parts = this.splitLine(raw, type);
+            const imei = stock.normalizeSerial(parts[0] || '', type);
+            const imei2 = parts[1] ? stock.normalizeSerial(parts[1], 'imei') : '';
+            let error = '';
+            try { stock.validateSerial(imei, product); } catch (e) {
+              const m = e.message || '';
+              error = /15 digits/.test(m) ? 'Not 15 digits' : /Luhn/i.test(m) ? 'Luhn check failed' : /already registered/i.test(m) ? 'Already registered' : /4.40 letters/.test(m) ? 'Bad format (4–40 letters / digits)' : m;
+            }
+            if (!error && known.has(imei.toUpperCase())) error = 'Already registered (as IMEI 2)';
+            if (!error && seen.has(imei.toUpperCase())) error = 'Duplicate in list';
+            if (!error && parts.length > 2) error = 'At most two IMEIs per line';
+            if (!error && imei2) {
+              if (type !== 'imei') error = 'One serial number per line';
+              else {
+                const f2 = this.imeiFormatError(imei2);
+                if (f2) error = 'IMEI 2: ' + f2.toLowerCase();
+                else if (imei2 === imei) error = 'IMEI 2 repeats IMEI 1';
+                else if (known.has(imei2.toUpperCase())) error = 'IMEI 2 already registered';
+                else if (seen.has(imei2.toUpperCase())) error = 'IMEI 2 duplicate in list';
+              }
+            }
+            seen.add(imei.toUpperCase()); if (imei2) seen.add(imei2.toUpperCase());
+            return { imei, imei2, error };
+          });
+          return { lines: out, valid: out.filter((l) => !l.error).length, invalid: out.filter((l) => l.error).length };
+        },
+        appendScan() {
+          const v = String(this.reg.scan || '').trim();
+          if (!v) return;
+          const pairing = this.reg.pair && this.regSerialType === 'imei';
+          if (pairing && this.reg.waiting && this.reg.text.trim()) { this.reg.text = this.reg.text.replace(/\s+$/, '') + ', ' + v; this.reg.waiting = false; }
+          else { this.reg.text = (this.reg.text ? this.reg.text.replace(/\s+$/, '') + '\n' : '') + v; this.reg.waiting = pairing; }
+          this.reg.scan = '';
+          const last = this.parsed.lines[this.parsed.lines.length - 1];
+          if (last && last.error) ui.warn(v + ': ' + last.error);
+        },
+        removeInvalid() { this.reg.text = this.parsed.lines.filter((l) => !l.error).map((l) => l.imei + (l.imei2 ? ', ' + l.imei2 : '')).join('\n'); this.reg.waiting = false; },
+        register() {
+          const e = {};
+          if (!this.reg.product_id) e.product_id = 'Select a product.';
+          if (!this.reg.branch_id) e.branch_id = 'Select a branch.';
+          const cost = Number(this.reg.unit_cost); if (this.reg.unit_cost === '' || isNaN(cost) || cost < 0) e.unit_cost = 'Enter a unit cost of 0 or more.';
+          const bat = String(this.reg.battery_health ?? '').trim();
+          if (bat !== '' && !(/^\d{1,3}$/.test(bat) && Number(bat) <= 100)) e.battery_health = 'Battery health is a whole number from 0 to 100.';
+          const parsed = this.parsed;
+          if (!parsed.lines.length) e.text = 'Add at least one ' + this.regSerialLabel + '.';
+          else if (parsed.invalid) e.text = 'Fix or remove the invalid lines before registering.';
+          this.reg.errors = e;
+          if (Object.keys(e).length) { ui.error(Object.values(e)[0]); return; }
+          this.reg.busy = true;
+          try {
+            const p = db.find('products', this.reg.product_id);
+            const branchId = Number(this.reg.branch_id);
+            const extra = { source: 'opening' };
+            if (this.reg.grade) extra.grade = this.reg.grade;
+            if (bat !== '') extra.battery_health = Number(bat);
+            if (this.reg.pta_status) extra.pta_status = this.reg.pta_status;
+            if (String(this.reg.accessories || '').trim()) extra.accessories = String(this.reg.accessories).trim();
+            // one call per line so each unit keeps its own IMEI 2
+            const inserted = parsed.lines.reduce((acc, l) => acc.concat(stock.addImeis(branchId, p.id, [l.imei], cost, 'opening', { type: 'opening' }, { ...extra, imei2: l.imei2 || null })), []);
+            const pairs = parsed.lines.filter((l) => l.imei2).length;
+            db.audit('imei.register', 'product', p.id, `${inserted.length} ${db.serialLabel(p)}${inserted.length > 1 ? 's' : ''} registered for ${p.sku} at ${db.branchCode(branchId)} (opening stock @ ${utils.money(cost)})${pairs ? ', ' + pairs + ' with IMEI 2' : ''}${extra.grade ? ', grade ' + extra.grade : ''}`, branchId);
+            ui.success(`${inserted.length} unit${inserted.length > 1 ? 's' : ''} registered.`);
+            this.reg.open = false;
+            this.f.product = String(p.id); this.f.status = ''; this.f.grade = ''; this.f.pta = ''; this.q = '';
+            if (isSuperAdmin && this.f.branch !== 'all' && this.f.branch !== String(branchId)) this.f.branch = String(branchId);
+            if (!this.range.contains(utils.now())) this.range.set('all');
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not register IMEIs.'); this.refresh(); } finally { this.reg.busy = false; }
+        },
+
+        /* ------------------------------------------------------ edit a unit */
+        openEdit(row) {
+          if (!this.canAct(row)) { ui.error('Your role is not allowed to change this unit.'); return; }
+          const unit = db.find('product_imeis', row.id);
+          if (!unit || unit.status === 'voided') { ui.error('A voided unit cannot be edited.'); return; }
+          const p = db.find('products', unit.product_id) || {};
+          const idx = this.buildIndex();
+          const h = this.facts(unit, idx);
+          const fresh = this.allRows.find((r) => r.id === row.id) || row;
+          this.ed = {
+            open: true, busy: false, row: fresh, serialType: db.serialType(p), serialLabel: db.serialLabel(p),
+            locks: { id: this.idLock(unit, h), cost: this.costLock(unit, h) },
+            form: {
+              imei: unit.imei, imei2: unit.imei2 || '', cost_price: unit.cost_price, sale_price: Number(unit.sale_price) > 0 ? unit.sale_price : '',
+              grade: unit.grade || '', battery_health: unit.battery_health == null ? '' : unit.battery_health, pta_status: unit.pta_status || productPta(p),
+              accessories: unit.accessories || '', notes: unit.notes || '',
+            },
+            errors: {},
+          };
+          this.$nextTick(() => this.$refs.edImei && !this.ed.locks.id && this.$refs.edImei.focus());
+        },
+        get costHelp() {
+          const r = this.ed.row; if (!r) return '';
+          const now = Number(this.ed.form.cost_price), was = Number(r.cost_price);
+          if (this.ed.form.cost_price === '' || isNaN(now) || utils.round2(now) === utils.round2(was)) return 'Changing it re-values this unit in ' + db.branchName(r.branch_id) + ' stock.';
+          const d = utils.round2(now - was);
+          return 'Stock value at ' + db.branchCode(r.branch_id) + ' goes ' + (d > 0 ? 'up' : 'down') + ' by ' + utils.money(Math.abs(d), { decimals: 0 }) + ' (recorded as a recount correction).';
+        },
+        get priceHelp() {
+          const r = this.ed.row; if (!r) return '';
+          const v = Number(this.ed.form.sale_price);
+          if (this.ed.form.sale_price !== '' && v > 0 && v < Number(this.ed.form.cost_price || r.cost_price)) return 'Below this unit\'s cost — it would sell at a loss.';
+          return 'Leave empty to sell at the product price (' + utils.money(r.retail_price, { decimals: 0 }) + ').';
+        },
+        /** Same rules as registering, but the unit being corrected does not clash with itself. */
+        serialError(v, product, selfId) {
+          const type = db.serialType(product);
+          if (type === 'serial') { if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{3,39}$/.test(v)) return 'A serial number is 4–40 letters, digits or - _ . /'; }
+          else { const f = this.imeiFormatError(v); if (f) return f === 'Not 15 digits' ? 'An IMEI has exactly 15 digits.' : 'This IMEI fails the Luhn check digit.'; }
+          const clash = this.knownIds(selfId).get(v.toUpperCase());
+          if (clash) return v + ' is already registered (' + db.productLabel(clash.product_id) + ' at ' + db.branchCode(clash.branch_id) + ').';
+          return '';
+        },
+        saveEdit() {
+          const ed = this.ed; const f = ed.form;
+          const unit = ed.row ? db.find('product_imeis', ed.row.id) : null;
+          if (!unit || unit.status === 'voided') { ui.error('This unit can no longer be edited.'); ed.open = false; this.refresh(); return; }
+          const product = db.find('products', unit.product_id) || {};
+          const type = db.serialType(product);
+          const label = db.serialLabel(product);
+          const e = {}, patch = {}, changes = [];
+          const show = (v) => (v === '' || v == null ? '—' : String(v));
+          let costChange = null;
+
+          // identifier
+          const newImei = stock.normalizeSerial(f.imei, type);
+          const imeiChanged = newImei.toUpperCase() !== String(unit.imei).toUpperCase();
+          if (!newImei) e.imei = 'Enter the ' + label + '.';
+          else if (imeiChanged) {
+            if (ed.locks.id) e.imei = 'Cannot change: ' + ed.locks.id;
+            else { const err = this.serialError(newImei, product, unit.id); if (err) e.imei = err; else { patch.imei = newImei; changes.push(label + ' ' + unit.imei + ' → ' + newImei); } }
+          }
+          // second IMEI (dual-SIM) — a missing one may always be filled in
+          const new2 = type === 'imei' ? String(f.imei2 || '').replace(/\s+/g, '') : String(unit.imei2 || '');
+          const old2 = String(unit.imei2 || '');
+          if (new2.toUpperCase() !== old2.toUpperCase()) {
+            if (ed.locks.id && old2) e.imei2 = 'Cannot change: ' + ed.locks.id;
+            else if (new2) {
+              const fmt = this.imeiFormatError(new2);
+              const clash = this.knownIds(unit.id).get(new2.toUpperCase());
+              if (fmt) e.imei2 = fmt === 'Not 15 digits' ? 'IMEI 2 has exactly 15 digits.' : 'IMEI 2 fails the Luhn check digit.';
+              else if (new2.toUpperCase() === (patch.imei || unit.imei).toUpperCase()) e.imei2 = 'IMEI 2 must differ from IMEI 1.';
+              else if (clash) e.imei2 = new2 + ' is already registered (' + db.productLabel(clash.product_id) + ' at ' + db.branchCode(clash.branch_id) + ').';
+              else { patch.imei2 = new2; changes.push('IMEI 2 ' + show(old2) + ' → ' + new2); }
+            } else { patch.imei2 = null; changes.push('IMEI 2 ' + old2 + ' removed'); }
+          }
+          // cost — only while the unit has never left stock
+          const cost = Number(f.cost_price);
+          if (f.cost_price === '' || f.cost_price == null || isNaN(cost) || cost < 0) e.cost_price = 'Enter a cost of 0 or more.';
+          else if (utils.round2(cost) !== utils.round2(unit.cost_price)) {
+            const diff = Math.abs(utils.round2(cost) - utils.round2(unit.cost_price));
+            if (ed.locks.cost) e.cost_price = 'Cannot change: ' + ed.locks.cost;
+            else if (this.approvalLimit > 0 && diff > this.approvalLimit && !session.can('inventory.approve')) e.cost_price = 'A change of more than ' + utils.money(this.approvalLimit, { decimals: 0 }) + ' needs someone who can approve large adjustments.';
+            else { costChange = { from: utils.round2(unit.cost_price), to: utils.round2(cost) }; changes.push('cost ' + utils.money(costChange.from) + ' → ' + utils.money(costChange.to)); }
+          }
+          // unit selling price
+          const priceRaw = String(f.sale_price ?? '').trim();
+          const price = priceRaw === '' ? null : Number(priceRaw);
+          if (price !== null && !(price > 0)) e.sale_price = 'Enter a price above zero, or leave it empty.';
+          else if ((Number(unit.sale_price) || null) !== (price === null ? null : utils.round2(price))) { patch.sale_price = price === null ? null : utils.round2(price); changes.push('price ' + show(unit.sale_price ? utils.money(unit.sale_price, { decimals: 0 }) : '') + ' → ' + (price === null ? 'product price' : utils.money(price, { decimals: 0 }))); }
+          // battery
+          const batRaw = String(f.battery_health ?? '').trim();
+          if (batRaw !== '' && !(/^\d{1,3}$/.test(batRaw) && Number(batRaw) <= 100)) e.battery_health = 'A whole number from 0 to 100.';
+          else { const b = batRaw === '' ? null : Number(batRaw); if ((unit.battery_health == null || unit.battery_health === '' ? null : Number(unit.battery_health)) !== b) { patch.battery_health = b; changes.push('battery ' + show(unit.battery_health) + ' → ' + show(b) + (b == null ? '' : '%')); } }
+          // grade, PTA, accessories, notes
+          const grade = GRADES.some((g) => g.key === f.grade) ? f.grade : '';
+          if ((unit.grade || '') !== grade) { patch.grade = grade || null; changes.push('grade ' + show(unit.grade) + ' → ' + show(grade)); }
+          const pta = PTA.some((o) => o.key === f.pta_status) ? f.pta_status : productPta(product);
+          if ((unit.pta_status || productPta(product)) !== pta) { patch.pta_status = pta; changes.push('PTA ' + this.ptaLabel(unit.pta_status || productPta(product)) + ' → ' + this.ptaLabel(pta)); }
+          const acc = String(f.accessories || '').trim().slice(0, 200);
+          if ((unit.accessories || '') !== acc) { patch.accessories = acc || null; changes.push('accessories updated'); }
+          const notes = String(f.notes || '').trim().slice(0, 500);
+          if ((unit.notes || '') !== notes) { patch.notes = notes; changes.push('notes updated'); }
+
+          ed.errors = e;
+          if (Object.keys(e).length) { ui.error(Object.values(e)[0]); return; }
+          if (!changes.length) { ui.warn('Nothing was changed.'); ed.open = false; return; }
+          ed.busy = true;
+          try {
+            if (costChange) {
+              // take the unit off at its old cost and put it back at the new one, so the branch's average cost follows
+              const note = `Cost corrected: ${utils.money(costChange.from)} → ${utils.money(costChange.to)} (${label} ${unit.imei})`;
+              const ref = { type: SELF_REF, id: unit.id, reasonCode: 'recount' };
+              stock.remove(unit.branch_id, unit.product_id, 1, 'adjustment', ref, { imeiId: unit.id, unitCost: costChange.from, notes: note });
+              stock.add(unit.branch_id, unit.product_id, 1, costChange.to, 'adjustment', ref, unit.id, note);
+              patch.cost_price = costChange.to;
+            }
+            if (patch.imei && unit.purchase_item_id) {
+              // the goods-received note lists its units by number — keep it pointing at this unit
+              const pi = db.find('purchase_items', unit.purchase_item_id);
+              if (pi && Array.isArray(pi.imeis)) db.update('purchase_items', pi.id, { imeis: pi.imeis.map((x) => (String(x).toUpperCase() === String(unit.imei).toUpperCase() ? patch.imei : x)) });
+            }
+            const before = unit.imei;
+            db.update('product_imeis', unit.id, patch);
+            db.audit('imei.edit', 'product_imei', unit.id, `${label} ${before} corrected: ${changes.join('; ')}`, unit.branch_id);
+            ui.success('Unit updated.');
+            ed.open = false;
+            if (this.look.result && this.look.result.id === unit.id && patch.imei) this.look.q = patch.imei;
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not update the unit.'); this.refresh(); } finally { ed.busy = false; }
+        },
+
+        /* ------------------------------------------- void a mistaken unit */
+        openVoid(row) {
+          if (!this.canVoidRow(row)) { ui.error('Your role is not allowed to void units.'); return; }
+          this.refresh();
+          const fresh = this.allRows.find((r) => r.id === row.id) || row;
+          this.vd = { open: true, busy: false, row: fresh, reason: '', error: '', check: fresh.voidable || { ok: false, reason: '' } };
+          this.$nextTick(() => this.$refs.vdReason && this.$refs.vdReason.focus());
+        },
+        saveVoid() {
+          const vd = this.vd;
+          const unit = vd.row ? db.find('product_imeis', vd.row.id) : null;
+          if (!unit) { vd.open = false; this.refresh(); return; }
+          const check = this.voidCheck(unit, this.facts(unit, this.buildIndex()));
+          vd.check = check;
+          if (!check.ok) { ui.error('This unit cannot be voided: ' + check.reason); return; }
+          const reason = String(vd.reason || '').trim();
+          if (!reason) { vd.error = 'Please say why it was registered by mistake.'; return; }
+          vd.error = ''; vd.busy = true;
+          try {
+            const label = db.serialLabel(unit.product_id);
+            stock.remove(unit.branch_id, unit.product_id, 1, 'adjustment', { type: SELF_REF, id: unit.id, reasonCode: 'recount' }, { imeiId: unit.id, unitCost: unit.cost_price, notes: 'Voided: registered by mistake' });
+            // the row stays for the trail; its number moves to voided_imei so the right unit can be registered with it
+            db.update('product_imeis', unit.id, {
+              status: 'voided', imei: 'VOID-' + unit.id + '-' + unit.imei, imei2: null, voided_imei: unit.imei, voided_imei2: unit.imei2 || null,
+              voided_at: utils.now(), voided_by: (session.user() || {}).id || null, void_reason: reason,
+            });
+            db.audit('imei.void', 'product_imei', unit.id, `${label} ${unit.imei} voided (registered by mistake): ${reason} — ${utils.money(unit.cost_price)} off ${db.branchCode(unit.branch_id)} stock`, unit.branch_id);
+            ui.success('Unit voided and taken off stock.');
+            vd.open = false;
+            if (this.look.result && this.look.result.id === unit.id) this.look.result = null;
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not void the unit.'); this.refresh(); } finally { vd.busy = false; }
+        },
+
+        /* ---------------------------------------------------------- status */
+        openStatus(row, action) {
+          if (!this.canEdit) { ui.error('Your role is not allowed to change units.'); return; }
+          this.st = { open: true, busy: false, action, row, notes: (action === 'restore' || action === 'found') ? '' : (row.notes || ''), error: '' };
+          this.$nextTick(() => this.$refs.stNotes && this.$refs.stNotes.focus());
+        },
+        saveStatus() {
+          const notes = String(this.st.notes || '').trim();
+          if (this.st.action === 'defective' && !notes) { this.st.error = 'Please give a reason.'; return; }
+          this.st.error = ''; this.st.busy = true;
+          try {
+            const r = this.st.row;
+            const lbl = db.serialLabel(r.product_id);
+            if (this.st.action === 'defective') { stock.markDefective(r.id, notes); db.audit('imei.status', 'product_imei', r.id, `${lbl} ${r.imei} marked defective: ${notes}`, r.branch_id); ui.success('Unit marked defective and removed from stock.'); }
+            else if (this.st.action === 'found') { stock.markFound(r.id, {}, notes || 'Found after a stock take'); db.audit('imei.status', 'product_imei', r.id, `${lbl} ${r.imei} found and returned to stock${notes ? ': ' + notes : ''}`, r.branch_id); ui.success('Unit is back in stock.'); }
+            else { stock.restoreImei(r.id, notes || 'Restored to stock'); db.audit('imei.status', 'product_imei', r.id, `${lbl} ${r.imei} restored to available${notes ? ': ' + notes : ''}`, r.branch_id); ui.success('Unit restored to available stock.'); }
+            this.st.open = false;
+            this.refresh();
+          } catch (err) { ui.error(err.message || 'Could not update the unit.'); } finally { this.st.busy = false; }
+        },
+        closeModals() { this.reg.open = false; this.st.open = false; this.ed.open = false; this.vd.open = false; },
+      };
+    }
+  </script>
+</body>
+</html>

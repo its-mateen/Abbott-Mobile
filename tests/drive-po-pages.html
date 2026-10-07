@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: purchase-order pages</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the real Alpine components of purchase-orders.html, purchase-order-create.html,
+    // purchase-order-view.html and purchase-create.html — the same code the browser runs.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async (o) => { log('CONFIRM: ' + (o && o.title)); return true; };
+      ui.toast = () => {};
+
+      /* ---------------- helpers ---------------- */
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+      let seq = 0;
+      const luhn = (d14) => { let s = 0; for (let i = 0; i < 14; i++) { let d = +d14[i]; if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; } s += d; } return String((10 - (s % 10)) % 10); };
+      const unit = (product) => { seq++; if (db.serialType(product) === 'serial') return 'DRV' + String(seq).padStart(5, '0'); const base = '35' + String(800000000000 + seq).slice(0, 12); return base + luhn(base); };
+      const fillSerials = (page) => page.lines.filter((l) => l.serialized).forEach((l) => {
+        const p = db.find('products', l.product_id);
+        const want = Number(l.expected) || 0;
+        l.unitsText = Array.from({ length: want }, () => unit(p)).join('\n');
+        page.revalidate();
+      });
+
+      await source('purchase-orders.html', 'purchaseOrdersPage');
+      await source('purchase-order-create.html', 'purchaseOrderCreatePage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+      await source('purchase-create.html', 'purchaseCreatePage');
+
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(mgr);
+      const BID = session.branchId();
+      log('=== session: ' + mgr.name + ' branch=' + BID);
+
+      /* ========================= 1. list page ========================= */
+      log('=== TEST 1: purchase-orders.html');
+      let list = mk(purchaseOrdersPage, '?range=all');
+      const mine = db.all('purchase_orders').filter((p) => p.branch_id == BID);
+      eq(list.rows.length, mine.length, 'T1: a manager sees only their own branch orders');
+      ok(list.rows.every((r) => r.branchCode === db.branchCode(BID)), 'T1: every row belongs to the branch');
+      ok(list.k.drafts >= 1, 'T1: the drafts tile counts drafts (' + list.k.drafts + ')');
+      ok(list.k.overdue >= 1, 'T1: the overdue tile counts late orders (' + list.k.overdue + ')');
+      ok(list.k.pendingValue > 0 && list.k.pendingUnits > 0, 'T1: awaiting-delivery tile has value and units');
+      const openRow = list.rows.find((r) => r.isOpen);
+      eq(openRow.pct, Math.round(openRow.received / openRow.ordered * 100), 'T1: progress % = received / ordered');
+      eq(list.statusLabel('partial'), 'Partially Received', 'T1: partial reads as Partially Received');
+
+      list.f.status = 'open';
+      ok(list.filtered.every((r) => r.status === 'ordered' || r.status === 'partial'), 'T1: the open filter keeps only live orders');
+      list.f.status = 'draft';
+      ok(list.filtered.every((r) => r.status === 'draft'), 'T1: the draft filter keeps only drafts');
+      list.f.status = ''; list.f.overdue = true;
+      ok(list.filtered.length && list.filtered.every((r) => r.overdue), 'T1: the overdue filter keeps only late orders');
+      list.clearFilters();
+      eq(list.hasFilters, false, 'T1: clear filters resets everything');
+      const cancelledRow = list.rows.find((r) => r.status === 'cancelled');
+      eq(cancelledRow.pendingValue, 0, 'T1: a cancelled order has no outstanding value');
+      ok(!list.filteredTotals.total || list.filteredTotals.total > 0, 'T1: footer totals computed');
+
+      /* ========================= 2. create a draft ========================= */
+      log('=== TEST 2: purchase-order-create.html (new draft)');
+      let cre = mk(purchaseOrderCreatePage, '');
+      eq(cre.editing, null, 'T2: a fresh page is not editing');
+      ok(!!cre.form.expected_date && cre.form.expected_date > cre.form.order_date, 'T2: expected delivery defaults a week out');
+      ok(!cre.validate(), 'T2: an empty order does not validate');
+      ok(!!cre.errors.supplier && !!cre.errors.lines, 'T2: supplier and lines are both flagged');
+
+      const supplier = db.all('suppliers').find((s) => s.is_active);
+      cre.selectSupplier(supplier);
+      const serialProd = cre.products.find((p) => p.serialized);
+      const bulkProd = cre.products.find((p) => !p.serialized);
+      cre.addLine(serialProd.id);
+      cre.addLine(bulkProd.id);
+      cre.addLine(bulkProd.id);                               // same product twice = +1 qty
+      eq(cre.lines.length, 2, 'T2: adding the same product again bumps the line instead of duplicating it');
+      eq(cre.lines[1].qty, 2, 'T2: quantity increased to 2');
+      cre.lines[0].qty = 4; cre.lines[0].unit_cost = serialProd.cost_price; cre.recalc();
+      near(cre.totals.subtotal, utils.round2(4 * serialProd.cost_price + 2 * bulkProd.cost_price), 'T2: subtotal = sum of the lines');
+      cre.form.discount = 100; cre.form.tax = 50;
+      near(cre.totals.total, utils.round2(cre.totals.subtotal - 100 + 50), 'T2: total = subtotal - discount + tax');
+      cre.form.discount = 10 ** 9;
+      ok(!cre.validate() && !!cre.errors.discount, 'T2: a discount over the subtotal is refused');
+      cre.form.discount = 100;
+      cre.lines[1].qty = 0;
+      ok(!cre.validate() && !!cre.lines[1].error, 'T2: a zero quantity line is refused');
+      cre.lines[1].qty = 2;
+
+      const beforeCount = db.all('purchase_orders').length;
+      noNav(() => cre.save(false));
+      const draft = db.all('purchase_orders').slice(-1)[0];
+      eq(db.all('purchase_orders').length, beforeCount + 1, 'T2: one order was created');
+      eq(draft.status, 'draft', 'T2: saved as a draft');
+      eq(draft.ordered_at, null, 'T2: a draft was never sent');
+      ok(/^PO-[A-Z0-9]+-\d{6}$/.test(draft.po_no), 'T2: numbered ' + draft.po_no);
+      eq(draft.branch_id, BID, 'T2: raised for the manager branch');
+      eq(db.where('purchase_order_items', { po_id: draft.id }).length, 2, 'T2: both lines stored');
+      ok(db.where('purchase_order_items', { po_id: draft.id }).every((i) => i.received_quantity === 0), 'T2: nothing received yet');
+      near(draft.total, utils.round2(draft.subtotal - draft.discount_amount + draft.tax_amount), 'T2: stored total is consistent');
+      eq(db.all('purchases').some((p) => String(p.purchase_order_id) === String(draft.id)), false, 'T2: no goods received note yet');
+      eq(db.all('supplier_transactions').some((t) => t.reference_type === 'purchase_order'), false, 'T2: nothing posted to the supplier ledger');
+
+      /* ========================= 3. low-stock suggestions ========================= */
+      log('=== TEST 3: suggest low stock');
+      const sug = mk(purchaseOrderCreatePage, '');
+      sug.suggest.supplierOnly = false;
+      sug.buildSuggestions();
+      ok(sug.suggest.rows.every((s) => s.qty <= s.min_stock), 'T3: only products at or below their minimum are suggested');
+      ok(sug.suggest.rows.every((s) => s.suggested >= 1), 'T3: every suggestion orders at least one unit');
+      if (sug.suggestions.length) {
+        const first = sug.suggestions[0];
+        sug.suggest.picked = {}; sug.suggestions.forEach((s) => { sug.suggest.picked[s.id] = false; });
+        sug.suggest.picked[first.id] = true;
+        eq(sug.pickedSuggestions.length, 1, 'T3: only ticked rows are added');
+        sug.addSuggested();
+        eq(sug.lines.length, 1, 'T3: the ticked product became a line');
+        eq(sug.lines[0].product_id, first.id, 'T3: the right product');
+        eq(sug.lines[0].qty, Math.max(1, Math.round(Number(first.suggested))), 'T3: the suggested quantity carried over');
+      } else { log('NOTE: nothing below minimum at this branch, suggestion add skipped'); }
+
+      /* ========================= 4. edit the draft, then send it ========================= */
+      log('=== TEST 4: edit a draft and send it');
+      let edit = mk(purchaseOrderCreatePage, '?id=' + draft.id);
+      eq(edit.blocked, null, 'T4: a draft opens for editing');
+      eq(edit.editing, draft.id, 'T4: editing the right order');
+      eq(edit.lines.length, 2, 'T4: its lines were loaded');
+      eq(edit.form.supplier_id, String(draft.supplier_id), 'T4: supplier prefilled');
+      eq(edit.canSaveDraft, true, 'T4: a draft can still be saved as a draft');
+      edit.lines[0].qty = 6; edit.recalc();
+      const itemsBefore = db.all('purchase_order_items').length;
+      noNav(() => edit.save(true));
+      const sent = db.find('purchase_orders', draft.id);
+      eq(sent.status, 'ordered', 'T4: saving with send marks it ordered');
+      ok(!!sent.ordered_at, 'T4: the sent timestamp is stamped');
+      eq(sent.po_no, draft.po_no, 'T4: the order number never changes');
+      eq(db.where('purchase_order_items', { po_id: sent.id }).length, 2, 'T4: still two lines (old rows replaced, not duplicated)');
+      eq(db.all('purchase_order_items').length, itemsBefore, 'T4: no orphan line rows left behind');
+      eq(db.where('purchase_order_items', { po_id: sent.id })[0].quantity, 6, 'T4: the edited quantity was saved');
+
+      /* ========================= 5. view page ========================= */
+      log('=== TEST 5: purchase-order-view.html');
+      let view = mk(purchaseOrderViewPage, '?id=' + sent.id);
+      ok(!!view.po, 'T5: the order loaded');
+      eq(view.isOpen, true, 'T5: an ordered PO is open for delivery');
+      eq(view.canEdit, true, 'T5: nothing received yet, so it can still be edited');
+      eq(view.received, 0, 'T5: nothing received');
+      eq(view.ordered, 8, 'T5: 6 + 2 units ordered');
+      eq(view.pendingUnits, 8, 'T5: everything is outstanding');
+      // outstanding is line cost scaled to the order total, so the order discount/tax is reflected
+      const lineOut = view.items.reduce((a, i) => a + i.pending * i.unit_cost, 0);
+      near(view.pendingValue, utils.round2(lineOut * (sent.total / sent.subtotal)), 'T5: outstanding value carries the order discount and tax');
+      ok(view.pendingValue <= sent.total + 0.01, 'T5: and can never exceed the order value');
+      eq(view.steps.length, 4, 'T5: the pipeline has four steps');
+      eq(view.steps[1].state, 'done', 'T5: "sent to supplier" is done');
+      eq(view.receipts.length, 0, 'T5: no deliveries yet');
+      eq(view.overdue, false, 'T5: not overdue while the expected date is ahead');
+
+      /* ========================= 6. receive a part delivery ========================= */
+      log('=== TEST 6: purchase-create.html?po= (part delivery)');
+      let rec = mk(purchaseCreatePage, '?po=' + sent.id);
+      ok(!!rec.po, 'T6: the receiving page picked up the order');
+      eq(String(rec.form.supplier_id), String(sent.supplier_id), 'T6: supplier locked to the order');
+      eq(String(rec.form.branch_id), String(sent.branch_id), 'T6: branch locked to the order');
+      eq(rec.lines.length, 2, 'T6: a line per outstanding order line');
+      eq(rec.lines[0].poRemaining, 6, 'T6: pre-filled with the balance still on order');
+      near(rec.lines[0].unit_cost, db.where('purchase_order_items', { po_id: sent.id })[0].unit_cost, 'T6: at the agreed order cost');
+      eq(rec.poRemainingUnits, 8, 'T6: the banner counts every outstanding unit');
+
+      // short delivery: 2 of the 6 serialized units, all of the accessory
+      rec.lines[0].expected = 2;
+      fillSerials(rec);
+      const bulkLine = rec.lines[1];
+      const bulkBefore = stock.qty(BID, bulkLine.product_id);
+      const serialBefore = stock.qty(BID, rec.lines[0].product_id);
+      const supplierBalBefore = db.find('suppliers', sent.supplier_id).balance;
+      rec.form.pay_amount = 0;
+      noNav(() => rec.save());
+      const grn = db.all('purchases').slice(-1)[0];
+      eq(String(grn.purchase_order_id), String(sent.id), 'T6: the receipt is linked to the order');
+      eq(stock.qty(BID, rec.lines[0].product_id), serialBefore + 2, 'T6: two serialized units in stock');
+      eq(stock.qty(BID, bulkLine.product_id), bulkBefore + Number(bulkLine.qty), 'T6: the accessory quantity arrived');
+      const afterItems = db.where('purchase_order_items', { po_id: sent.id });
+      eq(afterItems[0].received_quantity, 2, 'T6: the order line records 2 of 6 received');
+      eq(afterItems[1].received_quantity, 2, 'T6: the accessory line is complete');
+      eq(db.find('purchase_orders', sent.id).status, 'partial', 'T6: the order is partially received');
+      eq(db.find('purchase_orders', sent.id).closed_at, null, 'T6: not closed while units are outstanding');
+      near(db.find('suppliers', sent.supplier_id).balance, utils.round2(supplierBalBefore + grn.total), 'T6: only the delivered value is owed');
+
+      /* ========================= 7. the order can no longer be edited ========================= */
+      log('=== TEST 7: a part-delivered order locks its lines');
+      const blocked = mk(purchaseOrderCreatePage, '?id=' + sent.id);
+      ok(!!blocked.blocked, 'T7: editing a part-delivered order is blocked');
+      eq(blocked.blocked.id, sent.id, 'T7: the block offers a link back to the order');
+      view = mk(purchaseOrderViewPage, '?id=' + sent.id);
+      eq(view.canEdit, false, 'T7: the view page hides Edit too');
+      eq(view.receipts.length, 1, 'T7: the delivery shows on the order');
+      eq(view.pct, Math.round(4 / 8 * 100), 'T7: half the units have arrived');
+
+      /* ========================= 8. deliver the balance ========================= */
+      log('=== TEST 8: balance delivery closes the order');
+      let rec2 = mk(purchaseCreatePage, '?po=' + sent.id);
+      eq(rec2.lines.length, 1, 'T8: only the line still owing units is pre-filled');
+      eq(rec2.lines[0].poRemaining, 4, 'T8: four units still to come');
+      eq(rec2.lines[0].poReceived, 2, 'T8: two already received');
+      fillSerials(rec2);
+      rec2.form.pay_amount = 0;
+      noNav(() => rec2.save());
+      const closed = db.find('purchase_orders', sent.id);
+      eq(closed.status, 'completed', 'T8: the order completed');
+      ok(!!closed.closed_at, 'T8: stamped closed');
+      eq(db.where('purchase_order_items', { po_id: sent.id }).every((i) => i.received_quantity >= i.quantity), true, 'T8: every line satisfied');
+      view = mk(purchaseOrderViewPage, '?id=' + sent.id);
+      eq(view.receipts.length, 2, 'T8: both deliveries are listed');
+      eq(view.isOpen, false, 'T8: a completed order is not open');
+      eq(view.pendingUnits, 0, 'T8: nothing outstanding');
+
+      // receiving against a closed order falls back to a plain purchase
+      const after = mk(purchaseCreatePage, '?po=' + sent.id);
+      eq(after.po, null, 'T8: a closed order cannot be received against');
+      eq(after.lines.length, 0, 'T8: no lines were pre-filled');
+
+      /* ========================= 9. cancelling a delivery reopens the order ========================= */
+      log('=== TEST 9: cancel a delivery');
+      const lastGrn = db.all('purchases').slice(-1)[0];
+      const pv = await source('purchase-view.html', 'purchaseViewPage');
+      let pview = mk(purchaseViewPage, '?id=' + lastGrn.id);
+      ok(!!pview.p, 'T9: the goods received note opened');
+      ok(!!pview.order && pview.order.id === sent.id, 'T9: it shows which order it belongs to');
+      ok(pview.cancelCheck.ok, 'T9: it can still be cancelled');
+      await noNavAsync(() => pview.cancelPurchase());
+      eq(db.find('purchases', lastGrn.id).status, 'cancelled', 'T9: the delivery was cancelled');
+      const reopened = db.find('purchase_orders', sent.id);
+      eq(reopened.status, 'partial', 'T9: the order went back to partially received');
+      eq(reopened.closed_at, null, 'T9: the closed stamp was cleared');
+      eq(db.where('purchase_order_items', { po_id: sent.id })[0].received_quantity, 2, 'T9: the cancelled units are outstanding again');
+
+      /* ========================= 10. close short, cancel, delete ========================= */
+      log('=== TEST 10: close short / cancel / delete');
+      view = mk(purchaseOrderViewPage, '?id=' + sent.id);
+      await noNavAsync(() => view.closeShort());
+      const shortClosed = db.find('purchase_orders', sent.id);
+      eq(shortClosed.status, 'completed', 'T10: closing short completes the order');
+      ok(!!shortClosed.closed_at, 'T10: stamped closed');
+      ok(db.where('purchase_order_items', { po_id: sent.id }).some((i) => i.received_quantity < i.quantity), 'T10: the undelivered units stay unreceived');
+
+      const seedDraft = db.all('purchase_orders').find((p) => p.status === 'draft' && p.branch_id == BID);
+      view = mk(purchaseOrderViewPage, '?id=' + seedDraft.id);
+      await noNavAsync(() => view.send());
+      eq(db.find('purchase_orders', seedDraft.id).status, 'ordered', 'T10: a draft can be sent from the view page');
+      view = mk(purchaseOrderViewPage, '?id=' + seedDraft.id);
+      await noNavAsync(() => view.cancelOrder());
+      eq(db.find('purchase_orders', seedDraft.id).status, 'cancelled', 'T10: an ordered PO can be cancelled');
+      eq(mk(purchaseCreatePage, '?po=' + seedDraft.id).po, null, 'T10: a cancelled order cannot be received against');
+
+      // a brand-new draft can be deleted for good
+      let del = mk(purchaseOrderCreatePage, '');
+      del.selectSupplier(supplier);
+      del.addLine(bulkProd.id);
+      noNav(() => del.save(false));
+      const doomed = db.all('purchase_orders').slice(-1)[0];
+      view = mk(purchaseOrderViewPage, '?id=' + doomed.id);
+      await noNavAsync(() => view.deleteDraft());
+      eq(db.find('purchase_orders', doomed.id), null, 'T10: the draft was deleted');
+      eq(db.where('purchase_order_items', { po_id: doomed.id }).length, 0, 'T10: its lines went with it');
+
+      /* ========================= 11. other-branch guards ========================= */
+      log('=== TEST 11: branch scoping');
+      const otherMgr = db.all('users').find((u) => u.username === 'sana');
+      session.logout(); session.login(otherMgr);
+      const mainOrder = db.all('purchase_orders').find((p) => p.branch_id == BID);
+      const foreign = mk(purchaseOrderViewPage, '?id=' + mainOrder.id);
+      eq(foreign.po, null, 'T11: another branch order is not shown');
+      eq(foreign.otherBranch, true, 'T11: the page explains why');
+      const foreignEdit = mk(purchaseOrderCreatePage, '?id=' + mainOrder.id);
+      ok(!!foreignEdit.blocked, 'T11: it cannot be edited from another branch either');
+      const foreignRec = mk(purchaseCreatePage, '?po=' + mainOrder.id);
+      eq(foreignRec.po, null, 'T11: and it cannot be received into another branch');
+      const list2 = mk(purchaseOrdersPage, '?range=all');
+      ok(list2.rows.every((r) => String(r.branch_id) === String(session.branchId())), 'T11: the list only shows this branch');
+
+      /* ============ 12b. defects found in review: crediting, closing, editing ============ */
+      log('=== TEST 12b: the order is only ever changed by what really happened');
+      session.logout(); session.login(mgr);
+
+      // (a) a delivery that credits nothing must leave the order exactly as it was
+      let base = mk(purchaseOrderCreatePage, '');
+      base.selectSupplier(supplier);
+      base.addLine(bulkProd.id);
+      noNav(() => base.save(true));
+      const live = db.all('purchase_orders').slice(-1)[0];
+      const other = cre.products.find((p) => !p.serialized && String(p.id) !== String(bulkProd.id));
+      let stray = mk(purchaseCreatePage, '?po=' + live.id);
+      stray.removeLine(0);                                            // drop everything the order asked for
+      stray.addLine(other.id, true);                                  // and receive something else entirely
+      stray.form.pay_amount = 0;
+      noNav(() => stray.save());
+      eq(db.find('purchase_orders', live.id).status, 'ordered', 'T12b: a delivery with nothing from the order leaves it ordered');
+      eq(db.where('purchase_order_items', { po_id: live.id })[0].received_quantity, 0, 'T12b: and credits it nothing');
+      const stillEditable = mk(purchaseOrderCreatePage, '?id=' + live.id);
+      eq(stillEditable.blocked, null, 'T12b: so the order can still be edited');
+
+      // (b) receiving more than was ordered is recorded, not capped or hidden
+      let big = mk(purchaseCreatePage, '?po=' + live.id);
+      big.lines[0].qty = big.lines[0].poRemaining + 3;
+      big.form.pay_amount = 0;
+      noNav(() => big.save());
+      const overItem = db.where('purchase_order_items', { po_id: live.id })[0];
+      eq(overItem.received_quantity, overItem.quantity + 3, 'T12b: the over-delivery is recorded in full');
+      const overList = mk(purchaseOrdersPage, '?range=all');
+      const overRow = overList.rows.find((r) => r.id === live.id);
+      eq(overRow.received, overItem.received_quantity, 'T12b: the list shows what really arrived, not a capped number');
+      eq(overRow.pendingValue, 0, 'T12b: a completed order is owed nothing');
+      eq(db.find('purchase_orders', live.id).status, 'completed', 'T12b: and it completed');
+
+      // (c) an order closed short stays closed when one of its deliveries is cancelled
+      let shortBase = mk(purchaseOrderCreatePage, '');
+      shortBase.selectSupplier(supplier);
+      shortBase.addLine(bulkProd.id);
+      shortBase.lines[0].qty = 10;
+      noNav(() => shortBase.save(true));
+      const shortPo = db.all('purchase_orders').slice(-1)[0];
+      let part = mk(purchaseCreatePage, '?po=' + shortPo.id);
+      part.lines[0].qty = 4;
+      part.form.pay_amount = 0;
+      noNav(() => part.save());
+      const partGrn = db.all('purchases').slice(-1)[0];
+      let shortView = mk(purchaseOrderViewPage, '?id=' + shortPo.id);
+      eq(shortView.pendingUnits, 6, 'T12b: six units are still outstanding');
+      await noNavAsync(() => shortView.closeShort());
+      eq(db.find('purchase_orders', shortPo.id).closed_short, 1, 'T12b: closing short is recorded as such');
+      shortView = mk(purchaseOrderViewPage, '?id=' + shortPo.id);
+      eq(shortView.pendingUnits, 0, 'T12b: a closed order is no longer waiting for anything');
+      eq(shortView.shortUnits, 6, 'T12b: but it remembers the six that never came');
+      let cancelView = mk(purchaseViewPage, '?id=' + partGrn.id);
+      await noNavAsync(() => cancelView.cancelPurchase());
+      eq(db.find('purchase_orders', shortPo.id).status, 'completed', 'T12b: cancelling its delivery does not re-open a short-closed order');
+      ok(!!db.find('purchase_orders', shortPo.id).closed_at, 'T12b: and its closed stamp survives');
+
+      // (d) the same product on two order lines is given back to the line it came from
+      let twin = mk(purchaseOrderCreatePage, '');
+      twin.selectSupplier(supplier);
+      twin.addLine(bulkProd.id);
+      twin.lines[0].qty = 5;
+      noNav(() => twin.save(true));
+      const twinPo = db.all('purchase_orders').slice(-1)[0];
+      const firstItem = db.where('purchase_order_items', { po_id: twinPo.id })[0];
+      const secondItem = db.insert('purchase_order_items', { po_id: twinPo.id, product_id: bulkProd.id, quantity: 7, received_quantity: 0, unit_cost: firstItem.unit_cost, total: firstItem.unit_cost * 7, notes: '' });
+      let twinRec = mk(purchaseCreatePage, '?po=' + twinPo.id);
+      eq(twinRec.lines.length, 2, 'T12b: both lines of the same product are pre-filled separately');
+      twinRec.lines[0].qty = 5; twinRec.lines[1].qty = 7;
+      twinRec.form.pay_amount = 0;
+      noNav(() => twinRec.save());
+      eq(db.find('purchase_order_items', firstItem.id).received_quantity, 5, 'T12b: line one got its five');
+      eq(db.find('purchase_order_items', secondItem.id).received_quantity, 7, 'T12b: line two got its seven');
+      const twinGrn = db.all('purchases').slice(-1)[0];
+      let twinCancel = mk(purchaseViewPage, '?id=' + twinGrn.id);
+      await noNavAsync(() => twinCancel.cancelPurchase());
+      eq(db.find('purchase_order_items', firstItem.id).received_quantity, 0, 'T12b: cancelling gives line one its units back');
+      eq(db.find('purchase_order_items', secondItem.id).received_quantity, 0, 'T12b: and line two too — not both off one line');
+
+      // (e) editing an order never silently drops a line whose product was de-activated
+      let keep = mk(purchaseOrderCreatePage, '');
+      keep.selectSupplier(supplier);
+      keep.addLine(bulkProd.id);
+      keep.addLine(other.id);
+      noNav(() => keep.save(false));
+      const keepPo = db.all('purchase_orders').slice(-1)[0];
+      db.update('products', other.id, { is_active: 0 });
+      let keepEdit = mk(purchaseOrderCreatePage, '?id=' + keepPo.id);
+      eq(keepEdit.lines.length, 2, 'T12b: the de-activated product is still on the sheet');
+      ok(keepEdit.lines.some((l) => l.retired), 'T12b: and is flagged as retired');
+      noNav(() => keepEdit.save(false));
+      eq(db.where('purchase_order_items', { po_id: keepPo.id }).length, 2, 'T12b: saving keeps both lines');
+      db.update('products', other.id, { is_active: 1 });
+
+      // (f) an existing order can never be moved to another branch
+      session.logout(); session.login(db.all('users').find((u) => u.username === 'admin'));
+      let move = mk(purchaseOrderCreatePage, '?id=' + keepPo.id);
+      move.form.branch_id = String(db.all('branches').find((b) => b.id != keepPo.branch_id && b.is_active).id);
+      noNav(() => move.save(false));
+      eq(db.find('purchase_orders', keepPo.id).branch_id, keepPo.branch_id, 'T12b: the order stays at the branch its number belongs to');
+      session.logout(); session.login(mgr);
+
+      // (g) a draft is not "awaiting delivery"
+      let draftView = mk(purchaseOrderViewPage, '?id=' + db.all('purchase_orders').find((p) => p.status === 'draft' && p.branch_id == BID).id);
+      eq(draftView.pendingUnits, 0, 'T12b: a draft is owed nothing — it was never sent');
+      const draftList = mk(purchaseOrdersPage, '?range=all');
+      ok(draftList.rows.filter((r) => r.status === 'draft').every((r) => r.pendingValue === 0), 'T12b: and the list agrees with the tile');
+
+      /* ========================= 12. a missing order ========================= */
+      log('=== TEST 12: unknown ids');
+      const missing = mk(purchaseOrderViewPage, '?id=99999');
+      eq(missing.po, null, 'T12: an unknown order yields the not-found state, no throw');
+      eq(missing.otherBranch, false, 'T12: and it is not reported as a branch problem');
+      const missingEdit = mk(purchaseOrderCreatePage, '?id=99999');
+      ok(!!missingEdit.blocked && missingEdit.blocked.id === null, 'T12: editing an unknown order is blocked cleanly');
+      const missingRec = mk(purchaseCreatePage, '?po=99999');
+      eq(missingRec.po, null, 'T12: receiving an unknown order falls back to a direct purchase');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

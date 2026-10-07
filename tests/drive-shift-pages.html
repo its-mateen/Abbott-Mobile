@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: shift pages</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/pages/pos.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the real Alpine components of shifts.html and shift-view.html, plus the POS wiring
+    // that ties a sale to the drawer it was rung up in.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, ui } = ABM;
+      db.reset();
+      ui.confirm = async () => true;
+      ui.toast = () => {};
+
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+
+      await source('shifts.html', 'shiftsPage');
+      await source('shift-view.html', 'shiftViewPage');
+
+      const cashier = db.all('users').find((u) => u.username === 'cashier');
+      const manager = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(cashier);
+      const BID = session.branchId();
+      log('=== session: ' + cashier.name + ' (cashier) branch=' + BID);
+
+      /* ========================= 1. the list, as a cashier ========================= */
+      log('=== TEST 1: shifts.html for a cashier');
+      let list = mk(shiftsPage, '?range=all');
+      eq(list.ownOnly, true, 'T1: a cashier only sees their own drawers');
+      ok(list.rows.length > 0, 'T1: their shifts are listed (' + list.rows.length + ')');
+      ok(list.rows.every((r) => String(r.user_id) === String(cashier.id)), 'T1: nobody else\'s drawer is shown');
+      ok(!!list.myOpen, 'T1: the page knows they have an open drawer');
+      eq(list.k.open, 1, 'T1: the open-drawer tile counts it');
+      ok(list.k.inDrawer > 0, 'T1: and shows what is in it (' + list.k.inDrawer + ')');
+      const closedRow = list.rows.find((r) => r.status === 'closed');
+      eq(closedRow.varianceKey, closedRow.variance === 0 ? 'balanced' : closedRow.variance < 0 ? 'short' : 'over', 'T1: variance is classified');
+      list.f.status = 'closed';
+      ok(list.filtered.every((r) => r.status === 'closed'), 'T1: the status filter works');
+      list.f.status = ''; list.f.variance = 'short';
+      ok(list.filtered.every((r) => r.variance < 0), 'T1: the short filter works');
+      list.clearFilters();
+      eq(list.hasFilters, false, 'T1: filters clear');
+
+      /* ========================= 2. opening a drawer ========================= */
+      log('=== TEST 2: opening a drawer');
+      list.openStart();
+      eq(list.start.open, false, 'T2: a cashier who already has a drawer cannot open another');
+      const openOne = ABM.shift.current(cashier.id, BID);
+      let view = mk(shiftViewPage, '?id=' + openOne.id);
+      ok(!!view.shift, 'T2: their open drawer opens');
+      eq(view.canEdit, true, 'T2: and they can work it');
+
+      /* ========================= 3. POS sales land in the drawer ========================= */
+      log('=== TEST 3: a POS sale lands in the open drawer');
+      const pos = (() => { const c = posPage(); c.$watch = () => {}; c.$nextTick = (f) => { if (f) f(); }; c.$refs = {}; c.init(); return c; })();
+      eq(pos.shift.open, true, 'T3: POS shows the drawer as open');
+      eq(String(pos.shift.row.id), String(openOne.id), 'T3: and it is the cashier\'s own');
+      const drawerBefore = ABM.shift.tally(openOne).expected;
+      const acc = pos.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+      pos.pick(acc);
+      pos.cart.tax_rate = 0;
+      pos.openCheckout();
+      pos.setCash(pos.totals.total);
+      const saleTotal = pos.totals.total;
+      await pos.completeSale();
+      const sale = db.all('sales').slice(-1)[0];
+      eq(String(sale.shift_id), String(openOne.id), 'T3: the sale is stamped with the drawer');
+      near(ABM.shift.tally(openOne).expected, drawerBefore + saleTotal, 'T3: the cash reaches the drawer');
+      eq(pos.shift.expected, ABM.shift.tally(openOne).expected, 'T3: the POS chip refreshes after the sale');
+
+      /* ========================= 4. cash in and out ========================= */
+      log('=== TEST 4: cash in and out of the drawer');
+      view = mk(shiftViewPage, '?id=' + openOne.id);
+      const beforeCash = view.expected;
+      view.openCash('pay_out');
+      view.cash.amount = 500; view.cash.reason = '';
+      view.saveCash();
+      ok(!!view.cash.errors.reason, 'T4: a cash movement needs a reason');
+      view.cash.reason = 'Tea';
+      view.cash.amount = 9999999;
+      view.saveCash();
+      ok(!!view.cash.errors.amount, 'T4: more than the drawer holds is refused');
+      view.cash.amount = 500;
+      view.saveCash();
+      eq(view.cash.open, false, 'T4: a valid movement saves');
+      near(view.expected, beforeCash - 500, 'T4: and lowers the drawer');
+      eq(view.movements.length >= 1, true, 'T4: it is listed on the shift');
+      view.openCash('pay_in');
+      view.cash.amount = 1500; view.cash.reason = 'Change from the safe';
+      view.saveCash();
+      near(view.expected, beforeCash - 500 + 1500, 'T4: cash in raises the drawer');
+
+      /* ========================= 5. counting and closing ========================= */
+      log('=== TEST 5: counting the drawer');
+      view.openClose();
+      eq(view.close.open, true, 'T5: the close dialog opens');
+      eq(view.counted, 0, 'T5: nothing counted yet');
+      view.close.counts[5000] = 2; view.close.counts[1000] = 3; view.close.counts[100] = 5; view.close.coins = 50;
+      eq(view.counted, 2 * 5000 + 3 * 1000 + 5 * 100 + 50, 'T5: the note count adds up');
+      near(view.varPreview, view.counted - view.expected, 'T5: the variance preview is counted minus expected');
+      view.close.mode = 'total';
+      view.close.total = view.expected;
+      eq(view.varPreview, 0, 'T5: counting the exact expected balances');
+
+      view.close.handover = 999999; view.close.handoverTo = String(manager.id);
+      view.saveClose();
+      ok(!!view.close.errors.handover, 'T5: handing over more than counted is refused');
+      view.close.handover = 5000; view.close.banked = 999999;
+      view.saveClose();
+      ok(!!view.close.errors.handover, 'T5: banking more than counted is refused too');
+      view.close.banked = 0; view.close.handoverTo = '';
+      view.close.handover = 5000;
+      view.saveClose();
+      ok(!!view.close.errors.handover, 'T5: cash left in the drawer needs someone to take it');
+
+      view.close.handoverTo = String(manager.id);
+      view.close.banked = ABM.utils.round2(view.counted - 5000);
+      view.close.notes = 'Handover to the manager';
+      const expectedAtClose = view.expected;
+      view.saveClose();
+      const closedShift = db.find('cashier_shifts', openOne.id);
+      eq(closedShift.status, 'closed', 'T5: the shift closed');
+      near(closedShift.expected_cash, expectedAtClose, 'T5: the expected cash is frozen');
+      near(closedShift.counted_cash, expectedAtClose, 'T5: the counted cash is stored');
+      eq(closedShift.variance, 0, 'T5: it balanced');
+      eq(String(closedShift.handover_to), String(manager.id), 'T5: the handover is recorded');
+      near(closedShift.handover_amount + closedShift.banked_amount, closedShift.counted_cash, 'T5: every rupee counted is accounted for');
+      ok(!ABM.shift.current(cashier.id, BID), 'T5: the cashier has no open drawer now');
+
+      view = mk(shiftViewPage, '?id=' + openOne.id);
+      eq(view.isOpen, false, 'T5: the page shows it closed');
+      ok(view.denomRows.length === 0 || view.denomRows.length > 0, 'T5: denominations render without throwing');
+      view.openCash('pay_in');
+      eq(view.cash.open, false, 'T5: no more cash can be recorded');
+      view.openClose();
+      eq(view.close.open, false, 'T5: and it cannot be closed twice');
+
+      /* ========================= 6. POS without a drawer ========================= */
+      log('=== TEST 6: POS with no open drawer');
+      const pos2 = (() => { const c = posPage(); c.$watch = () => {}; c.$nextTick = (f) => { if (f) f(); }; c.$refs = {}; c.init(); return c; })();
+      eq(pos2.shift.open, false, 'T6: POS shows there is no drawer');
+      const acc2 = pos2.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+      pos2.pick(acc2);
+      pos2.cart.tax_rate = 0;
+      pos2.openCheckout();
+      pos2.setCash(pos2.totals.total);
+      await pos2.completeSale();
+      const sale2 = db.all('sales').slice(-1)[0];
+      eq(sale2.shift_id, null, 'T6: selling still works, the sale just belongs to no drawer');
+
+      /* ========================= 7. opening the next drawer ========================= */
+      log('=== TEST 7: the next drawer starts where the last left off');
+      list = mk(shiftsPage, '?range=all');
+      eq(!!list.myOpen, false, 'T7: no open drawer for this cashier');
+      list.openStart();
+      eq(list.start.open, true, 'T7: the dialog opens now');
+      eq(Number(list.start.float), closedShift.handover_amount, 'T7: the float defaults to what was handed over');
+      list.start.float = -5;
+      list.openShift();
+      ok(!!list.start.errors.float, 'T7: a negative float is refused');
+      list.start.float = closedShift.handover_amount;
+      noNav(() => list.openShift());
+      const fresh = ABM.shift.current(cashier.id, BID);
+      ok(!!fresh, 'T7: a new drawer is open');
+      near(ABM.shift.tally(fresh).expected, closedShift.handover_amount, 'T7: starting at the handed-over float');
+      ok(db.all('audit_logs').some((a) => a.action === 'shift.open' && String(a.entity_id) === String(fresh.id)), 'T7: the audit log records it');
+
+      /* ========================= 8. other people's drawers ========================= */
+      log('=== TEST 8: scope');
+      const otherShift = db.all('cashier_shifts').find((s) => String(s.user_id) !== String(cashier.id));
+      const denied = mk(shiftViewPage, '?id=' + otherShift.id);
+      eq(denied.shift, null, 'T8: a cashier cannot open another cashier\'s drawer');
+      eq(denied.denied, true, 'T8: and is told why');
+      const missing = mk(shiftViewPage, '?id=99999');
+      eq(missing.shift, null, 'T8: an unknown shift yields the not-found state');
+
+      session.logout(); session.login(manager);
+      const mgrList = mk(shiftsPage, '?range=all');
+      eq(mgrList.ownOnly, false, 'T8: a manager sees the whole branch');
+      ok(mgrList.rows.some((r) => String(r.user_id) !== String(manager.id)), 'T8: including other people\'s drawers');
+      ok(mgrList.rows.every((r) => String(r.branch_id) === String(session.branchId())), 'T8: but only their own branch');
+      const mgrView = mk(shiftViewPage, '?id=' + fresh.id);
+      ok(!!mgrView.shift, 'T8: a manager can open a cashier\'s drawer');
+      eq(mgrView.canEdit, true, 'T8: and can close it for them');
+
+      /* ========================= 9. totals and export ========================= */
+      log('=== TEST 9: list totals');
+      const t = mgrList.filteredTotals;
+      const closedRows = mgrList.filtered.filter((r) => r.status === 'closed');
+      near(t.expected, closedRows.reduce((a, r) => a + r.expected, 0), 'T9: expected totals only count closed shifts');
+      near(t.variance, closedRows.reduce((a, r) => a + r.variance, 0), 'T9: variance totals add up');
+      const csv = utils.toCsv(mgrList.filtered.slice(0, 2), [{ label: 'Shift No', key: 'shift_no' }]);
+      ok(csv.indexOf(mgrList.filtered[0].shift_no) > 0, 'T9: the export contains the shift number');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

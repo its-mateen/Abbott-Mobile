@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drive: customer accounts, invoice & email</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+  <script defer src="../assets/js/shop.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // End-to-end driver for the storefront account system. Exercises the real SHOP services.
+    setTimeout(function () {
+      var L = [], fails = 0;
+      function ok(name, cond, extra) {
+        if (!cond) fails++;
+        L.push((cond ? 'PASS  ' : 'FAIL  ') + name + (extra ? '  [' + extra + ']' : ''));
+      }
+      function throws(name, fn, match) {
+        try { fn(); ok(name, false, 'no error thrown'); }
+        catch (e) { ok(name, !match || e.message.indexOf(match) >= 0, e.message); }
+      }
+
+      try {
+        ABM.db.reset();
+        try { localStorage.removeItem('abm.shop.session'); } catch (e) {}
+        try { localStorage.removeItem('abm.shop.cart'); } catch (e) {}
+
+        /* ---------------- seeded demo accounts ---------------- */
+        var seeded = ABM.db.all('customers').filter(function (c) { return c.has_account; });
+        ok('seed ships website accounts', seeded.length >= 3, seeded.length + ' accounts');
+        ok('seeded account has an email', !!seeded[0].email, seeded[0].email);
+
+        var demo = SHOP.auth.login(seeded[0].email, 'demo1234');
+        ok('login with seeded email + demo1234', !!demo && demo.id === seeded[0].id);
+        ok('isLoggedIn after login', SHOP.auth.isLoggedIn());
+        throws('wrong password is rejected', function () { SHOP.auth.login(seeded[0].email, 'nope'); }, 'password');
+        var byPhone = (SHOP.auth.logout(), SHOP.auth.login(seeded[0].phone, 'demo1234'));
+        ok('login by phone number works', !!byPhone && byPhone.id === seeded[0].id);
+        var seededOrders = SHOP.auth.orders();
+        ok('seeded account sees its past orders', seededOrders.length > 0, seededOrders.length + ' orders');
+        SHOP.auth.logout();
+        ok('logout clears the session', !SHOP.auth.isLoggedIn());
+
+        /* ---------------- registration ---------------- */
+        throws('short password refused', function () { SHOP.auth.register({ name: 'Test User', email: 't@e.com', phone: '0300-1112233', password: '123' }); }, 'at least 6');
+        throws('bad email refused', function () { SHOP.auth.register({ name: 'Test User', email: 'nope', phone: '0300-1112233', password: 'secret123' }); }, 'valid email');
+        throws('mismatched confirm refused', function () { SHOP.auth.register({ name: 'Test User', email: 't@e.com', phone: '0300-1112233', password: 'secret123', confirm: 'other' }); }, 'do not match');
+
+        var before = ABM.db.all('customers').length;
+        var me = SHOP.auth.register({ name: 'Ali Test', email: 'ali.test@example.com', phone: '0321-9998877', password: 'secret123', confirm: 'secret123', address: '12 Test Street', city: 'Lahore' });
+        ok('register creates a customer', ABM.db.all('customers').length === before + 1);
+        ok('register signs you in', SHOP.auth.isLoggedIn() && SHOP.auth.user().id === me.id);
+        ok('account flagged on the customer row', me.has_account === 1 && !!me.password);
+        ok('password is not stored in clear text', me.password !== 'secret123', me.password);
+        throws('duplicate email refused', function () { SHOP.auth.register({ name: 'Copy Cat', email: 'ali.test@example.com', phone: '0333-1231234', password: 'secret123' }); }, 'already exists');
+        throws('duplicate phone refused', function () { SHOP.auth.register({ name: 'Copy Cat', email: 'other@example.com', phone: '0321-9998877', password: 'secret123' }); }, 'already exists');
+
+        /* ---------------- place an order while signed in ---------------- */
+        var prod = SHOP.products().filter(function (p) { return ABM.db.productType(p) === 'accessory' && SHOP.inStock(p); })[0];
+        ok('found a sellable accessory', !!prod, prod && prod.name);
+        SHOP.cart.clear();
+        SHOP.cart.add(prod.id, 2);
+        ok('cart holds 2 units', SHOP.cart.count() === 2);
+
+        var outboxBefore = ABM.db.all('email_outbox').length;
+        var order = SHOP.placeOrder(
+          { name: 'Ali Test', phone: '0321-9998877', email: 'ali.test@example.com', address: '12 Test Street', city: 'Lahore' },
+          SHOP.cart.get(), 'cod', ''
+        );
+        ok('order created with a number', !!order && /-/.test(order.order_no), order.order_no);
+        ok('order is linked to my account', String(order.customer_id) === String(me.id));
+        ok('order total = subtotal + delivery', Math.abs(order.total - (order.subtotal + order.delivery_fee)) < 0.01,
+          order.subtotal + ' + ' + order.delivery_fee + ' = ' + order.total);
+        ok('line total = qty x price', Math.abs(order.items[0].total - order.items[0].quantity * order.items[0].unit_price) < 0.01);
+        ok('COD order carries no payment reference', order.payment_reference === '');
+        ok('status starts pending with a log entry', order.status === 'pending' && order.status_log.length === 1);
+
+        /* ---------------- invoice email ---------------- */
+        var outbox = ABM.db.all('email_outbox');
+        ok('invoice email queued on order', outbox.length === outboxBefore + 1, outbox.length + ' in outbox');
+        var mail = outbox[outbox.length - 1];
+        ok('email addressed to the customer', mail.to === 'ali.test@example.com', mail.to);
+        ok('email subject names the order', mail.subject.indexOf(order.order_no) >= 0, mail.subject);
+        ok('email body is the invoice document', mail.body_html.indexOf('INVOICE') >= 0 && mail.body_html.indexOf(order.order_no) >= 0);
+        ok('order records when the invoice was emailed', !!ABM.db.find('online_orders', order.id).invoice_emailed_at);
+        ok('emailsFor(order) finds it', SHOP.emailsFor(order).length === 1);
+
+        /* ---------------- invoice document ---------------- */
+        var html = SHOP.invoiceHtml(order);
+        ok('invoice shows the customer name', html.indexOf('Ali Test') >= 0);
+        ok('invoice shows the item', html.indexOf(ABM.utils.escape(order.items[0].name)) >= 0);
+        ok('invoice shows the total', html.indexOf(ABM.utils.num(order.total, 0)) >= 0);
+        ok('invoice is a full document', html.indexOf('<!DOCTYPE html>') === 0 && html.indexOf('</html>') > 0);
+        ok('invoice marks COD as payable on delivery', html.indexOf('PAYABLE ON DELIVERY') >= 0);
+        ok('mailto link built', SHOP.mailtoInvoice(order).indexOf('mailto:') === 0);
+
+        /* ---------------- tracking ---------------- */
+        var steps = SHOP.orderSteps(order);
+        ok('tracking has 5 steps', steps.length === 5, steps.map(function (s) { return s.key; }).join(','));
+        ok('first step done, rest pending', steps[0].done && !steps[1].done);
+        ok('current step is "pending"', steps[0].current);
+        ABM.db.update('online_orders', order.id, {
+          status: 'out_for_delivery',
+          status_log: order.status_log.concat([{ status: 'confirmed', at: ABM.utils.now(), by: 3 }, { status: 'out_for_delivery', at: ABM.utils.now(), by: 3 }]),
+        });
+        var moved = ABM.db.find('online_orders', order.id);
+        var steps2 = SHOP.orderSteps(moved);
+        ok('tracking advances with the status', steps2[0].done && steps2[1].done && steps2[3].done && steps2[3].current && !steps2[4].done);
+        ok('status label reads for customers', SHOP.orderStatusLabel(moved) === 'Out for delivery', SHOP.orderStatusLabel(moved));
+        var cancelled = { status: 'cancelled', created_at: order.created_at, status_log: [{ status: 'pending', at: order.created_at }, { status: 'cancelled', at: ABM.utils.now() }] };
+        ok('cancelled orders show a cancelled trail', SHOP.orderSteps(cancelled).slice(-1)[0].failed === true);
+
+        /* ---------------- my account views ---------------- */
+        var mine = SHOP.auth.orders();
+        ok('my orders includes the new order', mine.some(function (o) { return o.id === order.id; }), mine.length + ' orders');
+        ok('cart was NOT auto-cleared by placeOrder', SHOP.cart.count() === 2);
+        SHOP.cart.clear();
+
+        /* ---------------- profile + password ---------------- */
+        SHOP.auth.updateProfile({ name: 'Ali Tested', address: '99 New Road', city: 'Karachi' });
+        ok('profile update saved', SHOP.auth.user().name === 'Ali Tested' && SHOP.auth.user().city === 'Karachi');
+        throws('wrong current password refused', function () { SHOP.auth.changePassword('bad', 'newpass123'); }, 'not correct');
+        SHOP.auth.changePassword('secret123', 'newpass123', 'newpass123');
+        SHOP.auth.logout();
+        var again = SHOP.auth.login('ali.test@example.com', 'newpass123');
+        ok('can sign in with the new password', !!again);
+
+        /* ---------------- tracking privacy ---------------- */
+        ok('findOrder matches number + phone', !!SHOP.findOrder(order.order_no, '0321-9998877'));
+        ok('findOrder rejects a wrong phone', !SHOP.findOrder(order.order_no, '0300-0000000'));
+
+      } catch (e) {
+        fails++;
+        L.push('FAIL  threw: ' + e.message + '\n' + (e.stack || ''));
+      }
+
+      L.push('');
+      L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach(function (l) { console.log('DRIVE ' + l); });
+    }, 900);
+  </script>
+</body>
+</html>

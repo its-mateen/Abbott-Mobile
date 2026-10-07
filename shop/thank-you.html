@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Thank you for your order · Abbott Mobiles</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-thankyou">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopThanks()">
+
+    <!-- not found -->
+    <template x-if="!order">
+      <div class="shop-container py-16">
+        <div class="shop-card shop-card-pad max-w-lg mx-auto text-center">
+          <div class="shop-empty">
+            <span x-html="SHOP.icon('search','')"></span>
+            <div class="shop-empty-title">We couldn't find that order</div>
+            <p class="text-sm mt-2">Check the order number and the phone number used to place it.</p>
+            <div class="flex flex-wrap justify-center gap-2 mt-5">
+              <a href="order.html" class="shop-btn">Track an order</a>
+              <a href="products.html" class="shop-btn shop-btn-outline">Continue shopping</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="order">
+      <div class="shop-container py-10 sm:py-14">
+
+        <!-- confirmation -->
+        <div class="text-center max-w-2xl mx-auto">
+          <span class="shop-thanks-badge" x-html="SHOP.icon('check-circle','')"></span>
+          <h1 class="shop-h2 mt-5">Thank you for your order!</h1>
+          <p class="shop-lead mt-2" x-text="'We have received it, ' + firstName + '. A confirmation is on its way and we will call you to confirm delivery.'"></p>
+          <p class="text-sm text-slate-500 mt-3" x-show="emailed" x-cloak>
+            Your invoice was emailed to <b x-text="order.customer.email"></b>.
+          </p>
+        </div>
+
+        <!-- key facts -->
+        <div class="shop-kv max-w-4xl mx-auto mt-8">
+          <div class="shop-kv-item"><div class="shop-kv-l">Order number</div><div class="shop-kv-v" x-text="order.order_no"></div></div>
+          <div class="shop-kv-item"><div class="shop-kv-l">Date</div><div class="shop-kv-v" x-text="$date(order.created_at)"></div></div>
+          <div class="shop-kv-item"><div class="shop-kv-l">Payment</div><div class="shop-kv-v" x-text="SHOP.paymentLabel(order.payment_method)"></div></div>
+          <div class="shop-kv-item"><div class="shop-kv-l">Total</div><div class="shop-kv-v" x-text="$money(order.total,{decimals:0})"></div></div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mt-8 max-w-5xl mx-auto">
+
+          <!-- summary -->
+          <div class="shop-card lg:col-span-2">
+            <div class="p-5 border-b border-slate-200/70">
+              <h2 class="shop-h3">Order summary</h2>
+            </div>
+            <div class="p-5 divide-y divide-slate-200/70">
+              <template x-for="l in order.items" :key="l.product_id + '-' + l.name">
+                <div class="flex items-center gap-3 py-2.5 min-w-0">
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold truncate" x-text="l.name"></div>
+                    <div class="text-xs text-slate-500" x-text="l.quantity + ' × ' + $money(l.unit_price,{decimals:0})"></div>
+                  </div>
+                  <div class="text-sm font-bold" x-text="$money(l.total,{decimals:0})"></div>
+                </div>
+              </template>
+            </div>
+            <div class="px-5 pb-5 space-y-1 text-sm">
+              <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span x-text="$money(order.subtotal,{decimals:0})"></span></div>
+              <div class="flex justify-between"><span class="text-slate-500">Delivery</span><span x-text="order.delivery_fee ? $money(order.delivery_fee,{decimals:0}) : 'Free'"></span></div>
+              <div class="flex justify-between font-bold text-lg pt-2 border-t border-slate-200/70"><span>Total</span><span x-text="$money(order.total,{decimals:0})"></span></div>
+            </div>
+          </div>
+
+          <!-- next steps -->
+          <div class="space-y-4">
+            <div class="shop-card shop-card-pad">
+              <h2 class="shop-h3">Your invoice</h2>
+              <p class="text-sm text-slate-600 mt-1">Keep a copy for your warranty claim.</p>
+              <div class="flex flex-col gap-2 mt-4">
+                <a :href="'invoice.html?no=' + encodeURIComponent(order.order_no) + '&phone=' + encodeURIComponent(order.customer.phone)"
+                   class="shop-btn shop-btn-block"><span x-html="SHOP.icon('document','')"></span>View invoice</a>
+                <button type="button" class="shop-btn shop-btn-outline shop-btn-block" @click="download()">
+                  <span x-html="SHOP.icon('download','')"></span>Download invoice
+                </button>
+                <button type="button" class="shop-btn shop-btn-outline shop-btn-block" @click="resend()" x-show="order.customer.email" x-cloak>
+                  <span x-html="SHOP.icon('mail','')"></span>Email it again
+                </button>
+              </div>
+              <p class="text-xs text-slate-500 mt-2" x-show="note" x-cloak x-text="note"></p>
+            </div>
+
+            <div class="shop-card shop-card-pad">
+              <h2 class="shop-h3">Track your order</h2>
+              <p class="text-sm text-slate-600 mt-1">Follow it from confirmed to delivered.</p>
+              <a :href="SHOP.trackUrl(order)" class="shop-btn shop-btn-accent shop-btn-block mt-4">
+                <span x-html="SHOP.icon('truck','')"></span>Track order
+              </a>
+              <template x-if="!loggedIn">
+                <div class="mt-4 pt-4 border-t border-slate-200/70">
+                  <p class="text-sm text-slate-600">Create an account to keep all your orders, invoices and repairs in one place.</p>
+                  <a :href="'register.html?next=' + encodeURIComponent('account.html') + '&name=' + encodeURIComponent(order.customer.name) + '&email=' + encodeURIComponent(order.customer.email || '') + '&phone=' + encodeURIComponent(order.customer.phone)"
+                     class="shop-btn shop-btn-outline shop-btn-block mt-3">
+                    <span x-html="SHOP.icon('user','')"></span>Create my account
+                  </a>
+                </div>
+              </template>
+              <template x-if="loggedIn">
+                <a href="account.html#orders" class="shop-btn shop-btn-outline shop-btn-block mt-3">My orders</a>
+              </template>
+            </div>
+
+            <div class="shop-card shop-card-pad" x-show="waHref" x-cloak>
+              <h2 class="shop-h3">Questions?</h2>
+              <p class="text-sm text-slate-600 mt-1">Message us with your order number and we will help.</p>
+              <a :href="waHref" target="_blank" rel="noopener" class="shop-btn shop-btn-outline shop-btn-block mt-4">
+                <span x-html="SHOP.socialIcon('whatsapp','')"></span>Chat on WhatsApp
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- delivery details -->
+        <div class="shop-card shop-card-pad max-w-5xl mx-auto mt-5">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 text-sm">
+            <div>
+              <div class="shop-label">Delivering to</div>
+              <div class="font-semibold" x-text="order.customer.name"></div>
+              <div class="text-slate-500" x-text="order.customer.phone"></div>
+              <div class="text-slate-500" x-text="order.customer.address"></div>
+              <div class="text-slate-500" x-text="order.customer.city"></div>
+            </div>
+            <div>
+              <div class="shop-label">Payment</div>
+              <div class="font-semibold" x-text="SHOP.paymentLabel(order.payment_method)"></div>
+              <div class="text-slate-500" x-show="order.payment_reference" x-cloak x-text="'Ref ' + order.payment_reference"></div>
+              <div class="text-slate-500" x-show="order.payment_method === 'cod'" x-cloak>Please keep the exact amount ready.</div>
+            </div>
+            <div>
+              <div class="shop-label">What happens next</div>
+              <ol class="text-slate-500 space-y-1 list-decimal list-inside">
+                <li>We confirm stock and call you.</li>
+                <li>Your parcel is packed and dispatched.</li>
+                <li>Delivery, then your warranty starts.</li>
+              </ol>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 mt-5">
+            <a href="products.html" class="shop-btn shop-btn-outline shop-btn-sm">Continue shopping</a>
+            <a href="repair.html" class="shop-btn shop-btn-ghost shop-btn-sm">Book a repair</a>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopThanks() {
+      const { utils } = ABM;
+      return {
+        order: null, note: '', waHref: '', loggedIn: false, emailed: false,
+        init() {
+          const no = utils.qs('no'), phone = utils.qs('phone');
+          this.loggedIn = SHOP.auth.isLoggedIn();
+          this.order = no ? SHOP.findOrder(no, phone) : null;
+          // a signed-in customer may open the page without the phone parameter
+          if (!this.order && no && this.loggedIn) {
+            this.order = SHOP.auth.orders().find((o) => o.order_no === no) || null;
+          }
+          if (!this.order) return;
+          this.emailed = !!this.order.invoice_emailed_at || SHOP.emailsFor(this.order).length > 0;
+          document.title = 'Order ' + this.order.order_no + ' · Thank you';
+          try { this.waHref = SHOP.waLink('Hello, I have a question about order ' + this.order.order_no + '.'); } catch (e) { this.waHref = ''; }
+        },
+        get firstName() { return String((this.order.customer || {}).name || '').split(' ')[0] || 'there'; },
+        download() { SHOP.downloadInvoice(this.order); this.note = 'Invoice downloaded — open it to print or save as PDF.'; },
+        resend() {
+          try { const row = SHOP.emailInvoice(this.order); this.note = 'Invoice sent again to ' + row.to + '.'; SHOP.toast('Invoice emailed.'); }
+          catch (e) { SHOP.toast(e.message, 'error'); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

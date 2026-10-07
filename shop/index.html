@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Abbott Mobile — Phones, Laptops &amp; Repairs in Lahore</title>
+  <meta name="description" content="Buy genuine smartphones, laptops and accessories online or book a mobile / laptop repair at Abbott Mobile, Lahore.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-home">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopHome()" @click="onGridClick($event)">
+
+    <!-- ===================================================== CATEGORY STRIP -->
+    <nav class="shop-catbar" aria-label="Shop by category">
+      <div class="shop-container">
+        <div class="shop-scroller shop-catbar-row">
+          <template x-for="c in catStrip" :key="c.key">
+            <a :href="c.href" class="shop-cat">
+              <span class="shop-cat-icon" x-html="SHOP.icon(c.icon,'')"></span>
+              <span class="shop-cat-name" x-text="c.name"></span>
+            </a>
+          </template>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ================================================================ HERO -->
+    <section class="shop-section-tight">
+      <div class="shop-container">
+        <div class="shop-hero-row">
+
+          <!-- rotating banner -->
+          <div class="shop-slider" role="region" aria-label="Offers">
+            <template x-for="(b, i) in slides" :key="i">
+              <a :href="b.link || 'products.html'" class="shop-slide" x-show="i === slide" x-cloak :style="slideStyle(b)">
+                <div class="shop-slide-body">
+                  <span class="shop-hero-badge" x-show="b.badge" x-cloak x-text="b.badge"></span>
+                  <h2 class="shop-slide-title" x-text="b.title"></h2>
+                  <p class="shop-slide-sub" x-text="b.subtitle"></p>
+                  <span class="shop-btn shop-btn-white shop-btn-lg mt-5" x-text="b.cta || 'Shop now'"></span>
+                </div>
+                <span class="shop-slide-art" x-html="b.art" aria-hidden="true"></span>
+              </a>
+            </template>
+            <div class="shop-slider-dots" x-show="slides.length > 1" x-cloak>
+              <template x-for="(b, i) in slides" :key="'d'+i">
+                <button type="button" class="shop-dot" :class="i === slide && 'is-on'" @click.prevent="slide = i"
+                        :aria-label="'Show offer ' + (i+1)"></button>
+              </template>
+            </div>
+          </div>
+
+          <!-- side promos -->
+          <div class="shop-hero-side">
+            <a href="repair.html" class="shop-promo shop-promo-a">
+              <span class="shop-promo-icon" x-html="SHOP.icon('wrench','')"></span>
+              <span class="min-w-0">
+                <span class="shop-promo-title">Book a repair</span>
+                <span class="shop-promo-text">Screens, batteries &amp; software — same-day service</span>
+              </span>
+            </a>
+            <a href="products.html?device=laptop" class="shop-promo shop-promo-b">
+              <span class="shop-promo-icon" x-html="SHOP.icon('laptop','')"></span>
+              <span class="min-w-0">
+                <span class="shop-promo-title">Laptops from <span x-text="$money(laptopFrom,{decimals:0})"></span></span>
+                <span class="shop-promo-text">Business-class, tested &amp; warrantied</span>
+              </span>
+            </a>
+            <a :href="waHref" target="_blank" rel="noopener" class="shop-promo shop-promo-c" x-show="waHref" x-cloak>
+              <span class="shop-promo-icon" x-html="SHOP.socialIcon ? SHOP.socialIcon('whatsapp','') : SHOP.icon('chat','')"></span>
+              <span class="min-w-0">
+                <span class="shop-promo-title">Order on WhatsApp</span>
+                <span class="shop-promo-text">Cash on delivery all over Pakistan</span>
+              </span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================== TRUST BAR -->
+    <section class="pt-0 pb-8 sm:pb-12">
+      <div class="shop-container">
+        <div class="shop-trust">
+          <template x-for="h in highlights" :key="h.title">
+            <div class="shop-trust-item">
+              <span class="shop-trust-icon" x-html="SHOP.icon(h.icon || 'check-circle','')"></span>
+              <span class="min-w-0">
+                <span class="shop-trust-title" x-text="h.title"></span>
+                <span class="shop-trust-text" x-text="h.text"></span>
+              </span>
+            </div>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================= SHOP BY CATEGORY -->
+    <section class="shop-section" x-show="categories.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Browse</div>
+            <h2 class="shop-h2">Shop by category</h2>
+          </div>
+          <a href="products.html" class="shop-btn shop-btn-outline shop-btn-sm">All products</a>
+        </div>
+        <div class="shop-tiles">
+          <template x-for="c in categories" :key="c.id">
+            <a :href="'products.html?category=' + c.id" class="shop-tile">
+              <span class="shop-tile-icon" x-html="SHOP.icon(catIcon(c),'')"></span>
+              <span class="min-w-0">
+                <span class="block font-bold text-slate-900 truncate" x-text="c.name"></span>
+                <span class="block text-xs text-slate-500" x-text="c.count + (c.count === 1 ? ' item' : ' items')"></span>
+              </span>
+            </a>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================== FEATURED / BESTSELLERS -->
+    <section class="shop-section shop-section-alt" x-show="featured.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Handpicked</div>
+            <h2 class="shop-h2">Featured this week</h2>
+            <p class="shop-muted" x-text="'Genuine devices with warranty — ready to ship from ' + branchName"></p>
+          </div>
+          <a href="products.html" class="shop-btn shop-btn-outline shop-btn-sm">See all<span x-html="SHOP.icon('arrow-right','')"></span></a>
+        </div>
+        <div class="shop-grid-products" x-html="cards(featured)"></div>
+      </div>
+    </section>
+
+    <!-- ========================================================= SMARTPHONES -->
+    <section class="shop-section" x-show="phones.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Mobiles</div>
+            <h2 class="shop-h2">Smartphones &amp; tablets</h2>
+          </div>
+          <a href="products.html?device=mobile" class="shop-btn shop-btn-outline shop-btn-sm">All phones<span x-html="SHOP.icon('arrow-right','')"></span></a>
+        </div>
+        <div class="shop-grid-products" x-html="cards(phones)"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ LAPTOPS -->
+    <section class="shop-section shop-section-alt" x-show="laptops.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Computing</div>
+            <h2 class="shop-h2">Laptops &amp; computers</h2>
+            <p class="shop-muted">New and certified refurbished — every unit tested and warrantied.</p>
+          </div>
+          <a href="products.html?device=laptop" class="shop-btn shop-btn-outline shop-btn-sm">All laptops<span x-html="SHOP.icon('arrow-right','')"></span></a>
+        </div>
+        <div class="shop-grid-products" x-html="cards(laptops)"></div>
+      </div>
+    </section>
+
+    <!-- ======================================================== ACCESSORIES -->
+    <section class="shop-section" x-show="accessories.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Everyday</div>
+            <h2 class="shop-h2">Accessories &amp; chargers</h2>
+          </div>
+          <a href="products.html?type=accessory" class="shop-btn shop-btn-outline shop-btn-sm">All accessories<span x-html="SHOP.icon('arrow-right','')"></span></a>
+        </div>
+        <div class="shop-grid-products" x-html="cards(accessories)"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ REPAIRS -->
+    <section class="shop-section" x-show="repairEnabled" x-cloak>
+      <div class="shop-container">
+        <div class="shop-repair">
+          <div class="shop-repair-copy">
+            <div class="shop-eyebrow shop-on-dark">Repair lab</div>
+            <h2 class="shop-h2 shop-on-dark">Broken screen? Dead battery?</h2>
+            <p class="shop-lead shop-on-dark" x-text="repairIntro"></p>
+            <div class="mt-6 flex flex-wrap gap-3">
+              <a href="repair.html" class="shop-btn shop-btn-accent shop-btn-lg"><span x-html="SHOP.icon('wrench','')"></span>Book a repair</a>
+              <a :href="waHref || 'contact.html'" class="shop-btn shop-btn-glass shop-btn-lg">Ask a question</a>
+            </div>
+          </div>
+          <div class="shop-repair-list">
+            <template x-for="s in repairServices" :key="s.id">
+              <a :href="'repair.html?service=' + s.id" class="shop-repair-item">
+                <span class="min-w-0">
+                  <span class="block font-semibold truncate" x-text="s.name"></span>
+                  <span class="block text-xs opacity-70" x-text="s.note"></span>
+                </span>
+                <span class="shop-repair-price" x-show="showRepairPrices" x-text="'from ' + $money(s.retail_price,{decimals:0})"></span>
+              </a>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================= BRANDS -->
+    <section class="shop-section-tight" x-show="brands.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-brands">
+          <template x-for="b in brands" :key="b.id">
+            <a :href="'products.html?brand=' + b.id" class="shop-brand" x-text="b.name"></a>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= TESTIMONIALS -->
+    <section class="shop-section shop-section-alt" x-show="testimonials.length" x-cloak>
+      <div class="shop-container">
+        <div class="shop-section-head">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Reviews</div>
+            <h2 class="shop-h2">What our customers say</h2>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <template x-for="t in testimonials" :key="t.id">
+            <figure class="shop-card shop-card-pad">
+              <span x-html="SHOP.stars(t.rating)"></span>
+              <blockquote class="mt-3 text-sm leading-relaxed text-slate-700" x-text="t.text"></blockquote>
+              <figcaption class="mt-4 text-sm font-bold text-slate-900" x-text="t.name"></figcaption>
+            </figure>
+          </template>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================= NEWSLETTER -->
+    <section class="shop-section-tight pb-14">
+      <div class="shop-container">
+        <div class="shop-card shop-card-pad shop-news">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">Stay in the loop</div>
+            <h2 class="shop-h3">New arrivals &amp; deals, once a week.</h2>
+            <p class="shop-muted">Price drops, fresh stock and repair offers. No spam — unsubscribe anytime.</p>
+          </div>
+          <form class="shop-news-form" @submit.prevent="subscribe()">
+            <input type="email" class="shop-input" placeholder="you@example.com" x-model="email" aria-label="Email address" required>
+            <button type="submit" class="shop-btn shop-btn-accent" :disabled="subBusy">
+              <span x-show="!subscribed"><span x-html="SHOP.icon('mail','')"></span>Subscribe</span>
+              <span x-show="subscribed" x-cloak><span x-html="SHOP.icon('check','')"></span>Subscribed</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopHome() {
+      const { db, utils } = ABM;
+      return {
+        site: {}, commerce: {}, branchName: '', highlights: [], categories: [], brands: [], testimonials: [],
+        featured: [], phones: [], laptops: [], accessories: [], repairServices: [], catStrip: [],
+        slides: [], slide: 0, laptopFrom: 0, waHref: '', repairEnabled: true, repairIntro: '', showRepairPrices: true,
+        email: '', subBusy: false, subscribed: false,
+
+        init() {
+          this.site = SHOP.site();
+          this.commerce = SHOP.commerce();
+          this.branchName = (SHOP.branch() || {}).name || 'our store';
+          this.highlights = SHOP.highlights();
+          this.categories = SHOP.categories().slice(0, 8);
+          this.brands = SHOP.brands();
+          this.testimonials = SHOP.testimonials();
+          try { this.waHref = SHOP.waLink('Hello ' + (this.site.name || '') + ', I want to order.'); } catch (e) { this.waHref = ''; }
+
+          const all = SHOP.products().filter((p) => db.productType(p) !== 'service');
+          const byNewest = (a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''));
+          const pick = (list, n) => list.slice(0, n);
+
+          const ids = this.site.featured_product_ids || [];
+          const featured = ids.map((id) => all.find((p) => p.id === id)).filter(Boolean);
+          this.featured = pick(featured.length ? featured : [...all].sort(byNewest), 8);
+          const isDevice = (p) => db.productType(p) === 'device';   // keep spare parts out of the device rows
+          this.phones = pick(all.filter((p) => isDevice(p) && ['mobile', 'tablet'].includes(p.device_type)).sort(byNewest), 8);
+          this.laptops = pick(all.filter((p) => isDevice(p) && ['laptop', 'desktop'].includes(p.device_type)).sort(byNewest), 8);
+          this.accessories = pick(all.filter((p) => db.productType(p) === 'accessory').sort((a, b) => a.retail_price - b.retail_price), 8);
+          this.laptopFrom = this.laptops.length ? Math.min(...this.laptops.map((p) => p.retail_price)) : 0;
+
+          // repair band
+          const rb = this.site.repair_booking || {};
+          this.repairEnabled = rb.enabled !== 0;
+          this.repairIntro = rb.intro || 'Certified technicians, genuine parts and a written warranty on every repair.';
+          this.showRepairPrices = rb.show_prices !== 0;
+          this.repairServices = SHOP.services().slice(0, 6).map((s) => ({
+            id: s.id, name: s.name.replace(/\s*(Labor|Labour)\s*/i, '').trim(), retail_price: s.retail_price,
+            note: s.device_type === 'laptop' ? 'Laptops & computers' : s.device_type === 'mobile' ? 'Phones & tablets' : 'All devices',
+          }));
+
+          // category quick-strip
+          const strip = [
+            { key: 'mobile', name: 'Phones', icon: 'phone', href: 'products.html?device=mobile' },
+            { key: 'laptop', name: 'Laptops', icon: 'laptop', href: 'products.html?device=laptop' },
+            { key: 'tablet', name: 'Tablets', icon: 'tablet', href: 'products.html?device=tablet' },
+            { key: 'watch', name: 'Watches', icon: 'watch', href: 'products.html?device=smartwatch' },
+            { key: 'acc', name: 'Accessories', icon: 'cube', href: 'products.html?type=accessory' },
+            { key: 'audio', name: 'Audio', icon: 'chat', href: 'products.html?q=buds' },
+            { key: 'parts', name: 'Spare parts', icon: 'cpu', href: 'products.html?type=part' },
+            { key: 'repair', name: 'Repairs', icon: 'wrench', href: 'repair.html' },
+          ];
+          const have = (d) => all.some((p) => p.device_type === d);
+          this.catStrip = strip.filter((c) => ['mobile', 'laptop', 'tablet', 'smartwatch'].indexOf(c.key) < 0 || have(c.key === 'watch' ? 'smartwatch' : c.key));
+
+          this.buildSlides();
+          if (this.slides.length > 1) setInterval(() => { this.slide = (this.slide + 1) % this.slides.length; }, 6000);
+        },
+
+        buildSlides() {
+          const hero = this.site.hero || {};
+          const art = (icons) => icons.map((n, i) => `<span class="shop-slide-chip c${i + 1}">${SHOP.icon(n, '')}</span>`).join('');
+          const list = [];
+          if (hero.title) list.push({
+            badge: hero.badge || '', title: hero.title, subtitle: hero.subtitle || '',
+            cta: hero.cta_text || 'Shop now', link: hero.cta_link || 'products.html',
+            color: '', art: art(['phone', 'laptop', 'cube']),
+          });
+          SHOP.banners().forEach((b) => list.push({
+            badge: '', title: b.title || '', subtitle: b.subtitle || '', cta: 'View offer',
+            link: b.link || 'products.html', color: b.color || '', image: b.image || '',
+            art: art(b.link && /laptop|category=4/.test(b.link) ? ['laptop', 'cpu', 'cube'] : /repair/.test(b.link || '') ? ['wrench', 'phone', 'cpu'] : ['phone', 'tablet', 'watch']),
+          }));
+          this.slides = list.filter((s) => s.title);
+        },
+        slideStyle(b) {
+          if (b.image) return `background-image:linear-gradient(100deg, rgba(8,14,32,.88), rgba(8,14,32,.45)), url('${String(b.image).replace(/'/g, '')}');background-size:cover;background-position:center`;
+          if (b.color) return `background-image:linear-gradient(110deg, ${b.color} 0%, rgb(var(--shop-primary-950)) 78%)`;
+          return 'background-image:linear-gradient(110deg, rgb(var(--shop-primary-800)) 0%, rgb(var(--shop-primary-950)) 72%)';
+        },
+
+        catIcon(c) {
+          if (c.device_type === 'laptop' || c.device_type === 'desktop') return 'laptop';
+          if (c.device_type === 'tablet') return 'tablet';
+          if (c.device_type === 'smartwatch') return 'watch';
+          if (c.device_type === 'mobile') return 'phone';
+          if (c.product_type === 'part') return 'cpu';
+          if (c.product_type === 'service') return 'wrench';
+          return 'cube';
+        },
+
+        /* ---- product cards (one markup for every section, click handled by delegation) ---- */
+        cards(list) { return list.map((p) => this.cardHtml(p)).join(''); },
+        cardHtml(p) {
+          const e = utils.escape;
+          const type = db.productType(p);
+          const inStock = SHOP.inStock(p);
+          const spec = [p.variant, p.color].filter((x) => x && x !== '—').join(' · ');
+          const tags = [];
+          if (p.condition && p.condition !== 'new') tags.push(`<span class="shop-tag shop-tag-warn">${e(utils.titleCase(p.condition))}</span>`);
+          if (p.warranty_months) tags.push(`<span class="shop-tag shop-tag-accent">${p.warranty_months}m warranty</span>`);
+          if (this.commerce.show_stock && !inStock) tags.push('<span class="shop-tag shop-tag-danger">Out of stock</span>');
+          const action = type === 'service'
+            ? `<a href="repair.html?service=${p.id}" class="shop-btn shop-btn-sm shop-btn-outline flex-none">Book</a>`
+            : `<button type="button" class="shop-add" data-add="${p.id}" ${inStock ? '' : 'disabled'} aria-label="Add ${e(SHOP.title(p))} to cart">${SHOP.icon('plus', '')}</button>`;
+          return `<div class="shop-card shop-card-hover shop-product">
+            <a href="product.html?id=${p.id}" class="block relative" aria-label="${e(SHOP.title(p))}">
+              <div class="shop-media">${SHOP.image(p)}</div>
+              ${tags.length ? `<div class="shop-media-tags">${tags.join('')}</div>` : ''}
+            </a>
+            <div class="shop-product-body">
+              <div class="shop-product-brand truncate">${e(db.brandName(p.brand_id))}</div>
+              <a href="product.html?id=${p.id}" class="shop-product-title hover:underline">${e(SHOP.title(p))}</a>
+              ${spec ? `<div class="text-[11px] text-slate-500 truncate">${e(spec)}</div>` : ''}
+              <div class="mt-auto pt-2 flex items-end justify-between gap-2 min-w-0">
+                <div class="min-w-0">
+                  ${this.commerce.show_prices ? `<div class="shop-price truncate">${utils.money(p.retail_price, { decimals: 0 })}</div>` : ''}
+                  ${this.commerce.show_stock ? `<div class="text-[11px] font-semibold mt-0.5 truncate ${inStock ? 'text-emerald-600' : 'text-rose-600'}">${e(SHOP.stockLabel(p))}</div>` : ''}
+                </div>
+                ${action}
+              </div>
+            </div>
+          </div>`;
+        },
+        onGridClick(ev) {
+          const btn = ev.target.closest('[data-add]');
+          if (!btn) return;
+          ev.preventDefault();
+          try { SHOP.cart.add(Number(btn.dataset.add), 1); SHOP.toast('Added to cart'); }
+          catch (err) { SHOP.toast(err.message || 'Could not add to cart', 'error'); }
+        },
+
+        subscribe() {
+          this.subBusy = true;
+          try { SHOP.subscribe(this.email); this.subscribed = true; this.email = ''; SHOP.toast('You are on the list!'); }
+          catch (err) { SHOP.toast(err.message || 'Please enter a valid email.', 'error'); }
+          finally { this.subBusy = false; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Receivables Aging · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .print-only { display: none; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-only { display: block !important; }
+      main { padding: 0 !important; max-width: none !important; }
+      .card { border: 1px solid #cbd5e1 !important; box-shadow: none !important; break-inside: avoid; margin-bottom: .75rem; }
+      .table thead th, .table tbody td, .table tfoot td { padding: .3rem .5rem !important; font-size: 11px !important; }
+      .table thead th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .table-wrap { overflow: visible !important; }
+      .hidden.md\:table-cell, .hidden.sm\:table-cell, .hidden.lg\:table-cell, .hidden.xl\:table-cell { display: table-cell !important; }
+      canvas { max-height: 190px !important; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="report-receivables" data-title="Receivables Aging" data-perm="reports.view">
+  <main x-data="receivablesReport()">
+    <!-- Print header -->
+    <div class="print-only mb-4">
+      <div class="text-xl font-extrabold text-slate-900" x-text="companyName + ' — Receivables Aging'"></div>
+      <div class="text-sm text-slate-600">As of <span x-text="$date(asOf)"></span> · <span x-text="scopeLabel"></span> · <span x-text="rows.length"></span> customers · total <span x-text="$money(totals.total)"></span> · printed by <span x-text="userName"></span></div>
+    </div>
+
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Receivables Aging</h2>
+        <p class="page-subtitle">Khata balances as of <b x-text="$date(asOf)"></b> · payments applied oldest invoice first<span x-show="scopeId !== null"> · accounts held at <b x-text="scopeLabel"></b> (branch of the latest ledger entry, counted once)</span></p>
+      </div>
+      <div class="page-actions">
+        <a href="reports.html" class="btn btn-ghost"><span x-html="ABM.icon('chevron-left')"></span>All reports</a>
+        <button type="button" class="btn btn-secondary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print</button>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <a href="customers.html" class="btn btn-primary"><span x-html="ABM.icon('users')"></span>Customers</a>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="card mb-4 no-print">
+      <div class="card-body !py-3 space-y-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label"><span x-text="range.label"></span> · aging as of <b x-text="ABM.utils.date(asOf)"></b></span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <template x-if="isSuperAdmin">
+            <select class="select input-sm !w-auto font-semibold" x-model="branchSel" x-ref="branchSelect" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <template x-if="!isSuperAdmin">
+            <span class="badge badge-navy badge-lg"><span x-text="ABM.db.branchCode(scopeId)"></span> · <span x-text="scopeLabel"></span></span>
+          </template>
+          <div class="relative flex-1 min-w-[10rem] max-w-xs">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input input-sm pl-9" placeholder="Customer name or phone…" x-model.debounce.200ms="q" aria-label="Search customers">
+          </div>
+          <select class="select input-sm !w-auto" x-model="bucketFilter" aria-label="Aging bucket">
+            <option value="">All balances</option>
+            <option value="current">Current (0–30)</option>
+            <option value="d31">31–60 days</option>
+            <option value="d61">61–90 days</option>
+            <option value="d90">90+ days</option>
+            <option value="overdue">Overdue (&gt; 30 days)</option>
+            <option value="overlimit">Over credit limit</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 no-print">
+      <a href="customers.html" class="stat stat-warning" title="Open customers">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Total receivable</div><div class="stat-value text-amber-700" x-text="$money(totals.total, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('users')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="rows.length"></span> customer<span x-text="rows.length === 1 ? '' : 's'"></span> with a balance</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#aging-table" class="stat stat-danger" @click="bucketFilter = 'overdue'" title="Show overdue balances only">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Overdue &gt; 30 days</div><div class="stat-value text-rose-600" x-text="$money(totals.overdue, {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="totals.overduePct"></span>% of the book · <span x-text="totals.overdueCount"></span> customer<span x-text="totals.overdueCount === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="#aging-table" class="stat" title="See the full list">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Customers owing</div><div class="stat-value" x-text="ABM.utils.num(rows.length)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('user-group')"></span>
+        </div>
+        <div class="stat-meta">avg <span x-text="$money(rows.length ? totals.total / rows.length : 0, {decimals:0})"></span> · <span x-text="totals.overLimit"></span> over credit limit</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="biggest ? 'customer-view.html?id=' + biggest.id : 'customers.html'" class="stat stat-accent" title="Open the largest debtor">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Largest balance</div><div class="stat-value truncate" x-text="biggest ? $money(biggest.total, {decimals:0}) : $money(0, {decimals:0})"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('user')"></span>
+        </div>
+        <div class="stat-meta truncate" x-text="biggest ? biggest.name : 'No outstanding balances'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <div class="print-area">
+      <!-- Buckets + chart -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
+        <div class="card">
+          <div class="card-header"><div><div class="card-title">Aging mix</div><div class="card-subtitle">Share of the outstanding book</div></div></div>
+          <div class="card-body">
+            <div class="h-52"><canvas id="agingChart"></canvas></div>
+            <template x-if="!totals.total"><div class="text-center text-sm text-slate-500 -mt-24 relative">Nothing outstanding.</div></template>
+          </div>
+        </div>
+        <div class="card lg:col-span-2">
+          <div class="card-header"><div><div class="card-title">Bucket summary</div><div class="card-subtitle">Every unpaid entry aged from its own date</div></div></div>
+          <div class="card-body space-y-3">
+            <template x-for="b in bucketSummary" :key="b.key">
+              <div class="min-w-0">
+                <div class="flex items-center justify-between gap-2 text-sm">
+                  <button type="button" class="font-semibold text-slate-800 hover:text-navy-700 text-left" @click="bucketFilter = b.filter" x-text="b.label"></button>
+                  <div class="flex items-center gap-2 flex-none">
+                    <span class="text-xs text-slate-500" x-text="b.count + ' customer' + (b.count === 1 ? '' : 's')"></span>
+                    <span class="font-bold tabular" :class="b.tone" x-text="$money(b.amount, {decimals:0})"></span>
+                    <span class="text-xs text-slate-400 w-10 text-right" x-text="b.pct + '%'"></span>
+                  </div>
+                </div>
+                <div class="progress mt-1.5"><div :style="'width:' + Math.min(100, b.pct) + '%; background:' + b.color"></div></div>
+              </div>
+            </template>
+            <div class="alert alert-info text-xs mt-2">
+              <span x-html="ABM.icon('info')"></span>
+              <span>Each payment, refund or store credit is applied to the customer's oldest unpaid entry first (FIFO). Ages are counted from the date of the unpaid sale or opening balance.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aging table -->
+      <div class="card mt-4" id="aging-table">
+        <div class="card-header">
+          <div class="min-w-0"><div class="card-title">Customer aging</div><div class="card-subtitle"><span x-text="filtered.length"></span> of <span x-text="rows.length"></span> customers · as of <span x-text="ABM.utils.date(asOf)"></span></div></div>
+          <button type="button" class="btn btn-ghost btn-sm no-print" x-show="q || bucketFilter" @click="q = ''; bucketFilter = ''"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="th-sort" @click="setSort('name')"><span class="inline-flex items-center gap-1">Customer<span x-html="sortIcon('name')"></span></span></th>
+                <th class="hidden lg:table-cell">Phone</th>
+                <th class="num th-sort" @click="setSort('current')"><span class="inline-flex items-center gap-1 justify-end">Current<span x-html="sortIcon('current')"></span></span></th>
+                <th class="num th-sort hidden md:table-cell" @click="setSort('d31')"><span class="inline-flex items-center gap-1 justify-end">31–60<span x-html="sortIcon('d31')"></span></span></th>
+                <th class="num th-sort hidden md:table-cell" @click="setSort('d61')"><span class="inline-flex items-center gap-1 justify-end">61–90<span x-html="sortIcon('d61')"></span></span></th>
+                <th class="num th-sort hidden sm:table-cell" @click="setSort('d90')"><span class="inline-flex items-center gap-1 justify-end">90+<span x-html="sortIcon('d90')"></span></span></th>
+                <th class="num th-sort" @click="setSort('total')"><span class="inline-flex items-center gap-1 justify-end">Total<span x-html="sortIcon('total')"></span></span></th>
+                <th class="num hidden xl:table-cell">Credit limit</th>
+                <th class="actions no-print">&nbsp;</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="c in pager.items" :key="c.id">
+                <tr>
+                  <td>
+                    <div class="min-w-0 max-w-[9.5rem] sm:max-w-[14rem]">
+                      <a :href="'customer-view.html?id=' + c.id" class="font-semibold text-navy-700 hover:underline block truncate" x-text="c.name"></a>
+                      <div class="text-xs text-slate-400 lg:hidden truncate" x-text="c.phone || '—'"></div>
+                      <div class="mt-0.5 flex flex-wrap gap-1">
+                        <span class="badge badge-red" x-show="c.overLimit">Over limit</span>
+                        <span class="badge badge-amber" x-show="!c.overLimit && c.oldestDays > 90" x-text="c.oldestDays + ' days old'"></span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="hidden lg:table-cell text-slate-600 whitespace-nowrap mono" x-text="c.phone || '—'"></td>
+                  <td class="num whitespace-nowrap" :class="c.current ? '' : 'text-slate-300'" x-text="$money(c.current, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap hidden md:table-cell" :class="c.d31 ? 'text-amber-700' : 'text-slate-300'" x-text="$money(c.d31, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap hidden md:table-cell" :class="c.d61 ? 'text-amber-700' : 'text-slate-300'" x-text="$money(c.d61, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap hidden sm:table-cell" :class="c.d90 ? 'text-rose-600 font-semibold' : 'text-slate-300'" x-text="$money(c.d90, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap font-bold text-slate-900" x-text="$money(c.total, {decimals:0})"></td>
+                  <td class="num whitespace-nowrap hidden xl:table-cell text-slate-500" x-text="c.credit_limit ? $money(c.credit_limit, {decimals:0}) : '—'"></td>
+                  <td class="actions no-print">
+                    <a :href="'customer-view.html?id=' + c.id" class="btn btn-ghost btn-sm btn-icon" title="Open ledger" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                  </td>
+                </tr>
+              </template>
+              <template x-if="!pager.items.length">
+                <tr><td colspan="9">
+                  <div class="empty">
+                    <span x-html="ABM.icon('check-circle')"></span>
+                    <div class="empty-title" x-text="rows.length ? 'No customer matches your filter' : 'Nothing outstanding'"></div>
+                    <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or bucket.' : 'Every customer is settled as of this date.'"></div>
+                    <div class="mt-4 no-print"><button type="button" class="btn btn-secondary btn-sm" x-show="q || bucketFilter" @click="q = ''; bucketFilter = ''">Clear filters</button></div>
+                  </div>
+                </td></tr>
+              </template>
+            </tbody>
+            <tfoot x-show="pager.items.length">
+              <tr>
+                <td class="font-bold">Total<span class="font-normal text-slate-500 text-xs" x-show="filtered.length !== rows.length"> (filtered)</span></td>
+                <td class="hidden lg:table-cell"></td>
+                <td class="num whitespace-nowrap" x-text="$money(filteredTotals.current, {decimals:0})"></td>
+                <td class="num whitespace-nowrap hidden md:table-cell" x-text="$money(filteredTotals.d31, {decimals:0})"></td>
+                <td class="num whitespace-nowrap hidden md:table-cell" x-text="$money(filteredTotals.d61, {decimals:0})"></td>
+                <td class="num whitespace-nowrap hidden sm:table-cell" x-text="$money(filteredTotals.d90, {decimals:0})"></td>
+                <td class="num whitespace-nowrap" x-text="$money(filteredTotals.total, {decimals:0})"></td>
+                <td class="num hidden xl:table-cell"></td>
+                <td class="no-print"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+          <div>
+            Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b>
+            <span x-show="storeCredit.count"> · <span x-text="storeCredit.count"></span> customer<span x-text="storeCredit.count === 1 ? ' holds ' : 's hold '"></span><b class="text-emerald-700" x-text="$money(storeCredit.amount, {decimals:0})"></b> store credit</span>
+          </div>
+          <div class="flex items-center gap-1 no-print" x-show="pager.pages > 1">
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+            <template x-for="n in pageNumbers" :key="n">
+              <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+            </template>
+            <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function receivablesReport() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      /** Branch a khata account belongs to = branch of its most recent entry (same rule as the balance sheet),
+          so a per-branch view never counts one customer balance at both branches. */
+      const homeBranch = (list) => {
+        let branch = null, key = '';
+        list.forEach((t) => { const k = String(t.created_at || '').slice(0, 10) + String(t.id).padStart(8, '0'); if (k >= key) { key = k; branch = t.branch_id; } });
+        return branch;
+      };
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        branchSel: String(session.branchId() || ''),
+        companyName: db.setting('company_name', 'Abbott Mobile'),
+        userName: (session.user() || {}).name || '',
+        range: null,
+        rows: [],
+        totals: { current: 0, d31: 0, d61: 0, d90: 0, total: 0, overdue: 0, overduePct: 0, overdueCount: 0, overLimit: 0 },
+        storeCredit: { count: 0, amount: 0 },
+        q: '',
+        bucketFilter: '',
+        sort: { key: 'total', dir: 'desc' },
+        page: 1,
+        chart: null,
+
+        init() {
+          const qb = utils.qs('branch');
+          if (this.isSuperAdmin && qb !== null) this.branchSel = (qb === 'all' || this.branches.some((b) => String(b.id) === String(qb))) ? String(qb) : String(session.branchId() || '');
+          const qbucket = utils.qs('bucket');
+          if (['current', 'd31', 'd61', 'd90', 'overdue', 'overlimit'].includes(qbucket)) this.bucketFilter = qbucket;
+          this.range = ABM.range('all', () => this.refresh(), 'report-receivables');
+          this.refresh();
+          this.$nextTick(() => { if (this.$refs.branchSelect) this.$refs.branchSelect.value = this.branchSel; });
+          this.$watch('branchSel', () => this.refresh());
+          this.$watch('q', () => { this.page = 1; });
+          this.$watch('bucketFilter', () => { this.page = 1; this.$nextTick(() => this.drawChart()); });
+          ABM.theme.onChange(() => this.drawChart());
+        },
+
+        /* ------------------------------------------------------------ scope */
+        get scopeId() { return this.isSuperAdmin ? (this.branchSel === 'all' ? null : Number(this.branchSel)) : session.branchId(); },
+        get scopeLabel() { return this.scopeId === null ? 'All branches' : db.branchName(this.scopeId); },
+        get asOf() { return this.range && this.range.value.to ? this.range.value.to : utils.today(); },
+
+        /* -------------------------------------------------------------- data */
+        refresh() { this.compute(); this.$nextTick(() => this.drawChart()); },
+        compute() {
+          const asOf = this.asOf;
+          const asOfDate = utils.parseDate(asOf) || new Date();
+          const bid = this.scopeId;
+          const txs = db.all('customer_transactions').filter((t) => String(t.created_at || '').slice(0, 10) <= asOf);
+          const byCustomer = utils.groupBy(txs, 'customer_id');
+          const out = [];
+          let creditCount = 0, creditAmount = 0;
+          db.all('customers').forEach((c) => {
+            const list = byCustomer[c.id] || [];
+            if (!list.length) return;
+            if (bid !== null && Number(homeBranch(list)) !== Number(bid)) return;
+            /* EVERY debit ages — credit sales, opening balances, adjustments and store credit spent at POS
+               (type 'store_credit', which pos.js posts as a debit). Filtering by type here while the credit
+               pool below counts every credit made the report disagree with customers.balance. */
+            const debits = utils.sortBy(list.filter((t) => (Number(t.debit) || 0) > 0), 'created_at', 'asc')
+              .map((t) => ({ date: String(t.created_at || '').slice(0, 10), amount: Number(t.debit) || 0, ref: t.type }));
+            let pool = utils.sum(list, 'credit');
+            const outstandingTotal = utils.round2(utils.sum(debits, 'amount') - pool);
+            if (outstandingTotal <= 0.01) {
+              if (outstandingTotal < -0.01) { creditCount += 1; creditAmount += Math.abs(outstandingTotal); }
+              return;
+            }
+            const buckets = { current: 0, d31: 0, d61: 0, d90: 0 };
+            let oldestDays = 0;
+            debits.forEach((d) => {
+              const applied = Math.min(pool, d.amount);
+              pool = utils.round2(pool - applied);
+              const rest = utils.round2(d.amount - applied);
+              if (rest <= 0.01) return;
+              const days = Math.max(0, Math.floor((asOfDate - (utils.parseDate(d.date) || asOfDate)) / 86400000));
+              if (days > oldestDays) oldestDays = days;
+              if (days <= 30) buckets.current += rest;
+              else if (days <= 60) buckets.d31 += rest;
+              else if (days <= 90) buckets.d61 += rest;
+              else buckets.d90 += rest;
+            });
+            const total = utils.round2(buckets.current + buckets.d31 + buckets.d61 + buckets.d90);
+            if (total <= 0.01) return;
+            out.push({
+              id: c.id, name: c.name, phone: c.phone || '', credit_limit: Number(c.credit_limit) || 0,
+              current: utils.round2(buckets.current), d31: utils.round2(buckets.d31), d61: utils.round2(buckets.d61), d90: utils.round2(buckets.d90),
+              total, overdue: utils.round2(buckets.d31 + buckets.d61 + buckets.d90), oldestDays,
+              overLimit: (Number(c.credit_limit) || 0) > 0 && total > (Number(c.credit_limit) || 0),
+            });
+          });
+          this.rows = utils.sortBy(out, 'total', 'desc');
+          this.storeCredit = { count: creditCount, amount: utils.round2(creditAmount) };
+          const t = {
+            current: utils.sum(this.rows, 'current'), d31: utils.sum(this.rows, 'd31'), d61: utils.sum(this.rows, 'd61'), d90: utils.sum(this.rows, 'd90'),
+            total: utils.sum(this.rows, 'total'), overdue: utils.sum(this.rows, 'overdue'),
+            overdueCount: this.rows.filter((r) => r.overdue > 0).length, overLimit: this.rows.filter((r) => r.overLimit).length,
+          };
+          t.overduePct = t.total ? Math.round(t.overdue / t.total * 100) : 0;
+          this.totals = t;
+          this.page = 1;
+        },
+        get biggest() { return this.rows[0] || null; },
+        get bucketSummary() {
+          const t = this.totals;
+          const mk = (key, label, amount, filter, tone, color) => ({ key, label, amount, filter, tone, color, pct: t.total ? Math.round(amount / t.total * 100) : 0, count: this.rows.filter((r) => (Number(r[key]) || 0) > 0).length });
+          return [
+            mk('current', 'Current (0–30 days)', t.current, 'current', 'text-emerald-700', '#059669'),
+            mk('d31', '31–60 days', t.d31, 'd31', 'text-amber-700', '#d97706'),
+            mk('d61', '61–90 days', t.d61, 'd61', 'text-amber-700', '#ea580c'),
+            mk('d90', 'Over 90 days', t.d90, 'd90', 'text-rose-600', '#e11d48'),
+          ];
+        },
+
+        /* ------------------------------------------------------------ table */
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: key === 'name' ? 'asc' : 'desc' }; this.page = 1; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const f = this.bucketFilter;
+          const list = this.rows.filter((r) => {
+            if (q && ![r.name, r.phone].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            if (f === 'overdue' && !(r.overdue > 0)) return false;
+            if (f === 'overlimit' && !r.overLimit) return false;
+            if (['current', 'd31', 'd61', 'd90'].includes(f) && !((Number(r[f]) || 0) > 0)) return false;
+            return true;
+          });
+          const key = this.sort.key;
+          return utils.sortBy(list, (r) => (key === 'name' ? String(r.name).toLowerCase() : Number(r[key]) || 0), this.sort.dir);
+        },
+        get filteredTotals() {
+          const f = this.filtered;
+          return { current: utils.sum(f, 'current'), d31: utils.sum(f, 'd31'), d61: utils.sum(f, 'd61'), d90: utils.sum(f, 'd90'), total: utils.sum(f, 'total') };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+
+        /* ------------------------------------------------------------ chart */
+        drawChart() {
+          const el = document.getElementById('agingChart');
+          if (!window.Chart || !el) return;
+          try {
+            const ex = Chart.getChart(el); if (ex) ex.destroy();
+            const tc = ABM.theme.chart();
+            Chart.defaults.color = tc.tick;
+            Chart.defaults.font.family = 'Inter, system-ui, sans-serif';
+            const data = this.bucketSummary.filter((b) => b.amount > 0);
+            if (!data.length) return;
+            this.chart = new Chart(el, {
+              type: 'doughnut',
+              data: { labels: data.map((b) => b.label), datasets: [{ data: data.map((b) => b.amount), backgroundColor: data.map((b) => b.color), borderWidth: 2, borderColor: 'rgba(0,0,0,0)' }] },
+              options: { responsive: true, maintainAspectRatio: false, cutout: '60%', plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, usePointStyle: true, color: tc.tick, padding: 10, font: { size: 11 } } }, tooltip: { callbacks: { label: (c) => ' ' + c.label + ': ' + utils.money(c.raw, { decimals: 0 }) } } } },
+            });
+          } catch (e) { console.warn('Receivables chart could not be drawn', e); }
+        },
+
+        /* ----------------------------------------------------------- export */
+        exportCsv() {
+          const cols = [
+            { label: 'Customer', key: 'name' }, { label: 'Phone', key: 'phone' }, { label: 'Current (0-30)', key: 'current' },
+            { label: '31-60', key: 'd31' }, { label: '61-90', key: 'd61' }, { label: '90+', key: 'd90' }, { label: 'Total', key: 'total' },
+            { label: 'Credit limit', key: 'credit_limit' }, { label: 'Over limit', value: (r) => (r.overLimit ? 'Yes' : 'No') }, { label: 'Oldest entry (days)', key: 'oldestDays' },
+          ];
+          if (!utils.download('receivables-aging-' + this.asOf + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' customer' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

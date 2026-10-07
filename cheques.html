@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Cheque Register · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="cheques" data-title="Cheque Register" data-perm="cheques.view">
+  <main x-data="chequesPage()" @keydown.escape.window="closeAll()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Cheque register</h2>
+        <p class="page-subtitle">Every cheque written and taken — and whether it actually cleared · <span x-text="range.label"></span></p>
+      </div>
+      <div class="page-actions">
+        <a href="banking.html" class="btn btn-secondary"><span x-html="ABM.icon('building')"></span>Bank accounts</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export</button>
+        <template x-if="canAdd"><button type="button" class="btn btn-secondary" @click="openNew('received')"><span x-html="ABM.icon('plus')"></span>Cheque received</button></template>
+        <template x-if="canAdd"><button type="button" class="btn btn-primary" @click="openNew('issued')"><span x-html="ABM.icon('document')"></span>Write a cheque</button></template>
+      </div>
+    </div>
+
+    <!-- Period filter -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tiles -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'cheques.html?range=all&status=open&dir=issued'" class="stat stat-warning" title="Cheques we wrote that have not cleared">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">We owe (not cleared)</div><div class="stat-value text-amber-700" x-text="$money(k.issuedOpen, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('document')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.issuedOpenCount"></span> cheque<span x-text="k.issuedOpenCount === 1 ? '' : 's'"></span> written and waiting</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'cheques.html?range=all&status=open&dir=received'" class="stat stat-money" title="Cheques we hold that have not cleared">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">We hold (not cleared)</div><div class="stat-value text-emerald-700" x-text="$money(k.receivedOpen, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.receivedOpenCount"></span> cheque<span x-text="k.receivedOpenCount === 1 ? '' : 's'"></span> in hand or with the bank</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'cheques.html?range=all&due=1'" class="stat" :class="k.due ? 'stat-danger' : 'stat-money'" title="Due today or already past their date">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Due now</div><div class="stat-value" :class="k.due ? 'text-rose-600' : 'text-emerald-700'" x-text="ABM.utils.num(k.due)"></div></div>
+          <span class="chip" :class="k.due ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.due ? $money(k.dueValue, {decimals:0}) + ' to chase or clear' : 'Nothing overdue'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'cheques.html?' + range.query + '&status=bounced'" class="stat" :class="k.bounced ? 'stat-danger' : 'stat-money'" title="Bounced cheques in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Bounced · <span x-text="periodShort"></span></div><div class="stat-value" :class="k.bounced ? 'text-rose-600' : 'text-emerald-700'" x-text="ABM.utils.num(k.bounced)"></div></div>
+          <span class="chip" :class="k.bounced ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('x-circle')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.bounced ? $money(k.bouncedValue, {decimals:0}) + ' returned unpaid' : 'None returned'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+          <div class="relative sm:col-span-2">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search cheque number, party or notes…" x-model.debounce.200ms="q" aria-label="Search cheques">
+          </div>
+          <select class="select" x-model="f.dir" aria-label="Direction">
+            <option value="">Issued and received</option>
+            <option value="issued">We wrote</option>
+            <option value="received">We received</option>
+          </select>
+          <select class="select" x-model="f.status" aria-label="Status">
+            <option value="">Any status</option>
+            <option value="open">Not cleared yet</option>
+            <option value="pending">In hand</option>
+            <option value="deposited">With the bank</option>
+            <option value="cleared">Cleared</option>
+            <option value="bounced">Bounced</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <label class="input flex items-center gap-2 cursor-pointer select-none" :class="f.due && '!border-rose-300 !bg-rose-50'">
+            <input type="checkbox" class="checkbox" x-model="f.due">
+            <span class="text-sm truncate" :class="f.due ? 'text-rose-700 font-semibold' : 'text-slate-600'">Due now only</span>
+          </label>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> cheques in period</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Cheques</div><div class="card-subtitle">Newest first · a cheque is only money once it clears</div></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Cheque</th>
+              <th>Party</th>
+              <th class="hidden lg:table-cell">Account / bank</th>
+              <th class="hidden md:table-cell">Due</th>
+              <th class="num">Amount</th>
+              <th>Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="c in pager.items" :key="c.id">
+              <tr :class="c.status === 'cancelled' && 'opacity-60'">
+                <td>
+                  <div class="font-semibold mono text-slate-800 whitespace-nowrap" x-text="c.cheque_no"></div>
+                  <div class="text-[11px]"><span x-html="$badge(c.direction, c.direction === 'issued' ? 'We wrote' : 'We received')"></span></div>
+                  <div class="text-[11px] text-slate-400 md:hidden whitespace-nowrap" x-text="'due ' + $date(c.due_date)"></div>
+                </td>
+                <td>
+                  <div class="font-medium text-slate-800 truncate max-w-[9rem] sm:max-w-[13rem]" x-text="c.party_name || '—'"></div>
+                  <div class="text-[11px] text-slate-400" x-text="ABM.utils.titleCase(c.party_type || '')"></div>
+                </td>
+                <td class="hidden lg:table-cell text-slate-600 truncate max-w-[12rem]"><span x-text="c.accountName || c.bank_name || '—'"></span></td>
+                <td class="hidden md:table-cell whitespace-nowrap" :class="c.overdue ? 'text-rose-600 font-semibold' : 'text-slate-600'">
+                  <span x-text="$date(c.due_date)"></span>
+                  <span class="badge badge-red ml-1" x-show="c.overdue">due</span>
+                </td>
+                <td class="num tabular font-semibold whitespace-nowrap" x-text="$money(c.amount, {decimals:0})"></td>
+                <td>
+                  <span x-html="$badge(c.status)"></span>
+                  <div class="text-[11px] text-rose-600 truncate max-w-[10rem]" x-show="c.bounced_reason" x-text="c.bounced_reason"></div>
+                </td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <template x-if="canManage && c.direction === 'received' && c.status === 'pending'">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-navy-700" title="Deposit into an account" @click="openDeposit(c)" x-html="ABM.icon('building','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="canManage && ['pending','deposited'].includes(c.status)">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="It cleared" @click="openClear(c)" x-html="ABM.icon('check-circle','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="canManage && ['pending','deposited','cleared'].includes(c.status)">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="It bounced" @click="openBounce(c)" x-html="ABM.icon('x-circle','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="canDelete && ['pending','deposited'].includes(c.status)">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-slate-400" title="Cancel this cheque" @click="cancel(c)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="7">
+                <div class="empty">
+                  <span x-html="ABM.icon('document')"></span>
+                  <div class="empty-title">No cheques found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No cheque was written or taken in this period.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td colspan="4">Totals · <span x-text="filtered.length"></span> cheque(s)</td>
+              <td class="num tabular whitespace-nowrap" x-text="$money(filteredTotal, {decimals:0})"></td>
+              <td colspan="2"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- New cheque -->
+    <div x-show="form.open" x-cloak class="modal-backdrop" @click.self="form.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="chqTitle">
+        <form @submit.prevent="saveCheque()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="chqTitle" x-text="form.direction === 'issued' ? 'Write a cheque' : 'Record a cheque we received'"></div>
+              <div class="text-xs text-slate-500" x-text="form.direction === 'issued' ? 'The bank balance only moves when it clears.' : 'It is not money until it clears — deposit it, then mark it cleared.'"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="form.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="ch-no">Cheque number <span class="req">*</span></label>
+                <input id="ch-no" x-ref="chqNo" type="text" class="input mono" x-model="form.cheque_no" :class="form.errors.cheque_no && 'is-invalid'" maxlength="30">
+                <p class="field-error" x-show="form.errors.cheque_no" x-text="form.errors.cheque_no"></p>
+              </div>
+              <div>
+                <label class="label" for="ch-amount">Amount <span class="req">*</span></label>
+                <div class="input-group"><input id="ch-amount" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.amount" :class="form.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="form.errors.amount" x-text="form.errors.amount"></p>
+              </div>
+              <div x-show="form.direction === 'issued'">
+                <label class="label" for="ch-acc">Drawn on <span class="req">*</span></label>
+                <select id="ch-acc" class="select" x-model="form.account_id" :class="form.errors.account && 'is-invalid'">
+                  <template x-for="a in activeAccounts" :key="a.id"><option :value="String(a.id)" x-text="a.name + ' · ' + ABM.utils.money(a.balance, {decimals:0})"></option></template>
+                </select>
+                <p class="field-error" x-show="form.errors.account" x-text="form.errors.account"></p>
+              </div>
+              <div x-show="form.direction === 'received'">
+                <label class="label" for="ch-bank">Their bank</label>
+                <input id="ch-bank" type="text" class="input" x-model="form.bank_name" placeholder="e.g. HBL" maxlength="60">
+              </div>
+              <div>
+                <label class="label" for="ch-ptype">Who</label>
+                <select id="ch-ptype" class="select" x-model="form.party_type" @change="form.party_id = ''">
+                  <option value="supplier">Supplier</option>
+                  <option value="customer">Customer</option>
+                  <option value="other">Someone else</option>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="ch-party" x-text="form.party_type === 'other' ? 'Name' : (form.party_type === 'supplier' ? 'Supplier' : 'Customer')"></label>
+                <template x-if="form.party_type === 'other'">
+                  <input id="ch-party" type="text" class="input" x-model="form.party_name" :class="form.errors.party && 'is-invalid'" maxlength="80">
+                </template>
+                <template x-if="form.party_type !== 'other'">
+                  <select id="ch-party" class="select" x-model="form.party_id" :class="form.errors.party && 'is-invalid'">
+                    <option value="">Choose…</option>
+                    <template x-for="p in parties" :key="p.id"><option :value="String(p.id)" x-text="p.name"></option></template>
+                  </select>
+                </template>
+                <p class="field-error" x-show="form.errors.party" x-text="form.errors.party"></p>
+              </div>
+              <div>
+                <label class="label" for="ch-issued">Cheque date</label>
+                <input id="ch-issued" type="date" class="input" x-model="form.issue_date">
+              </div>
+              <div>
+                <label class="label" for="ch-due">Due date (post-dated?)</label>
+                <input id="ch-due" type="date" class="input" x-model="form.due_date" :min="form.issue_date">
+                <p class="help">Leave the same as the cheque date unless it is post-dated.</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="ch-notes">Notes</label>
+                <input id="ch-notes" type="text" class="input" x-model="form.notes" placeholder="What it is for" maxlength="160">
+              </div>
+            </div>
+            <label class="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm cursor-pointer select-none" x-show="canPostLedger" x-cloak>
+              <input type="checkbox" class="checkbox mt-0.5" x-model="form.post_ledger">
+              <span><b x-text="form.direction === 'issued' ? 'This cheque pays the supplier' : 'This cheque pays the customer\'s khata'"></b><span class="block text-xs text-slate-500" x-text="form.direction === 'issued' ? 'Their balance goes down now; if the cheque bounces or is cancelled it goes back up.' : 'Their balance goes down now; if the cheque bounces or is cancelled they owe it again.'"></span></span>
+            </label>
+            <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><span x-text="form.direction === 'issued' ? 'The bank balance moves only when the cheque clears.' : 'It is not money until it clears — then it lands in the account you deposit it into.'"></span></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="form.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="form.busy"><span x-html="ABM.icon('check')"></span>Record</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Deposit / clear / bounce -->
+    <div x-show="act.open" x-cloak class="modal-backdrop" @click.self="act.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="actTitle">
+        <form @submit.prevent="saveAct()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="actTitle" x-text="act.kind === 'deposit' ? 'Deposit this cheque' : act.kind === 'clear' ? 'Mark it cleared' : 'Mark it bounced'"></div>
+              <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="act.cheque.cheque_no"></span> · <span x-text="act.cheque.party_name"></span> · <b x-text="$money(act.cheque.amount)"></b></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="act.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div x-show="act.kind !== 'bounce'">
+              <label class="label" for="ac-account">Account</label>
+              <select id="ac-account" class="select" x-model="act.account_id" :class="act.errors.account && 'is-invalid'">
+                <option value="">Choose…</option>
+                <template x-for="a in activeAccounts" :key="a.id"><option :value="String(a.id)" x-text="a.name"></option></template>
+              </select>
+              <p class="field-error" x-show="act.errors.account" x-text="act.errors.account"></p>
+            </div>
+            <div x-show="act.kind === 'clear'">
+              <label class="label" for="ac-date">Date it cleared</label>
+              <input id="ac-date" type="date" class="input" x-model="act.date" :max="today">
+            </div>
+            <div x-show="act.kind === 'bounce'">
+              <label class="label" for="ac-reason">Why did it bounce? <span class="req">*</span></label>
+              <input id="ac-reason" x-ref="bounceReason" type="text" class="input" x-model="act.reason" :class="act.errors.reason && 'is-invalid'" placeholder="Insufficient funds, signature mismatch…" maxlength="120">
+              <p class="field-error" x-show="act.errors.reason" x-text="act.errors.reason"></p>
+            </div>
+            <div class="alert" :class="act.kind === 'bounce' ? 'alert-warning' : 'alert-info'">
+              <span x-html="ABM.icon(act.kind === 'bounce' ? 'warning' : 'info')"></span>
+              <span x-show="act.kind === 'deposit'">It goes to the bank but is still not money until it clears.</span>
+              <span x-show="act.kind === 'clear'"><b x-text="$money(act.cheque.amount)"></b> <span x-text="act.cheque.direction === 'issued' ? 'leaves' : 'lands in'"></span> the account.</span>
+              <span x-show="act.kind === 'bounce'">
+                <span x-show="act.cheque.status === 'cleared'">The money comes back out of the account. </span>
+                <span x-show="act.cheque.direction === 'received' && act.cheque.ledger_txn_id">The amount goes back onto <b x-text="act.cheque.party_name"></b>'s ledger.</span>
+                <span x-show="act.cheque.direction === 'issued' && act.cheque.ledger_txn_id">It goes back onto what we owe <b x-text="act.cheque.party_name"></b>.</span>
+              </span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="act.open = false">Cancel</button>
+            <button type="submit" class="btn" :class="act.kind === 'bounce' ? 'btn-danger' : 'btn-primary'" :disabled="act.busy"><span x-html="ABM.icon('check')"></span>Confirm</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function chequesPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const blank = () => ({ id: null, cheque_no: '', party_name: '', amount: 0, direction: 'issued', status: '', party_type: 'supplier' });
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('cheques.add'),
+        canManage: session.can('cheques.edit'),
+        canDelete: session.can('cheques.delete'),
+        today: utils.today(),
+        range: null, rows: [], page: 1, q: '',
+        f: { dir: '', status: '', due: false },
+        k: { issuedOpen: 0, issuedOpenCount: 0, receivedOpen: 0, receivedOpenCount: 0, due: 0, dueValue: 0, bounced: 0, bouncedValue: 0 },
+        form: { open: false, direction: 'issued', cheque_no: '', amount: '', account_id: '', bank_name: '', party_type: 'supplier', party_id: '', party_name: '', issue_date: utils.today(), due_date: utils.today(), notes: '', errors: {}, busy: false },
+        act: { open: false, kind: 'clear', cheque: blank(), account_id: '', date: utils.today(), reason: '', errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get activeAccounts() { return ABM.bank.accounts(this.isSuperAdmin ? null : session.branchId()).filter((a) => a.is_active); },
+        /** Only a cheque between us and a customer (received) or a supplier (issued) can settle an account. */
+        get canPostLedger() {
+          const f = this.form;
+          return !!f.party_id && ((f.direction === 'received' && f.party_type === 'customer') || (f.direction === 'issued' && f.party_type === 'supplier'));
+        },
+        get parties() {
+          return this.form.party_type === 'supplier'
+            ? utils.sortBy(db.all('suppliers').filter((s) => s.is_active), 'name')
+            : utils.sortBy(db.all('customers').filter((c) => !c.is_walkin && c.is_active !== 0), 'name');
+        },
+        get hasFilters() { return !!(this.q || this.f.dir || this.f.status || this.f.due); },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((c) => {
+            if (this.f.dir && c.direction !== this.f.dir) return false;
+            if (this.f.status === 'open') { if (!['pending', 'deposited'].includes(c.status)) return false; }
+            else if (this.f.status && c.status !== this.f.status) return false;
+            if (this.f.due && !c.overdue) return false;
+            if (q && ![c.cheque_no, c.party_name, c.notes, c.bank_name, c.accountName].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotal() { return utils.sum(this.filtered, 'amount'); },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+
+        init() {
+          const st = utils.qs('status', ''); if (['open', 'pending', 'deposited', 'cleared', 'bounced', 'cancelled'].includes(st)) this.f.status = st;
+          const dir = utils.qs('dir', ''); if (['issued', 'received'].includes(dir)) this.f.dir = dir;
+          if (utils.qs('due') === '1') this.f.due = true;
+          const id = utils.qs('id'); if (id) this.q = String((db.find('cheques', id) || {}).cheque_no || '');
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'cheques');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          ['dir', 'status', 'due'].forEach((key) => this.$watch('f.' + key, () => { this.page = 1; }));
+        },
+        inScope(c) { return this.isSuperAdmin || String(c.branch_id) === String(session.branchId()); },
+        decorate(c) {
+          return {
+            ...c,
+            accountName: c.account_id ? (db.find('bank_accounts', c.account_id) || {}).name || '' : '',
+            overdue: ['pending', 'deposited'].includes(c.status) && String(c.due_date || '') <= this.today,
+          };
+        },
+        compute() {
+          const scoped = db.all('cheques').filter((c) => this.inScope(c)).map((c) => this.decorate(c));
+          this.rows = utils.sortBy(scoped.filter((c) => this.range.contains(c.issue_date)),
+            (c) => String(c.issue_date) + '|' + String(c.id).padStart(8, '0'), 'desc');
+          const openIssued = scoped.filter((c) => c.direction === 'issued' && ['pending', 'deposited'].includes(c.status));
+          const openRecv = scoped.filter((c) => c.direction === 'received' && ['pending', 'deposited'].includes(c.status));
+          const due = scoped.filter((c) => c.overdue);
+          const bounced = this.rows.filter((c) => c.status === 'bounced');
+          this.k = {
+            issuedOpen: utils.sum(openIssued, 'amount'), issuedOpenCount: openIssued.length,
+            receivedOpen: utils.sum(openRecv, 'amount'), receivedOpenCount: openRecv.length,
+            due: due.length, dueValue: utils.sum(due, 'amount'),
+            bounced: bounced.length, bouncedValue: utils.sum(bounced, 'amount'),
+          };
+        },
+        clearFilters() { this.q = ''; this.f = { dir: '', status: '', due: false }; },
+        closeAll() { this.form.open = false; this.act.open = false; },
+
+        /* ------------------------------------------------------- new cheque */
+        openNew(direction) {
+          if (!this.canAdd) { ui.warn('You do not have permission to record cheques.'); return; }
+          if (direction === 'issued' && !this.activeAccounts.length) { ui.warn('Add a bank account first.'); return; }
+          this.form = {
+            open: true, direction, cheque_no: '', amount: '', account_id: direction === 'issued' ? String(this.activeAccounts[0].id) : '',
+            bank_name: '', party_type: direction === 'issued' ? 'supplier' : 'customer', party_id: '', party_name: '',
+            issue_date: utils.today(), due_date: utils.today(), notes: '', post_ledger: true, errors: {}, busy: false,
+          };
+          this.$nextTick(() => { if (this.$refs.chqNo) this.$refs.chqNo.focus(); });
+        },
+        saveCheque() {
+          const f = this.form, e = {};
+          const amt = Number(f.amount);
+          if (!String(f.cheque_no || '').trim()) e.cheque_no = 'Enter the cheque number.';
+          if (f.amount === '' || f.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          if (f.direction === 'issued' && !f.account_id) e.account = 'Which account is it drawn on?';
+          if (f.party_type === 'other' ? !String(f.party_name || '').trim() : !f.party_id) e.party = 'Say who the cheque is for.';
+          if (f.due_date && f.issue_date && f.due_date < f.issue_date) e.party = e.party || '';
+          f.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          f.busy = true;
+          try {
+            const partyName = f.party_type === 'other' ? f.party_name
+              : f.party_type === 'supplier' ? db.supplierName(f.party_id) : db.customerName(f.party_id);
+            const payload = {
+              cheque_no: f.cheque_no, amount: amt, account_id: f.account_id || null, bank_name: f.bank_name,
+              party_type: f.party_type, party_id: f.party_type === 'other' ? null : Number(f.party_id), party_name: partyName,
+              issue_date: f.issue_date, due_date: f.due_date || f.issue_date, notes: f.notes,
+              branch_id: session.branchId(),
+              // the cheque IS the payment: record it on their account now, linked, so a bounce undoes exactly it
+              postLedger: this.canPostLedger && !!f.post_ledger,
+            };
+            if (f.direction === 'issued') ABM.bank.cheque.issue(payload);
+            else ABM.bank.cheque.receive(payload);
+            ui.success('Cheque ' + f.cheque_no + ' recorded.');
+            f.open = false;
+            this.compute();
+          } catch (err) { ui.error(err.message || 'Could not record the cheque.'); }
+          finally { f.busy = false; }
+        },
+
+        /* ------------------------------------------------------- lifecycle */
+        openDeposit(c) { this.openAct('deposit', c); },
+        openClear(c) { this.openAct('clear', c); },
+        openBounce(c) { this.openAct('bounce', c); },
+        openAct(kind, c) {
+          if (!this.canManage) { ui.warn('You do not have permission to change cheques.'); return; }
+          this.act = {
+            open: true, kind, cheque: { ...c },
+            account_id: String(c.account_id || (this.activeAccounts[0] ? this.activeAccounts[0].id : '')),
+            date: utils.today(), reason: '', errors: {}, busy: false,
+          };
+          if (kind === 'bounce') this.$nextTick(() => { if (this.$refs.bounceReason) this.$refs.bounceReason.focus(); });
+        },
+        saveAct() {
+          const a = this.act, e = {};
+          if (a.kind !== 'bounce' && !a.account_id) e.account = 'Choose the account.';
+          if (a.kind === 'bounce' && !String(a.reason || '').trim()) e.reason = 'Say why it bounced — it goes on the record.';
+          a.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          a.busy = true;
+          try {
+            if (a.kind === 'deposit') { ABM.bank.cheque.deposit(a.cheque.id, a.account_id); ui.success('Cheque deposited.'); }
+            else if (a.kind === 'clear') { ABM.bank.cheque.clear(a.cheque.id, { accountId: a.account_id, date: a.date }); ui.success('Cheque cleared — the account has been updated.'); }
+            else { ABM.bank.cheque.bounce(a.cheque.id, a.reason); ui.warn('Cheque marked bounced.'); }
+            a.open = false;
+            this.compute();
+          } catch (err) { ui.error(err.message || 'Could not update the cheque.'); }
+          finally { a.busy = false; }
+        },
+        async cancel(c) {
+          if (!this.canDelete) { ui.warn('Your role is not allowed to cancel cheques.'); return; }
+          const ok = await ui.confirm({
+            title: 'Cancel cheque ' + c.cheque_no + '?',
+            message: 'It stays on the register as cancelled. No money moves, and the number can be used again.',
+            confirmText: 'Cancel the cheque', cancelText: 'Keep it', danger: true,
+          });
+          if (!ok) return;
+          try { ABM.bank.cheque.cancel(c.id, 'Cancelled from the register'); ui.success('Cheque cancelled.'); }
+          catch (err) { ui.error(err.message || 'Could not cancel it.'); }
+          this.compute();
+        },
+        exportCsv() {
+          const cols = [
+            { label: 'Cheque No', key: 'cheque_no' }, { label: 'Direction', value: (c) => (c.direction === 'issued' ? 'We wrote' : 'We received') },
+            { label: 'Party', key: 'party_name' }, { label: 'Party type', value: (c) => utils.titleCase(c.party_type || '') },
+            { label: 'Account', key: 'accountName' }, { label: 'Bank', key: 'bank_name' },
+            { label: 'Cheque date', key: 'issue_date' }, { label: 'Due date', key: 'due_date' },
+            { label: 'Amount', key: 'amount' }, { label: 'Status', value: (c) => ui.statusLabel(c.status) },
+            { label: 'Bounced reason', key: 'bounced_reason' }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('cheques-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' cheque(s).');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

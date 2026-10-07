@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Sign in · Abbott Mobiles</title>
+  <meta name="description" content="Sign in to your Abbott Mobile account to track orders, download invoices and check your repairs.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-login">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopLogin()">
+    <div class="shop-container">
+      <div class="shop-auth">
+
+        <!-- form -->
+        <div class="shop-auth-form">
+          <nav class="shop-crumbs mb-6" aria-label="Breadcrumb">
+            <a href="index.html">Home</a>
+            <span x-html="SHOP.icon('chevron-right','')"></span>
+            <span class="font-semibold text-slate-700">Sign in</span>
+          </nav>
+
+          <h1 class="shop-h2">Welcome back</h1>
+          <p class="shop-muted mt-1">Sign in to track your orders, download invoices and check your repairs.</p>
+
+          <div class="shop-error mt-5" x-show="error" x-cloak>
+            <span x-html="SHOP.icon('x-circle','')"></span><span x-text="error"></span>
+          </div>
+
+          <form class="mt-6 space-y-4" @submit.prevent="submit()" novalidate>
+            <div>
+              <label class="shop-label" for="ident">Email or phone number</label>
+              <input id="ident" type="text" class="shop-input" x-model.trim="ident" autocomplete="username"
+                     placeholder="you@example.com or 0300-1234567" required>
+            </div>
+            <div>
+              <div class="flex items-center justify-between gap-2">
+                <label class="shop-label" for="pw">Password</label>
+                <button type="button" class="text-xs font-bold text-slate-500 hover:text-slate-800" @click="showPw = !showPw"
+                        x-text="showPw ? 'Hide' : 'Show'"></button>
+              </div>
+              <input id="pw" :type="showPw ? 'text' : 'password'" class="shop-input" x-model="password"
+                     autocomplete="current-password" placeholder="••••••••" required>
+            </div>
+
+            <button type="submit" class="shop-btn shop-btn-lg shop-btn-block" :disabled="busy">
+              <span x-show="!busy"><span x-html="SHOP.icon('key','')"></span>Sign in</span>
+              <span x-show="busy" x-cloak>Signing in…</span>
+            </button>
+          </form>
+
+          <p class="text-sm text-slate-600 mt-6">
+            New here?
+            <a :href="'register.html' + (next ? '?next=' + encodeURIComponent(next) : '')" class="shop-link">Create an account</a>
+            — it takes a minute and keeps every order in one place.
+          </p>
+          <p class="text-sm text-slate-500 mt-2">
+            Just want to check an order? <a href="order.html" class="shop-link">Track it with your order number</a>.
+          </p>
+
+          <!-- demo helper: the prototype ships with a ready-made account -->
+          <div class="shop-card shop-card-pad mt-8" x-show="demo" x-cloak>
+            <div class="shop-eyebrow">Demo account</div>
+            <p class="text-sm text-slate-600 mt-1">
+              Sign in as <b x-text="demo.name"></b> to see real orders:
+              <span class="font-mono text-xs bg-slate-900/5 rounded px-1.5 py-0.5" x-text="demo.email"></span>
+              / <span class="font-mono text-xs bg-slate-900/5 rounded px-1.5 py-0.5">demo1234</span>
+            </p>
+            <button type="button" class="shop-btn shop-btn-outline shop-btn-sm mt-3" @click="useDemo()">Fill demo details</button>
+          </div>
+        </div>
+
+        <!-- side panel -->
+        <aside class="shop-auth-side">
+          <div class="shop-eyebrow shop-on-dark">Your account</div>
+          <h2 class="shop-h2 shop-on-dark mt-1">Everything you bought, in one place.</h2>
+          <div class="mt-6 space-y-1">
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('truck','')"></span></span>
+              <span><b class="block">Live order tracking</b><span class="text-white/70 text-sm">See each step from confirmed to delivered.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('document','')"></span></span>
+              <span><b class="block">Invoices on demand</b><span class="text-white/70 text-sm">Download or print any invoice, any time.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('wrench','')"></span></span>
+              <span><b class="block">Repair status</b><span class="text-white/70 text-sm">Follow your device through our workshop.</span></span>
+            </div>
+            <div class="shop-auth-perk">
+              <span><span x-html="SHOP.icon('cart','')"></span></span>
+              <span><b class="block">Faster checkout</b><span class="text-white/70 text-sm">Your delivery details are filled in for you.</span></span>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopLogin() {
+      const { db, utils } = ABM;
+      return {
+        ident: '', password: '', showPw: false, busy: false, error: '', next: '', demo: null,
+        init() {
+          this.next = utils.qs('next') || '';
+          if (SHOP.auth.isLoggedIn()) { location.replace(this.next || 'account.html'); return; }
+          const d = db.all('customers').find((c) => c.has_account && c.email);
+          if (d) this.demo = { name: d.name, email: d.email };
+          if (utils.qs('email')) this.ident = utils.qs('email');
+        },
+        useDemo() { if (!this.demo) return; this.ident = this.demo.email; this.password = 'demo1234'; },
+        submit() {
+          this.error = '';
+          this.busy = true;
+          try {
+            const c = SHOP.auth.login(this.ident, this.password);
+            SHOP.toast('Welcome back, ' + String(c.name).split(' ')[0] + '!');
+            const target = this.next && /^[a-z0-9._-]+\.html(\?.*)?$/i.test(this.next) ? this.next : 'account.html';
+            setTimeout(() => location.replace(target), 250);
+          } catch (e) {
+            this.error = e.message;
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

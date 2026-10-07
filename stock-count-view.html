@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Stock Take · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    .print-only { display: none; }
+    @media print {
+      @page { margin: 12mm; }
+      .print-only { display: block; }
+      .no-print { display: none !important; }
+      .count-doc table { border-collapse: collapse; width: 100%; }
+      .count-doc th, .count-doc td { border: 1px solid #cbd5e1; padding: 5px 8px; font-size: 11px; vertical-align: top; }
+      .count-doc th { background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+      .count-doc .blank-cell { height: 22px; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="stock-count-view" data-title="Stock Take" data-perm="stocktake.view">
+  <main x-data="stockCountViewPage()" @keydown.escape.window="post.open = false">
+    <!-- Not found -->
+    <template x-if="!count">
+      <div class="max-w-lg mx-auto mt-10 card no-print">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('calculator','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900" x-text="otherBranch ? 'Count belongs to another branch' : 'Stock take not found'"></h2>
+          <p class="text-sm text-slate-600 mt-2"><span x-show="!otherBranch">No stock take matches id <span class="mono" x-text="requestedId || '(none)'"></span>. It may have been deleted or the link is wrong.</span><span x-show="otherBranch">You can only open counts done at <b x-text="ABM.session.branch() ? ABM.session.branch().name : 'your branch'"></b>.</span></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap"><a href="stock-counts.html" class="btn btn-primary">Back to stock takes</a><a href="stock.html" class="btn btn-secondary">Branch stock</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="count">
+      <div>
+        <div class="no-print">
+          <!-- Header -->
+          <div class="page-header">
+            <div class="min-w-0">
+              <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="stock-counts.html" class="hover:text-navy-700">Stock take</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="count.scope_label"></span></div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="page-title mono truncate" x-text="count.count_no"></h2>
+                <span x-html="$badge(count.status)"></span>
+                <span class="badge badge-amber" x-show="isOpen && moved.length" x-text="moved.length + ' line(s) moved since the count started'"></span>
+              </div>
+              <p class="page-subtitle"><span x-text="$date(count.count_date)"></span> · <b x-text="branchName"></b> · <span x-text="count.scope_label"></span> · counted by <b x-text="ABM.db.userName(count.counted_by)"></b></p>
+            </div>
+            <div class="page-actions">
+              <template x-if="canCount && isOpen">
+                <button type="button" class="btn btn-money" :disabled="busy || !countedItems" @click="openPost()"><span x-html="ABM.icon('check')"></span>Post adjustments</button>
+              </template>
+              <button type="button" class="btn btn-secondary" @click="print('sheet')"><span x-html="ABM.icon('printer')"></span>Print sheet</button>
+              <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+              <template x-if="canCancel && isOpen">
+                <button type="button" class="btn btn-danger-soft" :disabled="busy" @click="cancelCount()"><span x-html="ABM.icon('x-circle')"></span>Cancel count</button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Alerts -->
+          <div class="alert alert-info mb-4" x-show="isOpen"><span x-html="ABM.icon('info')"></span><span>Nothing has moved in stock yet. Enter what is physically on the shelf, then <b>post the adjustments</b> — only then do quantities change.</span></div>
+          <div class="alert alert-warning mb-4" x-show="isOpen && moved.length"><span x-html="ABM.icon('warning')"></span><span>Stock moved for <b x-text="moved.length"></b> product(s) since this sheet was frozen (a sale, a delivery or a transfer). Posting compares your count with the quantity <b>right now</b>, shown in the "system now" column.</span></div>
+          <div class="alert alert-success mb-4" x-show="count.status === 'completed'"><span x-html="ABM.icon('check-circle')"></span><span>Posted <b x-text="ABM.utils.datetime(count.completed_at)"></b> — <span x-text="ABM.utils.num(count.counted_items)"></span> line(s) counted, net <b x-text="$money(count.variance_value)"></b> (<span class="text-emerald-700" x-text="'+' + $money(count.gain_value, {decimals:0})"></span> / <span class="text-rose-600" x-text="$money(count.loss_value, {decimals:0})"></span>).</span></div>
+          <div class="alert alert-warning mb-4" x-show="count.status === 'cancelled'"><span x-html="ABM.icon('x-circle')"></span><span>This count was <b>cancelled</b><span x-show="count.cancelled_at"> on <b x-text="ABM.utils.datetime(count.cancelled_at)"></b></span>. Nothing was posted to stock.</span></div>
+
+          <!-- Tiles -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <button type="button" class="stat stat-accent text-left" @click="view = 'all'" title="Show every line">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Lines counted</div><div class="stat-value"><span x-text="ABM.utils.num(countedItems)"></span><span class="text-base text-slate-400"> / <span x-text="ABM.utils.num(items.length)"></span></span></div></div>
+                <span class="chip chip-navy" x-html="ABM.icon('calculator')"></span>
+              </div>
+              <div class="progress mt-2" :class="pct >= 100 && 'progress-money'"><div :style="'width:' + pct + '%'"></div></div>
+              <div class="stat-meta"><span x-text="pct + '% done'"></span> · <span x-text="ABM.utils.num(items.length - countedItems)"></span> still to count</div>
+            </button>
+            <button type="button" class="stat stat-money text-left" @click="view = 'counted'" title="Show counted lines">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Matching</div><div class="stat-value text-emerald-700" x-text="ABM.utils.num(matched)"></div></div>
+                <span class="chip chip-money" x-html="ABM.icon('check-circle')"></span>
+              </div>
+              <div class="stat-meta">shelf agrees with the system</div>
+            </button>
+            <button type="button" class="stat stat-warning text-left" @click="view = 'variance'" title="Show only the differences">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label">Differences</div><div class="stat-value text-amber-700" x-text="hideVariance ? '—' : ABM.utils.num(shortCount + overCount)"></div></div>
+                <span class="chip chip-warning" x-html="ABM.icon('scale')"></span>
+              </div>
+              <div class="stat-meta" x-show="!hideVariance"><span class="text-rose-600 font-semibold" x-text="shortCount + ' short'"></span> · <span class="text-emerald-700 font-semibold" x-text="overCount + ' over'"></span></div>
+              <div class="stat-meta" x-show="hideVariance">hidden while blind counting</div>
+            </button>
+            <div class="stat" :class="varianceValue < 0 && !hideVariance ? 'stat-danger' : 'stat-money'">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0"><div class="stat-label" x-text="isOpen ? 'Variance so far' : 'Posted variance'"></div><div class="stat-value" :class="varianceValue < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="hideVariance ? '—' : $money(varianceValue, {decimals:0})"></div></div>
+                <span class="chip" :class="varianceValue < 0 && !hideVariance ? 'chip-danger' : 'chip-money'" x-html="ABM.icon(varianceValue < 0 && !hideVariance ? 'trend-down' : 'trend-up')"></span>
+              </div>
+              <div class="stat-meta" x-show="!hideVariance"><span x-text="(varianceUnits > 0 ? '+' : '') + ABM.utils.num(varianceUnits)"></span> unit(s) · at cost</div>
+              <div class="stat-meta" x-show="hideVariance">untick "blind count" to reveal</div>
+            </div>
+          </div>
+
+          <!-- Toolbar -->
+          <div class="card mt-4">
+            <div class="card-body !py-3">
+              <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
+                <div class="relative sm:col-span-2">
+                  <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('scan','w-4 h-4')"></span>
+                  <input type="search" x-ref="find" class="input pl-9" placeholder="Find a product — name, SKU or barcode…" x-model.debounce.150ms="q" @keydown.enter.prevent="jumpToFirst()" aria-label="Find a product on this sheet">
+                </div>
+                <select class="select" x-model="view" aria-label="Show">
+                  <option value="all">All lines</option>
+                  <option value="pending">Not counted yet</option>
+                  <option value="counted">Counted</option>
+                  <option value="variance">Differences only</option>
+                  <option value="serialized">Serialized only</option>
+                </select>
+                <div class="flex items-center gap-2">
+                  <label class="input flex items-center gap-2 cursor-pointer select-none flex-1" :class="blind && '!border-navy-300 !bg-navy-50'" title="Hide the system quantity while counting">
+                    <input type="checkbox" class="checkbox" x-model="blind" :disabled="!isOpen">
+                    <span class="text-sm truncate" :class="blind ? 'text-navy-800 font-semibold' : 'text-slate-600'">Blind count</span>
+                  </label>
+                </div>
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+                <span><b class="text-slate-800" x-text="visible.length"></b> of <span x-text="items.length"></span> lines shown</span>
+                <template x-if="canCount && isOpen">
+                  <div class="flex flex-wrap items-center gap-1 ml-auto">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="pendingNonSerialized" @click="matchRemaining()"><span x-html="ABM.icon('check','w-4 h-4')"></span>Mark <span x-text="pendingNonSerialized"></span> quantity line(s) as matching</button>
+                    <button type="button" class="btn btn-ghost btn-sm text-rose-600" @click="clearCounts()" :disabled="!countedItems"><span x-html="ABM.icon('refresh','w-4 h-4')"></span>Clear counts</button>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unit panel for the serialized line being counted (one at a time, shared by both layouts) -->
+          <template x-if="openRow">
+            <div class="card mt-4 border-navy-200">
+              <div class="card-header">
+                <div class="min-w-0">
+                  <div class="card-title truncate"><span x-text="openRow.serialLabel"></span> units · <span x-text="openRow.label"></span></div>
+                  <div class="card-subtitle"><b class="text-slate-700" x-text="openRow.seenCount"></b> of <span x-text="openRow.units.length"></span> expected units seen<span x-show="openRow.extras.length"> · <span class="text-emerald-700 font-semibold" x-text="openRow.extras.length + ' extra'"></span></span><span x-show="openRow.missingUnits.length"> · <span class="text-rose-600 font-semibold" x-text="openRow.missingUnits.length + ' not found'"></span></span></div>
+                </div>
+                <button type="button" class="btn btn-ghost btn-icon" @click="closeScan()" aria-label="Close unit panel" x-html="ABM.icon('x')"></button>
+              </div>
+              <div class="card-body space-y-3">
+                <div class="flex flex-wrap items-end gap-2" x-show="canCount && isOpen">
+                  <div class="flex-1 min-w-[10rem]">
+                    <label class="label" for="scan-input">Scan or type each <span x-text="openRow.serialLabel"></span> you can see</label>
+                    <div class="input-icon">
+                      <span x-html="ABM.icon('scan')"></span>
+                      <input id="scan-input" type="text" class="input mono" data-scan x-model="openRow.scanInput" @keydown.enter.prevent="scanUnit(openRow)" :placeholder="openRow.serialType === 'imei' ? '15-digit IMEI' : 'Serial number'" autocomplete="off">
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-secondary" @click="scanUnit(openRow)"><span x-html="ABM.icon('plus')"></span>Add</button>
+                  <button type="button" class="btn btn-ghost" @click="scanAllPresent(openRow)" title="Tick every unit the system expects (use when they are all on the shelf)"><span x-html="ABM.icon('check')"></span>All present</button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div>
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">On the system at <span x-text="branchCode"></span> (<span x-text="openRow.units.length"></span>)</div>
+                    <div class="flex flex-wrap gap-1.5" x-show="openRow.units.length">
+                      <template x-for="u in openRow.units" :key="u.id">
+                        <button type="button" class="badge" :class="u.seen ? 'badge-green' : 'badge-slate'" :title="u.seen ? 'Counted' : 'Not seen yet — tap if it is on the shelf'" @click="toggleUnit(openRow, u)">
+                          <span x-html="ABM.icon(u.seen ? 'check' : 'qr','w-3 h-3')"></span><span class="mono" x-text="u.imei"></span>
+                        </button>
+                      </template>
+                    </div>
+                    <div class="text-sm text-slate-500" x-show="!openRow.units.length">The system holds no units of this product at this branch.</div>
+                  </div>
+                  <div>
+                    <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1.5">Counted but not expected (<span x-text="openRow.extras.length"></span>)</div>
+                    <div class="flex flex-wrap gap-1.5" x-show="openRow.extras.length">
+                      <template x-for="x in openRow.extras" :key="x.value">
+                        <span class="badge" :class="x.kind === 'unknown' ? 'badge-amber' : x.kind === 'other_branch' ? 'badge-blue' : x.kind === 'missing' ? 'badge-purple' : 'badge-red'" :title="x.hint">
+                          <span class="mono" x-text="x.value"></span><span x-text="' · ' + x.short"></span>
+                          <button type="button" class="ml-0.5" x-show="canCount && isOpen" @click="removeScan(openRow, x.value)" :aria-label="'Remove ' + x.value" x-html="ABM.icon('x','w-3 h-3')"></button>
+                        </span>
+                      </template>
+                    </div>
+                    <div class="text-sm text-slate-500" x-show="!openRow.extras.length">Nothing unexpected scanned.</div>
+                  </div>
+                </div>
+                <div class="text-xs text-slate-500">Counted total for this line: <b class="text-slate-800" x-text="openRow.counted_qty === null ? '—' : openRow.counted_qty"></b></div>
+              </div>
+            </div>
+          </template>
+
+          <!-- Sheet -->
+          <div class="card mt-4">
+            <div class="card-header">
+              <div><div class="card-title" x-text="isOpen ? 'Count sheet' : 'Count result'"></div><div class="card-subtitle">Serialized products are counted unit by unit — open a row to scan</div></div>
+              <div class="flex items-center gap-1 flex-wrap">
+                <span class="text-xs text-slate-500 hidden xl:block mr-2" x-text="'sheet frozen ' + ABM.utils.datetime(count.started_at)"></span>
+                <button type="button" class="btn btn-ghost btn-sm" @click="print('blank')" title="Print an empty sheet for the floor team"><span x-html="ABM.icon('printer','w-4 h-4')"></span>Blank sheet</button>
+              </div>
+            </div>
+            <!-- phone: a card per line so the counted field is always in reach -->
+            <div class="sm:hidden divide-y divide-slate-100">
+              <template x-for="row in visible" :key="'m' + row.id">
+                <div class="p-4" :class="row.state === 'short' ? 'bg-rose-50/60' : row.state === 'over' ? 'bg-emerald-50/60' : ''">
+                  <div class="flex items-start gap-2.5">
+                    <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="row.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(row.icon,'w-4 h-4')"></span>
+                    <div class="min-w-0 flex-1">
+                      <a :href="'product-view.html?id=' + row.product_id" class="font-semibold text-slate-800 block truncate" x-text="row.label"></a>
+                      <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="row.sku"></span><span x-show="row.serialized"> · <span x-text="row.serialLabel"></span> tracked</span></div>
+                    </div>
+                    <span class="flex-none" x-html="$badge(row.state, stateLabel(row))"></span>
+                  </div>
+                  <div class="flex items-end gap-3 mt-3">
+                    <div class="text-center flex-none" x-show="!blind || !isOpen">
+                      <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">System</div>
+                      <div class="text-lg font-bold tabular text-slate-700" x-text="row.currentQty !== row.expected_qty ? row.currentQty : row.expected_qty"></div>
+                      <div class="text-[10px] text-amber-700" x-show="row.currentQty !== row.expected_qty">was <span x-text="row.expected_qty"></span></div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <label class="label !text-[11px]" :for="'m-count-' + row.id">Counted</label>
+                      <template x-if="canCount && isOpen && !row.serialized">
+                        <input :id="'m-count-' + row.id" type="number" min="0" step="1" inputmode="numeric" class="input text-right" :value="row.counted_qty === null ? '' : row.counted_qty" @change="setCounted(row, $event.target.value)" placeholder="—" :aria-label="'Counted quantity for ' + row.label">
+                      </template>
+                      <template x-if="canCount && isOpen && row.serialized">
+                        <button type="button" class="btn btn-block" :class="row.counted_qty === null ? 'btn-secondary' : 'btn-soft'" @click="toggle(row)">
+                          <span x-html="ABM.icon('qr','w-4 h-4')"></span><span x-text="row.counted_qty === null ? 'Scan units' : row.counted_qty + ' scanned'"></span>
+                        </button>
+                      </template>
+                      <template x-if="!canCount || !isOpen">
+                        <div class="input bg-slate-50 text-right font-semibold" x-text="row.counted_qty === null ? '—' : row.counted_qty"></div>
+                      </template>
+                    </div>
+                    <button type="button" class="btn btn-ghost btn-icon text-slate-400 flex-none" x-show="canCount && isOpen && row.counted_qty !== null" title="Clear this line" @click="clearLine(row)" x-html="ABM.icon('x','w-4 h-4')"></button>
+                  </div>
+                  <div class="mt-2 text-xs" x-show="row.counted_qty !== null && !hideVariance">
+                    <span class="text-slate-500">Difference</span>
+                    <b class="ml-1 tabular" :class="row.variance < 0 ? 'text-rose-600' : row.variance > 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="(row.variance > 0 ? '+' : '') + row.variance"></b>
+                    <span class="text-slate-400" x-show="row.variance"> · <span x-text="$money(row.varianceValue, {decimals:0})"></span></span>
+                  </div>
+                </div>
+              </template>
+              <div class="empty py-8" x-show="!visible.length">
+                <div class="empty-title">Nothing to show</div>
+                <button type="button" class="btn btn-secondary btn-sm mt-3" x-show="q || view !== 'all'" @click="q = ''; view = 'all'">Show all lines</button>
+              </div>
+            </div>
+
+            <div class="table-wrap hidden sm:block">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th class="num" x-show="!blind || !isOpen">System</th>
+                    <th class="num hidden lg:table-cell" x-show="movedIds.length">System now</th>
+                    <th class="num">Counted</th>
+                    <th class="num hidden sm:table-cell" x-show="!hideVariance">Difference</th>
+                    <th class="num hidden md:table-cell" x-show="!hideVariance">Value</th>
+                    <th class="hidden sm:table-cell">State</th>
+                    <th class="actions"></th>
+                  </tr>
+                </thead>
+                <template x-for="row in visible" :key="row.id">
+                  <tbody>
+                    <tr :id="'row-' + row.id" :class="row.state === 'short' ? '!bg-rose-50/60' : row.state === 'over' ? '!bg-emerald-50/60' : ''">
+                      <td>
+                        <div class="flex items-center gap-3 min-w-0">
+                          <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="row.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(row.icon,'w-4 h-4')"></span>
+                          <div class="min-w-0">
+                            <a :href="'product-view.html?id=' + row.product_id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate max-w-[10rem] sm:max-w-[18rem]" x-text="row.label"></a>
+                            <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="row.sku"></span> · <span x-text="row.categoryName"></span><span x-show="row.serialized"> · <span x-text="row.serialLabel"></span> tracked</span></div>
+                            <div class="text-[11px] text-slate-500 sm:hidden" x-show="row.counted_qty !== null && !hideVariance">diff <b :class="row.variance < 0 ? 'text-rose-600' : row.variance > 0 ? 'text-emerald-700' : 'text-slate-500'" x-text="(row.variance > 0 ? '+' : '') + row.variance"></b></div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="num text-slate-600 tabular" x-show="!blind || !isOpen" x-text="row.expected_qty"></td>
+                      <td class="num hidden lg:table-cell tabular" x-show="movedIds.length" :class="row.currentQty !== row.expected_qty ? 'text-amber-700 font-semibold' : 'text-slate-400'" x-text="row.currentQty"></td>
+                      <td class="num">
+                        <template x-if="canCount && isOpen && !row.serialized">
+                          <input type="number" min="0" step="1" class="input input-sm !w-20 text-right" :class="row.counted_qty === null && 'bg-slate-50'" :value="row.counted_qty === null ? '' : row.counted_qty" @change="setCounted(row, $event.target.value)" :aria-label="'Counted quantity for ' + row.label" placeholder="—">
+                        </template>
+                        <template x-if="canCount && isOpen && row.serialized">
+                          <button type="button" class="btn btn-sm" data-units :class="row.counted_qty === null ? 'btn-secondary' : 'btn-soft'" @click="toggle(row)">
+                            <span x-html="ABM.icon('qr','w-4 h-4')"></span><span x-text="row.counted_qty === null ? 'Scan' : row.counted_qty + ' scanned'"></span>
+                          </button>
+                        </template>
+                        <template x-if="!canCount || !isOpen">
+                          <span class="font-semibold tabular" x-text="row.counted_qty === null ? '—' : row.counted_qty"></span>
+                        </template>
+                      </td>
+                      <td class="num hidden sm:table-cell tabular font-semibold" x-show="!hideVariance" :class="row.variance < 0 ? 'text-rose-600' : row.variance > 0 ? 'text-emerald-700' : 'text-slate-400'" x-text="row.counted_qty === null ? '—' : (row.variance > 0 ? '+' : '') + row.variance"></td>
+                      <td class="num hidden md:table-cell tabular whitespace-nowrap" x-show="!hideVariance" :class="row.varianceValue < 0 ? 'text-rose-600' : row.varianceValue > 0 ? 'text-emerald-700' : 'text-slate-400'" x-text="row.counted_qty === null || !row.variance ? '—' : $money(row.varianceValue, {decimals:0})"></td>
+                      <td class="hidden sm:table-cell"><span x-html="$badge(row.state, stateLabel(row))"></span></td>
+                      <td class="actions">
+                        <div class="inline-flex items-center gap-0.5">
+                          <template x-if="row.serialized">
+                            <button type="button" class="btn btn-ghost btn-sm btn-icon" :class="openId === row.id && 'text-navy-700'" :title="openId === row.id ? 'Hide units' : 'Show units'" @click="toggle(row)" x-html="ABM.icon(openId === row.id ? 'chevron-up' : 'chevron-down','w-4 h-4')"></button>
+                          </template>
+                          <template x-if="canCount && isOpen && row.counted_qty !== null">
+                            <button type="button" class="btn btn-ghost btn-sm btn-icon text-slate-400" title="Clear this line" @click="clearLine(row)" x-html="ABM.icon('x','w-4 h-4')"></button>
+                          </template>
+                        </div>
+                      </td>
+                    </tr>
+
+                  </tbody>
+                </template>
+                <tbody x-show="!visible.length">
+                  <tr><td :colspan="colSpan">
+                    <div class="empty">
+                      <span x-html="ABM.icon('calculator')"></span>
+                      <div class="empty-title">Nothing to show</div>
+                      <div class="text-sm mt-1" x-text="q ? 'No product on this sheet matches “' + q + '”.' : view === 'variance' ? 'Every counted line agrees with the system.' : view === 'pending' ? 'Every line has been counted.' : 'This sheet has no lines.'"></div>
+                      <button type="button" class="btn btn-secondary btn-sm mt-4" x-show="q || view !== 'all'" @click="q = ''; view = 'all'">Show all lines</button>
+                    </div>
+                  </td></tr>
+                </tbody>
+                <tfoot x-show="visible.length">
+                  <tr>
+                    <td>Totals · <span x-text="visible.length"></span> line(s)</td>
+                    <td class="num tabular" x-show="!blind || !isOpen" x-text="ABM.utils.num(visibleTotals.expected)"></td>
+                    <td class="num hidden lg:table-cell tabular" x-show="movedIds.length" x-text="ABM.utils.num(visibleTotals.current)"></td>
+                    <td class="num tabular" x-text="ABM.utils.num(visibleTotals.counted)"></td>
+                    <td class="num hidden sm:table-cell tabular" x-show="!hideVariance" :class="visibleTotals.variance < 0 ? 'text-rose-600' : visibleTotals.variance > 0 ? 'text-emerald-700' : ''" x-text="(visibleTotals.variance > 0 ? '+' : '') + ABM.utils.num(visibleTotals.variance)"></td>
+                    <td class="num hidden md:table-cell tabular whitespace-nowrap" x-show="!hideVariance" :class="visibleTotals.value < 0 ? 'text-rose-600' : visibleTotals.value > 0 ? 'text-emerald-700' : ''" x-text="$money(visibleTotals.value, {decimals:0})"></td>
+                    <td colspan="2"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+              <div x-show="count.notes" class="min-w-0"><b class="text-slate-700">Notes:</b> <span x-text="count.notes"></span></div>
+              <template x-if="canCount && isOpen">
+                <button type="button" class="btn btn-money ml-auto" :disabled="busy || !countedItems" @click="openPost()"><span x-html="ABM.icon('check')"></span>Post adjustments</button>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Post confirmation -->
+        <div x-show="post.open" x-cloak class="modal-backdrop no-print" @click.self="post.open = false">
+          <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="postTitle">
+            <div class="modal-header">
+              <div class="min-w-0">
+                <div class="modal-title" id="postTitle">Post this stock take?</div>
+                <div class="text-xs text-slate-500">Stock moves now. Every change is written to the inventory report as a count gain or loss.</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-icon" @click="post.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+            </div>
+            <div class="modal-body space-y-4">
+              <div class="flex flex-wrap gap-2">
+                <div class="flex-1 min-w-[6.5rem] rounded-xl bg-slate-50 border border-slate-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Lines counted</div><div class="text-sm font-bold text-slate-900 tabular" x-text="ABM.utils.num(countedItems)"></div></div>
+                <div class="flex-1 min-w-[6.5rem] rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Gain</div><div class="text-sm font-bold text-emerald-700 tabular" x-text="$money(plan.gain, {decimals:0})"></div></div>
+                <div class="flex-1 min-w-[6.5rem] rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-rose-600">Loss</div><div class="text-sm font-bold text-rose-600 tabular" x-text="$money(plan.loss, {decimals:0})"></div></div>
+                <div class="flex-1 min-w-[6.5rem] rounded-xl border border-slate-200 p-3 text-center" :class="plan.net < 0 ? 'bg-rose-50' : 'bg-emerald-50'"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Net</div><div class="text-sm font-bold tabular" :class="plan.net < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(plan.net, {decimals:0})"></div></div>
+              </div>
+
+              <div class="alert alert-danger" x-show="plan.blockers.length">
+                <span x-html="ABM.icon('x-circle')"></span>
+                <span>
+                  <b>This count cannot be posted yet:</b>
+                  <ul class="list-disc ml-4 mt-1 space-y-0.5">
+                    <template x-for="b in plan.blockers" :key="b"><li x-text="b"></li></template>
+                  </ul>
+                </span>
+              </div>
+
+              <div class="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-[40vh] overflow-y-auto" x-show="plan.actions.length">
+                <template x-for="a in plan.actions" :key="a.key">
+                  <div class="flex items-start gap-3 px-3 py-2.5 min-w-0">
+                    <span class="chip flex-none" :class="a.kind === 'in' ? 'chip-money' : a.kind === 'out' ? 'chip-danger' : 'chip-info'" x-html="ABM.icon(a.icon,'w-4 h-4')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-medium text-slate-800 truncate" x-text="a.label"></div>
+                      <div class="text-xs text-slate-500" x-text="a.detail"></div>
+                    </div>
+                    <div class="text-sm font-semibold tabular flex-none" :class="a.value < 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="a.value ? $money(a.value, {decimals:0}) : ''"></div>
+                  </div>
+                </template>
+              </div>
+              <div class="empty py-6" x-show="!plan.actions.length && !plan.blockers.length">
+                <div class="empty-title">Everything matches</div>
+                <div class="text-sm mt-1">Nothing to adjust — posting just closes the count.</div>
+              </div>
+
+              <div class="alert alert-warning" x-show="plan.uncounted"><span x-html="ABM.icon('warning')"></span><span><b x-text="plan.uncounted"></b> line(s) were never counted. They are left exactly as they are.</span></div>
+              <div>
+                <label class="label" for="post-note">Note on this count</label>
+                <input id="post-note" type="text" class="input" x-model="post.note" placeholder="Optional — who counted, anything unusual" maxlength="200">
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" @click="post.open = false">Not yet</button>
+              <button type="button" class="btn btn-money" :disabled="busy || plan.blockers.length" @click="postCount()"><span x-html="ABM.icon('check')"></span>Post <span x-text="plan.actions.length ? plan.actions.length + ' adjustment(s)' : 'and close'"></span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ================= PRINT: count sheet / variance report ================= -->
+        <div class="print-only print-area count-doc text-slate-900">
+          <div class="flex justify-between items-start gap-6 border-b-2 border-slate-900 pb-3">
+            <div class="min-w-0">
+              <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[16mm] w-auto" onerror="ABM.brand.onError(this)">
+              <div class="text-2xl font-extrabold" x-text="settings.company_name || 'Abbott Mobile'"></div>
+              <div class="text-xs mt-1"><b x-text="branchName"></b><span x-show="branch && branch.address"> · <span x-text="branch ? branch.address : ''"></span></span></div>
+            </div>
+            <div class="text-right flex-none">
+              <div class="text-lg font-extrabold uppercase tracking-wide" x-text="printMode === 'blank' ? 'Stock Count Sheet' : count.status === 'completed' ? 'Stock Take Variance Report' : 'Stock Count Sheet'"></div>
+              <div class="mono text-base font-semibold" x-text="count.count_no"></div>
+              <div class="text-xs">Date: <b x-text="$date(count.count_date)"></b></div>
+              <div class="text-xs">Scope: <b x-text="count.scope_label"></b></div>
+            </div>
+          </div>
+          <table class="mt-4">
+            <thead>
+              <tr>
+                <th style="width:4%">#</th>
+                <th>Product</th>
+                <th style="width:16%">SKU</th>
+                <th class="!text-right" style="width:10%" x-show="printMode !== 'blank'">System</th>
+                <th class="!text-right" style="width:10%">Counted</th>
+                <th class="!text-right" style="width:10%" x-show="printMode !== 'blank'">Difference</th>
+                <th class="!text-right" style="width:13%" x-show="printMode !== 'blank'">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(row, i) in printRows" :key="'p' + row.id">
+                <tr>
+                  <td x-text="i + 1"></td>
+                  <td><div class="font-semibold" x-text="row.label"></div><div class="text-[10px] text-slate-500" x-text="row.categoryName + (row.serialized ? ' · ' + row.serialLabel + ' tracked' : '')"></div></td>
+                  <td class="mono text-[10px]" x-text="row.sku"></td>
+                  <td class="!text-right" x-show="printMode !== 'blank'" x-text="row.expected_qty"></td>
+                  <td class="!text-right" :class="printMode === 'blank' && 'blank-cell'" x-text="printMode === 'blank' ? '' : (row.counted_qty === null ? '—' : row.counted_qty)"></td>
+                  <td class="!text-right" x-show="printMode !== 'blank'" x-text="row.counted_qty === null ? '—' : (row.variance > 0 ? '+' : '') + row.variance"></td>
+                  <td class="!text-right" x-show="printMode !== 'blank'" x-text="row.counted_qty === null || !row.variance ? '—' : $money(row.varianceValue)"></td>
+                </tr>
+              </template>
+            </tbody>
+            <tfoot x-show="printMode !== 'blank'">
+              <tr>
+                <td colspan="3" class="!text-right font-bold">Totals</td>
+                <td class="!text-right" x-text="ABM.utils.num(printTotals.expected)"></td>
+                <td class="!text-right" x-text="ABM.utils.num(printTotals.counted)"></td>
+                <td class="!text-right font-bold" x-text="(printTotals.variance > 0 ? '+' : '') + ABM.utils.num(printTotals.variance)"></td>
+                <td class="!text-right font-extrabold" x-text="$money(printTotals.value)"></td>
+              </tr>
+            </tfoot>
+          </table>
+          <div class="text-xs mt-3" x-show="count.notes"><b>Notes:</b> <span x-text="count.notes"></span></div>
+          <div class="text-xs mt-2 text-slate-600" x-show="printMode !== 'blank'">
+            <span x-text="countedItems"></span> of <span x-text="items.length"></span> line(s) counted ·
+            <span x-text="shortCount"></span> short · <span x-text="overCount"></span> over ·
+            net <b x-text="$money(varianceValue)"></b> at cost.
+          </div>
+          <div class="grid grid-cols-1 print:grid-cols-3 gap-8 mt-12 text-xs">
+            <div class="border-t border-slate-900 pt-1">Counted by</div>
+            <div class="border-t border-slate-900 pt-1">Checked by</div>
+            <div class="border-t border-slate-900 pt-1">Approved by (manager)</div>
+          </div>
+          <div class="text-[10px] text-slate-500 mt-6">Printed <span x-text="ABM.utils.datetime(new Date())"></span> by <span x-text="ABM.session.user() ? ABM.session.user().name : ''"></span> · <span x-text="settings.company_name || 'Abbott Mobile'"></span></div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <script>
+    function stockCountViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const iconFor = (p) => (!p ? 'cube' : ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : db.isSerialized(p) ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube');
+      const arr = (v) => (Array.isArray(v) ? v.slice() : []);
+      return {
+        requestedId: utils.qs('id'),
+        isSuperAdmin: session.isSuperAdmin(),
+        canCount: session.can('stocktake.edit'),
+        canCancel: session.can('stocktake.delete'),
+        settings: db.settings(),
+        count: null, branch: null, items: [], otherBranch: false, busy: false,
+        view: 'all', q: '', blind: false, openId: null, printMode: 'sheet',
+        post: { open: false, note: '' },
+
+        get isOpen() { return !!this.count && this.count.status === 'in_progress'; },
+        /** A blind count hides the difference as well as the system quantity — otherwise it is not blind. */
+        get hideVariance() { return this.blind && this.isOpen; },
+        get branchName() { return this.count ? db.branchName(this.count.branch_id) : ''; },
+        get branchCode() { return this.count ? db.branchCode(this.count.branch_id) : ''; },
+        get countedItems() { return this.items.filter((r) => r.counted_qty !== null).length; },
+        get pct() { return this.items.length ? Math.round(this.countedItems / this.items.length * 100) : 0; },
+        get matched() { return this.items.filter((r) => r.counted_qty !== null && r.variance === 0).length; },
+        get shortCount() { return this.items.filter((r) => r.counted_qty !== null && r.variance < 0).length; },
+        get overCount() { return this.items.filter((r) => r.counted_qty !== null && r.variance > 0).length; },
+        get varianceUnits() { return this.items.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.variance), 0); },
+        get varianceValue() { return utils.round2(this.items.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.varianceValue), 0)); },
+        get movedIds() { return this.items.filter((r) => r.currentQty !== r.expected_qty).map((r) => r.id); },
+        get moved() { return this.items.filter((r) => r.currentQty !== r.expected_qty); },
+        get pendingNonSerialized() { return this.items.filter((r) => r.counted_qty === null && !r.serialized).length; },
+        get colSpan() { return 8; },
+        get visible() {
+          const q = this.q.trim().toLowerCase();
+          return this.items.filter((r) => {
+            if (this.view === 'pending' && r.counted_qty !== null) return false;
+            if (this.view === 'counted' && r.counted_qty === null) return false;
+            if (this.view === 'variance' && !(r.counted_qty !== null && r.variance !== 0)) return false;
+            if (this.view === 'serialized' && !r.serialized) return false;
+            if (q && ![r.label, r.sku, r.barcode, r.categoryName].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get visibleTotals() {
+          const v = this.visible;
+          return {
+            expected: v.reduce((a, r) => a + r.expected_qty, 0),
+            current: v.reduce((a, r) => a + r.currentQty, 0),
+            counted: v.reduce((a, r) => a + (r.counted_qty || 0), 0),
+            variance: v.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.variance), 0),
+            value: utils.round2(v.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.varianceValue), 0)),
+          };
+        },
+        get printRows() { return this.printMode === 'blank' ? this.items : (this.count.status === 'completed' ? this.items.filter((r) => r.counted_qty !== null) : this.items); },
+        get printTotals() {
+          const v = this.printRows;
+          return {
+            expected: v.reduce((a, r) => a + r.expected_qty, 0),
+            counted: v.reduce((a, r) => a + (r.counted_qty || 0), 0),
+            variance: v.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.variance), 0),
+            value: utils.round2(v.reduce((a, r) => a + (r.counted_qty === null ? 0 : r.varianceValue), 0)),
+          };
+        },
+
+        init() {
+          this.load();
+          if (this.count && utils.qs('print') === '1') setTimeout(() => this.print('sheet'), 900);
+        },
+        load() {
+          const c = db.find('stock_counts', this.requestedId);
+          if (!c) { this.count = null; return; }
+          if (!this.isSuperAdmin && String(c.branch_id) !== String(session.branchId())) { this.count = null; this.otherBranch = true; return; }
+          this.count = { ...c };
+          this.branch = db.find('branches', c.branch_id);
+          this.items = utils.sortBy(db.where('stock_count_items', { count_id: c.id }).map((it) => this.decorate(it)), 'label');
+        },
+        /** One sheet line: the frozen expectation, what the system holds now, and what was counted. */
+        decorate(it) {
+          const product = db.find('products', it.product_id);
+          const serialized = !!it.serialized || (product ? db.isSerialized(product) : false);
+          const counted = it.counted_qty === null || it.counted_qty === undefined ? null : Number(it.counted_qty);
+          const cost = Number(it.unit_cost) || (product ? Number(product.cost_price) || 0 : 0);
+          const variance = counted === null ? 0 : counted - Number(it.expected_qty || 0);
+          const row = {
+            ...it, label: db.productLabel(it.product_id), sku: product ? product.sku : '', barcode: product ? product.barcode : '',
+            categoryName: product ? db.categoryName(product.category_id) : '', icon: iconFor(product),
+            serialized, serialType: product ? db.serialType(product) : 'imei', serialLabel: product ? db.serialLabel(product) : 'IMEI',
+            expected_qty: Number(it.expected_qty) || 0, counted_qty: counted, unit_cost: cost,
+            currentQty: ABM.stock.qty(this.count.branch_id, it.product_id),
+            variance, varianceValue: utils.round2(variance * cost),
+            scanned: arr(it.scanned), scanInput: '',
+            state: counted === null ? 'pending' : variance === 0 ? 'matched' : variance < 0 ? 'short' : 'over',
+            units: [], extras: [], missingUnits: [], seenCount: 0,
+          };
+          if (serialized) this.classify(row);
+          return row;
+        },
+        /** Match what was scanned against the registry: seen / not found / unexpected. */
+        classify(row) {
+          const branchId = this.count.branch_id;
+          const here = db.all('product_imeis').filter((u) => String(u.product_id) === String(row.product_id) && String(u.branch_id) === String(branchId) && ABM.stock.SELLABLE.includes(u.status));
+          const scanned = row.scanned.map((s) => String(s).toUpperCase());
+          row.units = here.map((u) => ({ id: u.id, imei: u.imei, status: u.status, seen: scanned.includes(String(u.imei).toUpperCase()) }));
+          row.seenCount = row.units.filter((u) => u.seen).length;
+          row.missingUnits = row.units.filter((u) => !u.seen);
+          const known = new Set(here.map((u) => String(u.imei).toUpperCase()));
+          row.extras = row.scanned.filter((s) => !known.has(String(s).toUpperCase())).map((value) => {
+            const unit = ABM.stock.findUnit(value);
+            if (!unit) return { value, kind: 'unknown', short: 'not registered', hint: 'No such unit on the system — posting registers it as new stock.' };
+            if (String(unit.product_id) !== String(row.product_id)) return { value, kind: 'wrong_product', short: 'another product', hint: 'Registered against ' + db.productLabel(unit.product_id) + ' — count it on that line.' };
+            if (unit.status === 'missing') return { value, kind: 'missing', short: 'was missing', hint: 'Written off by an earlier count — posting brings it back into stock.' };
+            if (String(unit.branch_id) !== String(this.count.branch_id)) return { value, kind: 'other_branch', short: 'at ' + db.branchCode(unit.branch_id), hint: 'The system holds this unit at ' + db.branchName(unit.branch_id) + ' — posting moves it here.' };
+            return { value, kind: 'not_sellable', short: ui.statusLabel(unit.status), hint: 'This unit is ' + ui.statusLabel(unit.status) + ' and cannot be counted as shelf stock.' };
+          });
+        },
+        stateLabel(row) { return row.state === 'matched' ? 'Matches' : row.state === 'short' ? 'Short' : row.state === 'over' ? 'Over' : 'To count'; },
+        /** The serialized line whose units are being scanned — one at a time, above the sheet. */
+        get openRow() { return this.openId === null ? null : this.items.find((r) => r.id === this.openId) || null; },
+        toggle(row) {
+          this.openId = this.openId === row.id ? null : row.id;
+          if (this.openId !== null) this.$nextTick(() => { const el = document.querySelector('[data-scan]'); if (el) el.focus(); });
+        },
+        closeScan() { this.openId = null; },
+        jumpToFirst() {
+          const first = this.visible[0];
+          if (!first) return;
+          this.$nextTick(() => { const el = document.getElementById('row-' + first.id); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+        },
+
+        /* ------------------------------------------------------- counting */
+        persist(row) {
+          const variance = row.counted_qty === null ? 0 : row.counted_qty - row.expected_qty;
+          row.variance = variance;
+          row.varianceValue = utils.round2(variance * row.unit_cost);
+          row.state = row.counted_qty === null ? 'pending' : variance === 0 ? 'matched' : variance < 0 ? 'short' : 'over';
+          db.update('stock_count_items', row.id, {
+            counted_qty: row.counted_qty, variance_qty: variance, variance_value: row.varianceValue,
+            scanned: row.scanned, counted_at: row.counted_qty === null ? null : utils.now(),
+            counted_by: row.counted_qty === null ? null : (session.user() || {}).id || null,
+          });
+          this.syncHeader();
+        },
+        syncHeader() {
+          const counted = this.items.filter((r) => r.counted_qty !== null);
+          db.update('stock_counts', this.count.id, {
+            counted_items: counted.length,
+            variance_qty: counted.reduce((a, r) => a + r.variance, 0),
+            variance_value: utils.round2(counted.reduce((a, r) => a + r.varianceValue, 0)),
+            gain_value: utils.round2(counted.filter((r) => r.variance > 0).reduce((a, r) => a + r.varianceValue, 0)),
+            loss_value: utils.round2(counted.filter((r) => r.variance < 0).reduce((a, r) => a + r.varianceValue, 0)),
+          });
+        },
+        guard() {
+          if (!this.canCount) { ui.warn('You do not have permission to change a stock take.'); return false; }
+          if (!this.isOpen) { ui.warn('This count is ' + ui.statusLabel(this.count.status).toLowerCase() + ' and can no longer be changed.'); return false; }
+          return true;
+        },
+        setCounted(row, value) {
+          if (!this.guard()) { this.load(); return; }
+          const raw = String(value == null ? '' : value).trim();
+          if (raw === '') { row.counted_qty = null; this.persist(row); return; }
+          const n = Number(raw);
+          if (!Number.isInteger(n) || n < 0) { ui.error('Counted quantity must be a whole number of zero or more.'); this.load(); return; }
+          if (n > 99999) { ui.error('That count looks wrong — enter the units actually on the shelf.'); this.load(); return; }
+          row.counted_qty = n;
+          this.persist(row);
+        },
+        clearLine(row) {
+          if (!this.guard()) return;
+          row.counted_qty = null; row.scanned = [];
+          if (row.serialized) this.classify(row);
+          this.persist(row);
+        },
+        clearCounts() {
+          if (!this.guard()) return;
+          ui.confirm({ title: 'Clear every count on this sheet?', message: 'All ' + this.countedItems + ' counted line(s) go back to "to count". Nothing in stock changes.', confirmText: 'Clear counts', cancelText: 'Keep them', danger: true }).then((ok) => {
+            if (!ok) return;
+            this.items.forEach((row) => { row.counted_qty = null; row.scanned = []; if (row.serialized) this.classify(row); this.persist(row); });
+            ui.success('Sheet cleared.');
+          });
+        },
+        matchRemaining() {
+          if (!this.guard()) return;
+          const rows = this.items.filter((r) => r.counted_qty === null && !r.serialized);
+          if (!rows.length) return;
+          rows.forEach((row) => { row.counted_qty = row.expected_qty; this.persist(row); });
+          ui.success(rows.length + ' quantity line(s) marked as matching the system.');
+        },
+        scanUnit(row) {
+          if (!this.guard()) return;
+          const product = db.find('products', row.product_id);
+          const value = ABM.stock.normalizeSerial(row.scanInput, db.serialType(product));
+          row.scanInput = '';
+          if (!value) return;
+          if (row.scanned.some((s) => String(s).toUpperCase() === value.toUpperCase())) { ui.warn(value + ' is already on this line.'); return; }
+          const unit = ABM.stock.findUnit(value);
+          if (unit && String(unit.product_id) !== String(row.product_id)) {
+            const other = this.items.find((r) => String(r.product_id) === String(unit.product_id));
+            ui.error(value + ' belongs to ' + db.productLabel(unit.product_id) + (other ? ' — count it on that line.' : ' which is not on this sheet.'));
+            return;
+          }
+          row.scanned.push(value);
+          row.counted_qty = row.scanned.length;
+          this.classify(row);
+          this.persist(row);
+        },
+        toggleUnit(row, u) {
+          if (!this.guard()) return;
+          if (u.seen) row.scanned = row.scanned.filter((s) => String(s).toUpperCase() !== String(u.imei).toUpperCase());
+          else row.scanned.push(u.imei);
+          row.counted_qty = row.scanned.length;
+          this.classify(row);
+          this.persist(row);
+        },
+        removeScan(row, value) {
+          if (!this.guard()) return;
+          row.scanned = row.scanned.filter((s) => String(s).toUpperCase() !== String(value).toUpperCase());
+          row.counted_qty = row.scanned.length;
+          this.classify(row);
+          this.persist(row);
+        },
+        scanAllPresent(row) {
+          if (!this.guard()) return;
+          const extras = row.scanned.filter((s) => !row.units.some((u) => String(u.imei).toUpperCase() === String(s).toUpperCase()));
+          row.scanned = row.units.map((u) => u.imei).concat(extras);
+          row.counted_qty = row.scanned.length;
+          this.classify(row);
+          this.persist(row);
+          ui.toast(row.units.length + ' unit(s) ticked as present.', 'info');
+        },
+
+        /* ----------------------------------------------------------- post */
+        /** What posting would do, line by line — also the thing the confirm dialog shows. */
+        get plan() {
+          const actions = [], blockers = [];
+          let gain = 0, loss = 0;
+          this.items.filter((r) => r.counted_qty !== null).forEach((row) => {
+            const delta = row.counted_qty - row.currentQty;      // against stock RIGHT NOW, not the frozen sheet
+            const value = utils.round2(delta * row.unit_cost);
+            if (row.serialized) {
+              const usedScans = row.scanned.length > 0;
+              const missing = usedScans ? row.missingUnits : [];
+              const bringBack = row.extras.filter((x) => x.kind === 'missing');
+              const moveIn = row.extras.filter((x) => x.kind === 'other_branch');
+              const register = row.extras.filter((x) => x.kind === 'unknown');
+              const bad = row.extras.filter((x) => x.kind === 'not_sellable' || x.kind === 'wrong_product');
+              if (bad.length) blockers.push(row.label + ': ' + bad.length + ' scanned unit(s) cannot be counted here (' + bad.map((b) => b.short).join(', ') + ') — remove them.');
+              if (!usedScans && delta > 0) blockers.push(row.label + ': scan the ' + delta + ' extra ' + row.serialLabel + '(s) — a serialized surplus cannot be posted as a bare number.');
+              if (!usedScans && delta < 0) {
+                const pick = db.all('product_imeis').filter((u) => String(u.product_id) === String(row.product_id) && String(u.branch_id) === String(this.count.branch_id) && ABM.stock.SELLABLE.includes(u.status)).slice(0, -delta);
+                if (pick.length < -delta) blockers.push(row.label + ': only ' + pick.length + ' unit(s) are on the system, cannot write off ' + (-delta) + '.');
+                else actions.push({ key: 'm' + row.id, kind: 'out', icon: 'qr', label: row.label, detail: pick.length + ' unit(s) marked missing (oldest first): ' + pick.map((u) => u.imei).join(', '), value: utils.round2(-pick.length * row.unit_cost) });
+              }
+              if (usedScans && missing.length) actions.push({ key: 'm' + row.id, kind: 'out', icon: 'qr', label: row.label, detail: missing.length + ' unit(s) not found: ' + missing.map((u) => u.imei).join(', '), value: utils.round2(-missing.length * row.unit_cost) });
+              if (register.length) actions.push({ key: 'r' + row.id, kind: 'in', icon: 'plus', label: row.label, detail: register.length + ' new unit(s) registered: ' + register.map((x) => x.value).join(', '), value: utils.round2(register.length * row.unit_cost) });
+              if (moveIn.length) actions.push({ key: 't' + row.id, kind: 'move', icon: 'transfer', label: row.label, detail: moveIn.length + ' unit(s) moved to ' + this.branchCode + ': ' + moveIn.map((x) => x.value).join(', '), value: utils.round2(moveIn.length * row.unit_cost) });
+              if (bringBack.length) actions.push({ key: 'b' + row.id, kind: 'in', icon: 'refresh', label: row.label, detail: bringBack.length + ' previously missing unit(s) found: ' + bringBack.map((x) => x.value).join(', '), value: utils.round2(bringBack.length * row.unit_cost) });
+            } else if (delta !== 0) {
+              actions.push({ key: 'q' + row.id, kind: delta > 0 ? 'in' : 'out', icon: delta > 0 ? 'trend-up' : 'trend-down', label: row.label, detail: (delta > 0 ? 'add ' : 'remove ') + Math.abs(delta) + ' · system ' + row.currentQty + ' → counted ' + row.counted_qty + (row.currentQty !== row.expected_qty ? ' (was ' + row.expected_qty + ' when the sheet was frozen)' : ''), value });
+            }
+            if (delta > 0) gain += value; else loss += value;
+          });
+          return {
+            actions, blockers, gain: utils.round2(gain), loss: utils.round2(loss), net: utils.round2(gain + loss),
+            uncounted: this.items.filter((r) => r.counted_qty === null).length,
+          };
+        },
+        openPost() {
+          if (!this.guard()) return;
+          this.load();
+          this.post = { open: true, note: '' };
+        },
+        postCount() {
+          if (this.busy || !this.guard()) return;
+          const plan = this.plan;
+          if (plan.blockers.length) { ui.error(plan.blockers[0]); return; }
+          this.busy = true;
+          try {
+            const cur = db.find('stock_counts', this.count.id);
+            if (!cur || cur.status !== 'in_progress') throw new Error('This count is no longer open.');
+            const ref = { type: 'stock_count', id: cur.id };
+            const note = String(this.post.note || '').trim();
+            const tag = cur.count_no + (note ? ' · ' + note : '');
+            let gain = 0, loss = 0, movedUnits = 0, postedUnits = 0;
+            const failed = [];
+            this.items.filter((r) => r.counted_qty !== null).forEach((row) => {
+              const before = ABM.stock.qty(cur.branch_id, row.product_id);
+              try {
+              if (row.serialized) {
+                const usedScans = row.scanned.length > 0;
+                if (usedScans) {
+                  row.missingUnits.forEach((u) => { ABM.stock.markMissing(u.id, ref, 'Not found during ' + tag); movedUnits++; });
+                  row.extras.forEach((x) => {
+                    const unit = ABM.stock.findUnit(x.value);
+                    if (x.kind === 'unknown') { ABM.stock.addImeis(cur.branch_id, row.product_id, [x.value], row.unit_cost, 'count_in', ref, { notes: 'Found during ' + tag }); movedUnits++; }
+                    else if (x.kind === 'missing' && unit) { ABM.stock.markFound(unit.id, ref, 'Found during ' + tag); movedUnits++; }
+                    else if (x.kind === 'other_branch' && unit) { ABM.stock.moveCountedUnit(unit.id, cur.branch_id, ref, 'Counted at ' + db.branchCode(cur.branch_id) + ' during ' + tag); movedUnits++; }
+                  });
+                } else {
+                  const delta = row.counted_qty - before;
+                  if (delta < 0) {
+                    db.all('product_imeis')
+                      .filter((u) => String(u.product_id) === String(row.product_id) && String(u.branch_id) === String(cur.branch_id) && ABM.stock.SELLABLE.includes(u.status))
+                      .slice(0, -delta)
+                      .forEach((u) => { ABM.stock.markMissing(u.id, ref, 'Not found during ' + tag); movedUnits++; });
+                  }
+                }
+              } else {
+                ABM.stock.countAdjust(cur.branch_id, row.product_id, row.counted_qty, ref, 'Stock take ' + tag);
+              }
+              } catch (lineErr) {
+                // one line failing (a unit sold from another tab while the sheet was open) must not
+                // abandon the post half-done: record it, carry on, and keep the count open.
+                failed.push(row.label + ': ' + (lineErr.message || 'could not be posted'));
+              }
+              const after = ABM.stock.qty(cur.branch_id, row.product_id);
+              const posted = after - before;
+              const value = utils.round2(posted * row.unit_cost);
+              postedUnits += posted;
+              if (posted > 0) gain += value; else loss += value;
+              db.update('stock_count_items', row.id, { variance_qty: posted, variance_value: value, posted_qty: row.counted_qty, missing_ids: row.serialized ? row.missingUnits.map((u) => u.id) : [], extra_serials: row.serialized ? row.extras.map((x) => x.value) : [] });
+            });
+            db.update('stock_counts', cur.id, {
+              status: failed.length ? 'in_progress' : 'completed',
+              completed_at: failed.length ? null : utils.now(), counted_by: (session.user() || {}).id || cur.counted_by,
+              counted_items: this.countedItems, variance_qty: postedUnits,
+              variance_value: utils.round2(gain + loss), gain_value: utils.round2(gain), loss_value: utils.round2(loss),
+              notes: note ? (cur.notes ? cur.notes + ' · ' + note : note) : cur.notes,
+            });
+            db.audit('stock_count.post', 'stock_count', cur.id, `Stock take ${cur.count_no} posted at ${db.branchName(cur.branch_id)}: ${this.countedItems} line(s), ${movedUnits} serialized unit(s) adjusted, net ${utils.money(utils.round2(gain + loss))}${failed.length ? '; ' + failed.length + ' line(s) failed: ' + failed.join(' | ') : ''}`);
+            if (failed.length) ui.error(failed.length + ' line(s) could not be posted (' + failed[0] + '). The rest went through — the count stays open so you can fix them.');
+            else ui.success('Stock take posted — net ' + utils.money(utils.round2(gain + loss)) + '.');
+            this.post.open = false;
+          } catch (err) {
+            ui.error(err.message || 'Could not post the stock take.');
+          } finally {
+            this.busy = false;
+            this.load();
+          }
+        },
+        async cancelCount() {
+          if (this.busy) return;
+          if (!this.canCancel) { ui.warn('Your role is not allowed to cancel a stock take.'); return; }
+          if (!this.isOpen) { ui.warn('This count is ' + ui.statusLabel(this.count.status).toLowerCase() + ' and can no longer be changed.'); return; }
+          const ok = await ui.confirm({
+            title: 'Cancel ' + this.count.count_no + '?',
+            message: 'The sheet is kept for the record but nothing is posted to stock. ' + this.countedItems + ' counted line(s) will be left as they are.',
+            confirmText: 'Cancel count', cancelText: 'Keep counting', danger: true,
+          });
+          if (!ok) return;
+          this.busy = true;
+          try {
+            const cur = db.find('stock_counts', this.count.id);
+            if (!cur || cur.status !== 'in_progress') throw new Error('This count is no longer open.');
+            db.update('stock_counts', cur.id, { status: 'cancelled', cancelled_at: utils.now() });
+            db.audit('stock_count.cancel', 'stock_count', cur.id, `Stock take ${cur.count_no} cancelled with ${this.countedItems} of ${this.items.length} line(s) counted`);
+            ui.success('Stock take cancelled — nothing was posted.');
+          } catch (err) { ui.error(err.message || 'Could not cancel the count.'); }
+          finally { this.busy = false; this.load(); }
+        },
+
+        print(mode) { this.printMode = mode === 'blank' ? 'blank' : 'sheet'; this.$nextTick(() => ui.print()); },
+        exportCsv() {
+          const cols = [
+            { label: 'Product', key: 'label' }, { label: 'SKU', key: 'sku' }, { label: 'Category', key: 'categoryName' },
+            { label: 'Tracking', value: (r) => (r.serialized ? r.serialLabel : 'Quantity') },
+            { label: 'System (frozen)', key: 'expected_qty' }, { label: 'System now', key: 'currentQty' },
+            { label: 'Counted', value: (r) => (r.counted_qty === null ? '' : r.counted_qty) },
+            { label: 'Difference', value: (r) => (r.counted_qty === null ? '' : r.variance) },
+            { label: 'Unit cost', key: 'unit_cost' }, { label: 'Difference value', value: (r) => (r.counted_qty === null ? '' : r.varianceValue) },
+            { label: 'State', value: (r) => this.stateLabel(r) }, { label: 'Scanned units', value: (r) => r.scanned.join(' ') },
+          ];
+          if (!utils.download(this.count.count_no + '-' + utils.today() + '.csv', utils.toCsv(this.items, cols))) return;
+          ui.success('Exported ' + this.items.length + ' line(s).');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

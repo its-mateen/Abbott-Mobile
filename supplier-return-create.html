@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>New Supplier Return · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="supplier-return-create" data-title="New Supplier Return" data-perm="supplier_returns.add">
+  <main x-data="supplierReturnCreate()">
+
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">New supplier return</h2>
+        <p class="page-subtitle">Pick the faulty units, say what you want back, then send it to the supplier.</p>
+      </div>
+      <div class="page-actions">
+        <a href="supplier-returns.html" class="btn btn-secondary"><span x-html="ABM.icon('arrow-left')"></span>Back to list</a>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
+
+      <!-- ------------------------------------------------------ left: form -->
+      <div class="xl:col-span-2 space-y-4 min-w-0">
+
+        <!-- header fields -->
+        <div class="card">
+          <div class="card-header"><div class="card-title">Return details</div></div>
+          <div class="card-body grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="label" for="sr-supplier">Supplier <span class="req">*</span></label>
+              <select id="sr-supplier" class="select" x-model="form.supplier_id" x-sync="form.supplier_id" :class="errors.supplier_id && 'is-invalid'">
+                <option value="">Select a supplier…</option>
+                <template x-for="s in suppliers" :key="s.id">
+                  <option :value="String(s.id)" x-text="s.name + (s.balance > 0 ? ' · owed ' + ABM.utils.money(s.balance, {decimals:0}) : '')"></option>
+                </template>
+              </select>
+              <p class="field-error" x-show="errors.supplier_id" x-cloak x-text="errors.supplier_id"></p>
+            </div>
+            <div>
+              <label class="label" for="sr-branch">Branch <span class="req">*</span></label>
+              <select id="sr-branch" class="select" x-model="form.branch_id" x-sync="form.branch_id" :disabled="!isAdmin" @change="lines = []">
+                <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+              </select>
+              <p class="help">Stock leaves this branch when you send the return.</p>
+            </div>
+            <div>
+              <label class="label" for="sr-date">Return date</label>
+              <input id="sr-date" type="date" class="input" x-model="form.return_date" :max="today">
+            </div>
+            <div>
+              <label class="label" for="sr-res">What do you want back? <span class="req">*</span></label>
+              <select id="sr-res" class="select" x-model="form.resolution" x-sync="form.resolution">
+                <option value="credit_note">Credit note — reduce what we owe</option>
+                <option value="replacement">Replacement unit</option>
+                <option value="refund">Refund</option>
+                <option value="scrap">Nothing — write the stock off</option>
+              </select>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="sr-reason">Reason <span class="req">*</span></label>
+              <input id="sr-reason" type="text" class="input" x-model.trim="form.reason" :class="errors.reason && 'is-invalid'"
+                     list="sr-reasons" placeholder="e.g. Dead on arrival, failed within warranty, wrong item shipped" maxlength="140">
+              <datalist id="sr-reasons">
+                <option value="Faulty on arrival"></option>
+                <option value="Failed within warranty"></option>
+                <option value="Damaged in transit"></option>
+                <option value="Wrong item shipped"></option>
+                <option value="Excess delivery"></option>
+              </datalist>
+              <p class="field-error" x-show="errors.reason" x-cloak x-text="errors.reason"></p>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="label" for="sr-notes">Notes</label>
+              <textarea id="sr-notes" class="textarea !min-h-[4rem]" x-model="form.notes" placeholder="Reference numbers, who you spoke to, courier details…"></textarea>
+            </div>
+          </div>
+        </div>
+
+        <!-- faulty serialized units -->
+        <div class="card">
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Faulty units at <span x-text="branchName"></span></div>
+              <div class="card-subtitle">Units marked defective are already out of sellable stock and waiting to be dealt with.</div>
+            </div>
+            <div class="input-icon w-full sm:w-64">
+              <span x-html="ABM.icon('search')"></span>
+              <input type="search" class="input input-sm" x-model="unitQ" placeholder="Search serial or product…">
+            </div>
+          </div>
+
+          <div class="table-wrap" x-show="availableUnits.length" x-cloak>
+            <table class="table table-compact">
+              <thead>
+                <tr>
+                  <th class="w-10"><input type="checkbox" class="checkbox" @change="toggleAll($event)" :checked="allPicked" aria-label="Select all"></th>
+                  <th>Product</th>
+                  <th>IMEI / Serial</th>
+                  <th class="hidden sm:table-cell">Marked faulty</th>
+                  <th class="num">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="u in availableUnits" :key="u.id">
+                  <tr :class="isPicked(u) && 'selected'">
+                    <td><input type="checkbox" class="checkbox" :checked="isPicked(u)" @change="toggleUnit(u)" :aria-label="'Add ' + u.imei"></td>
+                    <td>
+                      <div class="font-medium text-slate-800" x-text="ABM.db.productLabel(u.product_id)"></div>
+                      <div class="text-xs text-slate-500 truncate max-w-[18rem]" x-text="u.notes"></div>
+                    </td>
+                    <td class="mono" x-text="u.imei"></td>
+                    <td class="hidden sm:table-cell text-slate-500" x-text="ABM.utils.date(u.updated_at || u.created_at)"></td>
+                    <td class="num" x-text="$money(u.cost_price, {decimals:0})"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card-body" x-show="!availableUnits.length" x-cloak>
+            <div class="empty !py-8">
+              <span x-html="ABM.icon('check-circle')"></span>
+              <div class="empty-title">No faulty units at this branch</div>
+              <p class="text-sm">Mark a unit defective in the IMEI / Serial registry and it will appear here.</p>
+              <a href="imeis.html?status=defective" class="btn btn-secondary btn-sm mt-3">Open the registry</a>
+            </div>
+          </div>
+        </div>
+
+        <!-- non-serialized quantities -->
+        <div class="card">
+          <div class="card-header">
+            <div class="min-w-0">
+              <div class="card-title">Other stock to send back</div>
+              <div class="card-subtitle">Accessories, parts and anything counted by quantity.</div>
+            </div>
+          </div>
+          <div class="card-body space-y-3">
+            <div class="flex flex-wrap gap-2">
+              <div class="input-icon flex-1 min-w-[14rem]">
+                <span x-html="ABM.icon('search')"></span>
+                <input type="search" class="input" x-model="bulkQ" placeholder="Search a product to add…" @keydown.enter.prevent="addFirstBulk()">
+              </div>
+            </div>
+            <div class="rounded-xl border border-slate-200 max-h-44 overflow-y-auto" x-show="bulkQ.trim().length > 1" x-cloak>
+              <template x-for="p in bulkMatches" :key="p.id">
+                <button type="button" class="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center justify-between gap-2"
+                        @click="addBulk(p)">
+                  <span class="truncate" x-text="ABM.db.productLabel(p.id)"></span>
+                  <span class="text-xs text-slate-500 flex-none" x-text="ABM.db.stockQty(Number(form.branch_id), p.id) + ' in stock'"></span>
+                </button>
+              </template>
+              <div class="px-3 py-2 text-xs text-slate-500" x-show="!bulkMatches.length" x-cloak>No stocked product matches.</div>
+            </div>
+
+            <div class="table-wrap" x-show="bulkLines.length" x-cloak>
+              <table class="table table-compact">
+                <thead><tr><th>Product</th><th class="num w-28">Quantity</th><th class="num">Unit cost</th><th class="num">Total</th><th class="actions"></th></tr></thead>
+                <tbody>
+                  <template x-for="(l, i) in bulkLines" :key="l.product_id">
+                    <tr>
+                      <td>
+                        <div class="font-medium text-slate-800" x-text="ABM.db.productLabel(l.product_id)"></div>
+                        <div class="text-xs text-slate-500" x-text="l.max + ' in stock at this branch'"></div>
+                      </td>
+                      <td class="num"><input type="number" class="input input-sm !w-24 text-right" min="1" :max="l.max" x-model.number="l.quantity" @input="clampQty(l)"></td>
+                      <td class="num" x-text="$money(l.unit_cost, {decimals:0})"></td>
+                      <td class="num font-semibold" x-text="$money(l.unit_cost * l.quantity, {decimals:0})"></td>
+                      <td class="actions"><button type="button" class="btn btn-ghost btn-icon btn-sm text-rose-600" @click="bulkLines.splice(i,1)" aria-label="Remove"><span x-html="ABM.icon('trash','w-4 h-4')"></span></button></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- --------------------------------------------------- right: summary -->
+      <div class="space-y-4 min-w-0">
+        <div class="card xl:sticky xl:top-20">
+          <div class="card-header"><div class="card-title">Summary</div></div>
+          <div class="card-body space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Supplier</span><span class="font-semibold truncate ml-2" x-text="supplierName || '—'"></span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Faulty units</span><span class="font-semibold" x-text="picked.length"></span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Other items</span><span class="font-semibold" x-text="bulkUnits"></span></div>
+            <div class="flex justify-between text-sm"><span class="text-slate-500">Outcome</span><span class="font-semibold" x-text="resolutionLabel"></span></div>
+            <div class="divider"></div>
+            <div class="flex justify-between items-baseline">
+              <span class="text-slate-600 font-semibold">Value of goods</span>
+              <span class="text-xl font-extrabold text-slate-900" x-text="$money(total, {decimals:0})"></span>
+            </div>
+            <p class="help" x-show="form.resolution === 'credit_note' || form.resolution === 'refund'" x-cloak>
+              When the supplier accepts, this amount comes off what you owe them.
+            </p>
+            <p class="help" x-show="form.resolution === 'replacement'" x-cloak>
+              You will record the replacement serial numbers when the new units arrive.
+            </p>
+            <p class="help" x-show="form.resolution === 'scrap'" x-cloak>
+              Nothing is claimed back — the cost stays with us as a loss.
+            </p>
+
+            <div class="alert alert-danger" x-show="formError" x-cloak>
+              <span x-html="ABM.icon('warning')"></span><span x-text="formError"></span>
+            </div>
+
+            <div class="flex flex-col gap-2 pt-1">
+              <button type="button" class="btn btn-primary btn-block" :disabled="busy || !total" @click="save('draft')">
+                <span x-html="ABM.icon('document')"></span>Save as draft
+              </button>
+              <button type="button" class="btn btn-money btn-block" :disabled="busy || !total" @click="save('sent')">
+                <span x-html="ABM.icon('truck')"></span>Save &amp; send to supplier
+              </button>
+              <a href="supplier-returns.html" class="btn btn-ghost btn-block">Cancel</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function supplierReturnCreate() {
+      const { db, utils, ui, session, stock, ledger } = ABM;
+      return {
+        form: { supplier_id: '', branch_id: String(ABM.session.branchId() || 1), return_date: ABM.utils.today(), resolution: 'credit_note', reason: '', notes: '' },
+        errors: {}, formError: '', busy: false,
+        picked: [], bulkLines: [], unitQ: '', bulkQ: '',
+        today: ABM.utils.today(),
+        isAdmin: session.isSuperAdmin(),
+
+        init() {
+          if (utils.qs('supplier')) this.form.supplier_id = utils.qs('supplier');
+          if (utils.qs('unit')) {
+            const u = db.find('product_imeis', utils.qs('unit'));
+            if (u && u.status === 'defective') { this.form.branch_id = String(u.branch_id); this.picked = [u.id]; }
+          }
+        },
+
+        get suppliers() { return db.all('suppliers').filter((s) => s.is_active); },
+        get branches() { return db.all('branches').filter((b) => b.is_active); },
+        get branchName() { return db.branchName(Number(this.form.branch_id)); },
+        get supplierName() { return this.form.supplier_id ? db.supplierName(Number(this.form.supplier_id)) : ''; },
+        get resolutionLabel() { return ({ credit_note: 'Credit note', replacement: 'Replacement', refund: 'Refund', scrap: 'Write off' })[this.form.resolution]; },
+
+        /** Faulty units sitting at the chosen branch. */
+        get availableUnits() {
+          const q = this.unitQ.trim().toLowerCase();
+          return db.all('product_imeis')
+            .filter((u) => u.status === 'defective' && String(u.branch_id) === String(this.form.branch_id))
+            .filter((u) => !q || [u.imei, db.productLabel(u.product_id), u.notes].join(' ').toLowerCase().includes(q));
+        },
+        isPicked(u) { return this.picked.includes(u.id); },
+        toggleUnit(u) {
+          const i = this.picked.indexOf(u.id);
+          if (i >= 0) this.picked.splice(i, 1); else this.picked.push(u.id);
+        },
+        get allPicked() { return this.availableUnits.length > 0 && this.availableUnits.every((u) => this.isPicked(u)); },
+        toggleAll(ev) {
+          if (ev.target.checked) this.availableUnits.forEach((u) => { if (!this.isPicked(u)) this.picked.push(u.id); });
+          else this.picked = this.picked.filter((id) => !this.availableUnits.some((u) => u.id === id));
+        },
+
+        /** Non-serialized products that actually have stock at this branch. */
+        get bulkMatches() {
+          const q = this.bulkQ.trim().toLowerCase();
+          if (q.length < 2) return [];
+          const branchId = Number(this.form.branch_id);
+          return db.all('products').filter((p) => {
+            if (!p.is_active || db.isSerialized(p) || !db.isStockTracked(p)) return false;
+            if (this.bulkLines.some((l) => l.product_id === p.id)) return false;
+            if (db.stockQty(branchId, p.id) <= 0) return false;
+            return [p.name, p.model, p.variant, p.sku, db.brandName(p.brand_id)].join(' ').toLowerCase().includes(q);
+          }).slice(0, 10);
+        },
+        addBulk(p) {
+          const branchId = Number(this.form.branch_id);
+          const row = db.first('branch_stock', (s) => s.branch_id === branchId && s.product_id === p.id);
+          this.bulkLines.push({ product_id: p.id, quantity: 1, max: row ? row.quantity : 0, unit_cost: row && row.avg_cost ? row.avg_cost : p.cost_price });
+          this.bulkQ = '';
+        },
+        addFirstBulk() { if (this.bulkMatches.length) this.addBulk(this.bulkMatches[0]); },
+        clampQty(l) { l.quantity = Math.max(1, Math.min(Number(l.quantity) || 1, l.max)); },
+        get bulkUnits() { return this.bulkLines.reduce((n, l) => n + (Number(l.quantity) || 0), 0); },
+
+        get total() {
+          const units = this.picked.map((id) => db.find('product_imeis', id)).filter(Boolean)
+            .reduce((s, u) => s + (Number(u.cost_price) || 0), 0);
+          const bulk = this.bulkLines.reduce((s, l) => s + l.unit_cost * (Number(l.quantity) || 0), 0);
+          return utils.round2(units + bulk);
+        },
+
+        validate() {
+          const e = {};
+          if (!this.form.supplier_id) e.supplier_id = 'Choose the supplier this stock came from.';
+          if (String(this.form.reason || '').trim().length < 3) e.reason = 'Say why it is going back.';
+          this.errors = e;
+          if (!this.picked.length && !this.bulkLines.length) { this.formError = 'Add at least one faulty unit or quantity.'; return false; }
+          if (Object.keys(e).length) { this.formError = 'Please fix the highlighted fields.'; return false; }
+          this.formError = '';
+          return true;
+        },
+
+        /**
+         * Writes the return. For status 'sent' the stock actually moves:
+         * serialized units go to "with supplier", quantities leave branch stock.
+         */
+        save(status) {
+          if (this.busy) return;
+          if (!this.validate()) return;
+          this.busy = true;
+          try {
+            const branchId = Number(this.form.branch_id);
+            const supplierId = Number(this.form.supplier_id);
+            const units = this.picked.map((id) => db.find('product_imeis', id)).filter(Boolean);
+
+            // validate everything before writing anything — there is no rollback here
+            units.forEach((u) => {
+              if (u.status !== 'defective') throw new Error(`${u.imei} is no longer marked faulty.`);
+              if (u.branch_id !== branchId) throw new Error(`${u.imei} is not at ${db.branchName(branchId)}.`);
+            });
+            this.bulkLines.forEach((l) => {
+              const have = db.stockQty(branchId, l.product_id);
+              if (l.quantity > have) throw new Error(`${db.productLabel(l.product_id)}: only ${have} in stock.`);
+            });
+
+            const ret = db.insert('supplier_returns', {
+              return_no: db.nextNumber('SRT', db.branchCode(branchId)),
+              branch_id: branchId, supplier_id: supplierId, purchase_id: null,
+              return_date: this.form.return_date || utils.today(),
+              status, resolution: this.form.resolution,
+              reason: String(this.form.reason).trim(), notes: String(this.form.notes || '').trim(),
+              subtotal: this.total, credit_amount: 0,
+              created_by: (session.user() || {}).id || null,
+              sent_at: status === 'sent' ? utils.now() : null, completed_at: null,
+            });
+
+            units.forEach((u) => {
+              db.insert('supplier_return_items', {
+                return_id: ret.id, product_id: u.product_id, imei_id: u.id,
+                quantity: 1, unit_cost: u.cost_price, total: u.cost_price,
+                condition: 'defective', resolution_note: '', replacement_imei_id: null,
+              });
+              if (status === 'sent') stock.returnToSupplier(u.id, { type: 'supplier_return', id: ret.id }, 'Sent back on ' + ret.return_no);
+            });
+            this.bulkLines.forEach((l) => {
+              db.insert('supplier_return_items', {
+                return_id: ret.id, product_id: l.product_id, imei_id: null,
+                quantity: l.quantity, unit_cost: l.unit_cost, total: utils.round2(l.unit_cost * l.quantity),
+                condition: 'damaged', resolution_note: '', replacement_imei_id: null,
+              });
+              if (status === 'sent') stock.removeForSupplierReturn(branchId, l.product_id, l.quantity, { type: 'supplier_return', id: ret.id }, 'Sent back on ' + ret.return_no);
+            });
+
+            db.audit('supplier_return.create', 'supplier_return', ret.id,
+              `${ret.return_no} raised for ${db.supplierName(supplierId)} · ${utils.money(ret.subtotal)}${status === 'sent' ? ' and sent' : ''}`);
+            ui.success(status === 'sent' ? 'Return sent to the supplier.' : 'Draft saved.');
+            location.href = 'supplier-return-view.html?id=' + ret.id;
+          } catch (err) {
+            this.formError = err.message;
+            ui.error(err.message);
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Supplier Return · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .doc { background: #fff; color: #0f172a; }
+    @media print {
+      .no-print { display: none !important; }
+      .print-area { box-shadow: none !important; border: 0 !important; }
+      @page { size: A4; margin: 14mm; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="supplier-return-view" data-title="Supplier Return" data-perm="supplier_returns.view">
+  <main x-data="supplierReturnView()">
+
+    <!-- not found -->
+    <template x-if="!ret">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('return','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Return not found</h2>
+          <p class="text-sm text-slate-600 mt-2">This return may have been deleted, or it belongs to another branch.</p>
+          <a href="supplier-returns.html" class="btn btn-primary mt-6">Back to supplier returns</a>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="ret">
+      <div>
+        <!-- header -->
+        <div class="page-header no-print">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="page-title mono" x-text="ret.return_no"></h2>
+              <span x-html="$badge(ret.status)"></span>
+              <span x-html="$badge(ret.resolution, resolutionLabel(ret.resolution))"></span>
+            </div>
+            <p class="page-subtitle">
+              <a :href="'supplier-view.html?id=' + ret.supplier_id" class="font-semibold text-navy-700 hover:underline" x-text="ABM.db.supplierName(ret.supplier_id)"></a>
+              · <span x-text="ABM.db.branchName(ret.branch_id)"></span>
+              · raised <span x-text="$date(ret.return_date)"></span>
+              by <span x-text="ABM.db.userName(ret.created_by)"></span>
+            </p>
+          </div>
+          <div class="page-actions">
+            <a href="supplier-returns.html" class="btn btn-ghost"><span x-html="ABM.icon('arrow-left')"></span>All returns</a>
+            <button type="button" class="btn btn-secondary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print debit note</button>
+          </div>
+        </div>
+
+        <!-- workflow -->
+        <div class="card no-print mb-4">
+          <div class="card-body">
+            <div class="pipeline">
+              <template x-for="(s, i) in steps" :key="s.key">
+                <template x-if="true">
+                  <div class="contents">
+                    <div class="pipeline-step" :class="[s.done && 'done', s.current && 'current', s.failed && 'failed']">
+                      <span class="dot" x-html="ABM.icon(s.failed ? 'x' : (s.done ? 'check' : 'clock'),'w-3.5 h-3.5')"></span>
+                      <span>
+                        <span x-text="s.label"></span>
+                        <span class="block text-xs font-normal text-slate-400" x-show="s.at" x-cloak x-text="ABM.utils.datetime(s.at)"></span>
+                      </span>
+                    </div>
+                    <span class="pipeline-sep" :class="s.done && 'done'" x-show="i < steps.length - 1"></span>
+                  </div>
+                </template>
+              </template>
+            </div>
+
+            <div class="flex flex-wrap gap-2 mt-5" x-show="canManage || canDelete">
+              <button type="button" class="btn btn-money" x-show="canManage && ret.status === 'draft'" @click="send()">
+                <span x-html="ABM.icon('truck')"></span>Send to supplier
+              </button>
+              <button type="button" class="btn btn-primary" x-show="canManage && ret.status === 'sent'" @click="openComplete()">
+                <span x-html="ABM.icon('check-circle')"></span>Record the outcome
+              </button>
+              <button type="button" class="btn btn-danger-soft" x-show="canDelete && (ret.status === 'draft' || ret.status === 'sent')" @click="cancel()">
+                <span x-html="ABM.icon('x-circle')"></span>Cancel return
+              </button>
+              <span class="text-sm text-slate-500 self-center" x-show="ret.status === 'completed'" x-cloak>
+                Closed <span x-text="ABM.utils.datetime(ret.completed_at)"></span>.
+              </span>
+            </div>
+
+            <div class="alert alert-warning mt-4" x-show="ret.status === 'draft'" x-cloak>
+              <span x-html="ABM.icon('info')"></span>
+              <span>This is still a draft — the stock has not moved yet. Sending it takes the units out of the branch.</span>
+            </div>
+            <div class="alert alert-info mt-4" x-show="ret.status === 'sent'" x-cloak>
+              <span x-html="ABM.icon('truck')"></span>
+              <span>With the supplier since <b x-text="ABM.utils.date(ret.sent_at)"></b>. Record the outcome when they reply.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- printable document -->
+        <div class="card print-area">
+          <div class="card-body doc">
+            <!-- letterhead (print only) -->
+            <div class="hidden print:block mb-6">
+              <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[16mm] w-auto" onerror="ABM.brand.onError(this)">
+              <div class="text-xl font-extrabold" x-text="company.company_name"></div>
+              <div class="text-xs text-slate-600" x-text="branch.address + ' · ' + branch.phone + ' · ' + (branch.tax_id || '')"></div>
+              <div class="text-lg font-bold mt-4">DEBIT NOTE — GOODS RETURNED</div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
+              <div>
+                <div class="label !mb-1">Supplier</div>
+                <div class="font-bold text-slate-900" x-text="supplier.name"></div>
+                <div class="text-sm text-slate-500" x-text="supplier.contact_person"></div>
+                <div class="text-sm text-slate-500" x-text="supplier.phone"></div>
+                <div class="text-xs text-slate-400" x-text="supplier.tax_id"></div>
+              </div>
+              <div>
+                <div class="label !mb-1">Return</div>
+                <div class="font-bold mono" x-text="ret.return_no"></div>
+                <div class="text-sm text-slate-500" x-text="$date(ret.return_date)"></div>
+                <div class="text-sm text-slate-500" x-text="ABM.db.branchName(ret.branch_id)"></div>
+              </div>
+              <div>
+                <div class="label !mb-1">Reason</div>
+                <div class="text-sm text-slate-700" x-text="ret.reason"></div>
+                <div class="text-sm text-slate-500 mt-1" x-text="'We are claiming: ' + resolutionLabel(ret.resolution)"></div>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr><th>#</th><th>Item</th><th>IMEI / Serial</th><th class="hidden sm:table-cell">Condition</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Total</th></tr>
+                </thead>
+                <tbody>
+                  <template x-for="(it, i) in items" :key="it.id">
+                    <tr>
+                      <td class="text-slate-400" x-text="i + 1"></td>
+                      <td>
+                        <div class="font-medium text-slate-800" x-text="ABM.db.productLabel(it.product_id)"></div>
+                        <div class="text-xs text-slate-500" x-show="it.resolution_note" x-cloak x-text="it.resolution_note"></div>
+                      </td>
+                      <td class="mono text-xs">
+                        <span x-text="unitOf(it) ? unitOf(it).imei : '—'"></span>
+                        <span class="block" x-show="unitOf(it)" x-cloak x-html="$badge(unitOf(it) ? unitOf(it).status : '')"></span>
+                      </td>
+                      <td class="hidden sm:table-cell"><span x-html="$badge(it.condition === 'defective' ? 'defective' : 'amber', ABM.utils.titleCase(it.condition))"></span></td>
+                      <td class="num" x-text="it.quantity"></td>
+                      <td class="num" x-text="$money(it.unit_cost, {decimals:0})"></td>
+                      <td class="num font-semibold" x-text="$money(it.total, {decimals:0})"></td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="4" class="hidden sm:table-cell"></td>
+                    <td class="num" x-text="totalUnits"></td>
+                    <td class="num">Total</td>
+                    <td class="num" x-text="$money(ret.subtotal, {decimals:0})"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
+              <div x-show="ret.notes" x-cloak>
+                <div class="label !mb-1">Notes</div>
+                <p class="text-sm text-slate-600 whitespace-pre-line" x-text="ret.notes"></p>
+              </div>
+              <div class="sm:text-right">
+                <div class="label !mb-1">Credit received</div>
+                <div class="text-2xl font-extrabold" :class="ret.credit_amount ? 'text-emerald-700' : 'text-slate-400'" x-text="$money(ret.credit_amount, {decimals:0})"></div>
+                <div class="text-xs text-slate-500" x-show="ret.status !== 'completed'" x-cloak>Not settled yet</div>
+              </div>
+            </div>
+
+            <div class="hidden print:grid grid-cols-2 gap-10 mt-16 text-xs">
+              <div class="border-t border-slate-400 pt-2">Issued by</div>
+              <div class="border-t border-slate-400 pt-2">Received by (supplier)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ledger effect -->
+        <div class="card mt-4 no-print" x-show="ledgerRows.length" x-cloak>
+          <div class="card-header"><div class="card-title">Effect on the supplier account</div></div>
+          <div class="table-wrap">
+            <table class="table table-compact">
+              <thead><tr><th>Date</th><th>Type</th><th>Notes</th><th class="num">Debit</th><th class="num">Balance after</th></tr></thead>
+              <tbody>
+                <template x-for="t in ledgerRows" :key="t.id">
+                  <tr>
+                    <td class="text-slate-500" x-text="$date(t.created_at)"></td>
+                    <td><span x-html="$badge(t.type)"></span></td>
+                    <td class="text-slate-600" x-text="t.notes"></td>
+                    <td class="num text-emerald-700" x-text="$money(t.debit, {decimals:0})"></td>
+                    <td class="num font-semibold" x-text="$money(t.balance_after, {decimals:0})"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- ===================================================== OUTCOME MODAL -->
+    <div x-show="cm.open" x-cloak class="modal-backdrop no-print" @click.self="cm.open = false" @keydown.escape.window="cm.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true">
+        <form @submit.prevent="complete()">
+          <div class="modal-header">
+            <div class="modal-title">What did the supplier do?</div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="cm.open = false" aria-label="Close"><span x-html="ABM.icon('x')"></span></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div>
+              <label class="label" for="cm-res">Outcome</label>
+              <select id="cm-res" class="select" x-model="cm.resolution" x-sync="cm.resolution">
+                <option value="credit_note">Credit note — reduces what we owe</option>
+                <option value="refund">Refund — treated as a credit on the account</option>
+                <option value="replacement">Replacement units received</option>
+                <option value="scrap">Rejected — write the stock off</option>
+              </select>
+            </div>
+
+            <!-- credit amount -->
+            <div x-show="cm.resolution === 'credit_note' || cm.resolution === 'refund'" x-cloak>
+              <label class="label" for="cm-amount">Amount credited</label>
+              <div class="input-group">
+                <span class="addon addon-left" x-text="currency"></span>
+                <input id="cm-amount" type="number" class="input input-money" min="0" :max="ret ? ret.subtotal : 0" step="0.01" x-model.number="cm.amount">
+              </div>
+              <p class="help">Goods were worth <b x-text="ret ? $money(ret.subtotal, {decimals:0}) : ''"></b>. Lower it if they only credited part.</p>
+            </div>
+
+            <!-- replacement serials -->
+            <div x-show="cm.resolution === 'replacement'" x-cloak class="space-y-3">
+              <p class="text-sm text-slate-600">Enter the serial number of each replacement unit. Leave blank to write that unit off instead.</p>
+              <template x-for="(r, i) in cm.replacements" :key="r.imei_id">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 items-center">
+                  <div class="text-sm min-w-0">
+                    <div class="font-medium text-slate-800 truncate" x-text="ABM.db.productLabel(r.product_id)"></div>
+                    <div class="text-xs text-slate-500 mono" x-text="'was ' + r.old_serial"></div>
+                  </div>
+                  <input type="text" class="input input-sm mono" x-model.trim="r.serial" :placeholder="r.placeholder">
+                </div>
+              </template>
+              <p class="help" x-show="!cm.replacements.length" x-cloak>This return has no serialized units, so there is nothing to swap.</p>
+            </div>
+
+            <div>
+              <label class="label" for="cm-note">Note</label>
+              <textarea id="cm-note" class="textarea !min-h-[4rem]" x-model="cm.note" placeholder="Credit note number, who approved it, courier reference…"></textarea>
+            </div>
+
+            <div class="alert alert-danger" x-show="cm.error" x-cloak>
+              <span x-html="ABM.icon('warning')"></span><span x-text="cm.error"></span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="cm.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="cm.busy"><span x-html="ABM.icon('check')"></span>Close the return</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function supplierReturnView() {
+      const { db, utils, ui, session, stock, ledger } = ABM;
+      return {
+        ret: null, tick: 0,
+        canManage: session.can('supplier_returns.edit'),
+        canDelete: session.can('supplier_returns.delete'),
+        currency: ABM.db.setting('currency_symbol') || 'Rs.',
+        cm: { open: false, busy: false, resolution: 'credit_note', amount: 0, note: '', replacements: [], error: '' },
+
+        init() {
+          this.load();
+          if (this.ret && utils.qs('complete') && this.ret.status === 'sent') this.openComplete();
+        },
+        load() {
+          const r = db.find('supplier_returns', utils.qs('id'));
+          // a branch manager may only open their own branch's paperwork
+          this.ret = r && (session.isSuperAdmin() || r.branch_id === session.branchId()) ? r : null;
+          this.tick++;
+          if (this.ret) document.title = this.ret.return_no + ' · Supplier Return';
+        },
+
+        get supplier() { return (this.ret && db.find('suppliers', this.ret.supplier_id)) || {}; },
+        get branch() { return (this.ret && db.find('branches', this.ret.branch_id)) || {}; },
+        get company() { return db.settings(); },
+        get items() { this.tick; return this.ret ? db.where('supplier_return_items', (i) => i.return_id === this.ret.id) : []; },
+        get totalUnits() { return this.items.reduce((n, i) => n + (Number(i.quantity) || 0), 0); },
+        unitOf(it) { return it.imei_id ? db.find('product_imeis', it.imei_id) : null; },
+        resolutionLabel(x) { return ({ credit_note: 'Credit note', replacement: 'Replacement', refund: 'Refund', scrap: 'Write off' })[x] || utils.titleCase(x || '—'); },
+        get ledgerRows() {
+          this.tick;
+          if (!this.ret) return [];
+          return db.where('supplier_transactions', (t) => t.reference_type === 'supplier_return' && String(t.reference_id) === String(this.ret.id));
+        },
+
+        get steps() {
+          const r = this.ret;
+          if (!r) return [];
+          if (r.status === 'cancelled') {
+            return [
+              { key: 'draft', label: 'Raised', at: r.created_at, done: true },
+              { key: 'cancelled', label: 'Cancelled', at: r.cancelled_at, done: true, current: true, failed: true },
+            ];
+          }
+          const order = ['draft', 'sent', 'completed'];
+          const idx = Math.max(0, order.indexOf(r.status));
+          return [
+            { key: 'draft', label: 'Raised', at: r.created_at, done: true, current: idx === 0 },
+            { key: 'sent', label: 'Sent to supplier', at: r.sent_at, done: idx >= 1, current: idx === 1 },
+            { key: 'completed', label: 'Settled', at: r.completed_at, done: idx >= 2, current: idx === 2 },
+          ];
+        },
+
+        /* ------------------------------------------------------- actions -- */
+        async send() {
+          if (!this.canManage || this.ret.status !== 'draft') return;
+          const yes = await ui.confirm({
+            title: 'Send this return to the supplier?',
+            message: 'The units leave ' + db.branchName(this.ret.branch_id) + ' and are recorded as being with the supplier.',
+            confirmText: 'Send',
+          });
+          if (!yes) return;
+          try {
+            this.items.forEach((it) => {
+              if (it.imei_id) stock.returnToSupplier(it.imei_id, { type: 'supplier_return', id: this.ret.id }, 'Sent back on ' + this.ret.return_no);
+              else stock.removeForSupplierReturn(this.ret.branch_id, it.product_id, it.quantity, { type: 'supplier_return', id: this.ret.id }, 'Sent back on ' + this.ret.return_no);
+            });
+            db.update('supplier_returns', this.ret.id, { status: 'sent', sent_at: utils.now() });
+            db.audit('supplier_return.send', 'supplier_return', this.ret.id, this.ret.return_no + ' sent to ' + db.supplierName(this.ret.supplier_id));
+            this.load();
+            ui.success('Return sent. Stock has left the branch.');
+          } catch (e) { ui.error(e.message); }
+        },
+
+        openComplete() {
+          if (!this.canManage) { ui.error('Your role is not allowed to update supplier returns.'); return; }
+          this.cm = {
+            open: true, busy: false,
+            resolution: this.ret.resolution || 'credit_note',
+            amount: this.ret.subtotal, note: '', error: '',
+            replacements: this.items.filter((i) => i.imei_id).map((i) => {
+              const u = db.find('product_imeis', i.imei_id) || {};
+              const p = db.find('products', i.product_id);
+              return {
+                imei_id: i.imei_id, product_id: i.product_id, old_serial: u.imei || '',
+                serial: '', placeholder: db.serialType(p) === 'serial' ? 'New serial number' : 'New 15-digit IMEI',
+              };
+            }),
+          };
+        },
+
+        /** Close the return: credit the supplier account, take in replacements, or write the stock off. */
+        complete() {
+          if (this.cm.busy || !this.canManage) return;
+          this.cm.busy = true;
+          this.cm.error = '';
+          try {
+            const r = this.ret, res = this.cm.resolution;
+            let credit = 0;
+
+            if (res === 'credit_note' || res === 'refund') {
+              credit = utils.round2(Math.max(0, Math.min(Number(this.cm.amount) || 0, r.subtotal)));
+              if (!credit) throw new Error('Enter the amount the supplier credited.');
+              ledger.supplier(r.supplier_id, r.branch_id, 'return', credit, 0, {
+                referenceType: 'supplier_return', referenceId: r.id,
+                notes: `Credit for ${r.return_no}${this.cm.note ? ' · ' + this.cm.note : ''}`,
+              });
+              // units stay out of stock: they are gone for good
+              this.items.filter((i) => i.imei_id).forEach((i) => {
+                const u = db.find('product_imeis', i.imei_id);
+                if (u && u.status === 'returned_to_supplier') db.update('product_imeis', u.id, { status: 'scrapped', notes: 'Credited on ' + r.return_no });
+              });
+            } else if (res === 'replacement') {
+              const filled = this.cm.replacements.filter((x) => String(x.serial || '').trim());
+              // validate every serial first, then write
+              filled.forEach((x) => stock.validateSerial(x.serial, db.find('products', x.product_id)));
+              filled.forEach((x) => {
+                const row = stock.receiveReplacement(x.imei_id, x.serial, { type: 'supplier_return', id: r.id }, this.cm.note);
+                const item = this.items.find((i) => i.imei_id === x.imei_id);
+                if (item) db.update('supplier_return_items', item.id, { replacement_imei_id: row.id, resolution_note: 'Replaced by ' + row.imei });
+              });
+              // anything not replaced is written off
+              this.cm.replacements.filter((x) => !String(x.serial || '').trim()).forEach((x) => {
+                const u = db.find('product_imeis', x.imei_id);
+                if (u && u.status === 'returned_to_supplier') db.update('product_imeis', u.id, { status: 'scrapped', notes: 'Not replaced · ' + r.return_no });
+              });
+            } else if (res === 'scrap') {
+              this.items.filter((i) => i.imei_id).forEach((i) => {
+                const u = db.find('product_imeis', i.imei_id);
+                if (u && u.status !== 'scrapped') db.update('product_imeis', u.id, { status: 'scrapped', notes: 'Written off · ' + r.return_no });
+              });
+            }
+
+            db.update('supplier_returns', r.id, {
+              status: 'completed', resolution: res, credit_amount: credit,
+              completed_at: utils.now(),
+              notes: [r.notes, this.cm.note].filter(Boolean).join('\n'),
+            });
+            db.audit('supplier_return.complete', 'supplier_return', r.id,
+              `${r.return_no} closed as ${this.resolutionLabel(res)}${credit ? ' · credit ' + utils.money(credit) : ''}`);
+
+            this.cm.open = false;
+            this.load();
+            ui.success('Return closed.');
+          } catch (e) {
+            this.cm.error = e.message;
+            ui.error(e.message);
+          } finally {
+            this.cm.busy = false;
+          }
+        },
+
+        async cancel() {
+          if (!this.canDelete) { ui.error('Your role is not allowed to cancel supplier returns.'); return; }
+          const wasSent = this.ret.status === 'sent';
+          const yes = await ui.confirm({
+            title: 'Cancel this return?',
+            message: wasSent ? 'The units come back to the branch as faulty stock.' : 'The draft will be marked cancelled.',
+            confirmText: 'Cancel return', danger: true,
+          });
+          if (!yes) return;
+          try {
+            if (wasSent) {
+              this.items.forEach((it) => {
+                if (it.imei_id) {
+                  const u = db.find('product_imeis', it.imei_id);
+                  if (u && u.status === 'returned_to_supplier') {
+                    db.update('product_imeis', u.id, { status: 'defective', notes: 'Return ' + this.ret.return_no + ' cancelled' });
+                    stock.movement(u.branch_id, u.product_id, 'supplier_return', 0, u.cost_price, { type: 'supplier_return', id: this.ret.id }, u.id, 'Return cancelled');
+                  }
+                } else {
+                  stock.add(this.ret.branch_id, it.product_id, it.quantity, it.unit_cost, 'adjustment', { type: 'supplier_return', id: this.ret.id }, null, 'Return ' + this.ret.return_no + ' cancelled');
+                }
+              });
+            }
+            db.update('supplier_returns', this.ret.id, { status: 'cancelled', cancelled_at: utils.now() });
+            db.audit('supplier_return.cancel', 'supplier_return', this.ret.id, this.ret.return_no + ' cancelled');
+            this.load();
+            ui.success('Return cancelled.');
+          } catch (e) { ui.error(e.message); }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

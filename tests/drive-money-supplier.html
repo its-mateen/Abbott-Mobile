@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>DRIVE money / supplier ledger</title></head>
+<body>
+<pre id="log"></pre>
+<script>
+/* QA driver — drives suppliers.html / supplier-view.html and asserts the payables ledger. */
+const TAG = 'DRIVE';
+let fails = 0, checks = 0;
+const L = (...a) => { const s = a.join(' '); console.log(TAG + ' ' + s); document.getElementById('log').textContent += s + '\n'; };
+const ok = (cond, msg, extra) => { checks++; if (!cond) { fails++; L('FAIL ' + msg + (extra ? '  [' + extra + ']' : '')); } else L('ok   ' + msg + (extra ? '  [' + extra + ']' : '')); };
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const near = (a, b, tol) => Math.abs(r2(a) - r2(b)) <= (tol === undefined ? 0.01 : tol);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function load(url, opts) {
+  opts = opts || {};
+  return new Promise((resolve, reject) => {
+    const f = document.createElement('iframe');
+    f.width = 1400; f.height = 900; f.style.border = '1px solid #ccc';
+    f.onload = () => {
+      const w = f.contentWindow;
+      if (opts.plain) return resolve({ f, w, st: null });
+      let n = 0;
+      const t = setInterval(() => {
+        n++;
+        let st = null;
+        try { const el = w.document.querySelector('main[x-data]'); if (el) st = (w.Alpine && w.Alpine.$data) ? w.Alpine.$data(el) : (el._x_dataStack || [])[0]; } catch (e) { /* ignore */ }
+        if (st) { clearInterval(t); resolve({ f, w, st }); }
+        else if (n > 160) { clearInterval(t); reject(new Error('Alpine component never appeared on ' + url)); }
+      }, 25);
+    };
+    f.src = url;
+    document.body.appendChild(f);
+  });
+}
+
+(async function () {
+  try {
+    const boot = await load('autologin.html?as=admin&reset=1', { plain: true });
+    const A = boot.w.ABM;
+    const key = (t) => String(t.created_at) + '|' + String(t.id).padStart(8, '0');
+
+    /* ---------- 1. seeded supplier ledger integrity ---------- */
+    let drift = 0, afterBad = 0, firstBad = '';
+    A.db.all('suppliers').forEach((s) => {
+      const tx = A.db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(s.id)).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+      let run = 0;
+      tx.forEach((t) => {
+        run = r2(run + (Number(t.credit) || 0) - (Number(t.debit) || 0));
+        if (!near(run, t.balance_after)) { afterBad++; if (!firstBad) firstBad = 'sup ' + s.id + ' tx#' + t.id + ' ' + t.type + ' ' + String(t.created_at).slice(0, 10) + ' stored=' + t.balance_after + ' replay=' + run; }
+      });
+      if (!near(run, Number(s.balance) || 0)) { drift++; L('  balance drift: supplier ' + s.id + ' ' + s.name + ' stored=' + s.balance + ' replay=' + run); }
+    });
+    ok(drift === 0, 'every supplier.balance equals the replay of its ledger', drift + ' drifting');
+    ok(afterBad === 0, 'every supplier_transactions.balance_after matches the chronological running balance', afterBad + ' rows; first: ' + firstBad);
+
+    /* ---------- 2. suppliers list page ---------- */
+    const pl = await load('../suppliers.html');
+    const S0 = pl.st, DL = pl.w.ABM;
+    const rawPayable = r2(DL.db.all('suppliers').filter((s) => Number(s.balance) > 0).reduce((a, s) => a + Number(s.balance), 0));
+    ok(near(S0.k.payable, rawPayable), 'suppliers list payable KPI == Σ positive supplier balances', S0.k.payable + ' vs ' + rawPayable);
+
+    /* ---------- 3. pick a supplier with >= 2 open purchases ---------- */
+    const openBy = {};
+    A.db.all('purchases').filter((p) => p.status !== 'cancelled' && r2((Number(p.total) || 0) - (Number(p.paid_amount) || 0)) > 0.005)
+      .forEach((p) => { (openBy[p.supplier_id] = openBy[p.supplier_id] || []).push(p); });
+    const cand = A.db.all('suppliers').filter((s) => Number(s.balance) > 1000 && (openBy[s.id] || []).length >= 2).sort((a, b) => openBy[b.id].length - openBy[a.id].length);
+    if (!cand.length) throw new Error('no supplier with >= 2 open purchases in the seed');
+    const SID = cand[0].id;
+    const bills = openBy[SID].slice().sort((a, b) => (String(a.purchase_date) + a.id < String(b.purchase_date) + b.id ? -1 : 1));
+    L('target supplier ' + SID + ' "' + cand[0].name + '" balance=' + cand[0].balance + ' openBills=' + bills.length + ' [' + bills.map((p) => p.purchase_no + ':' + r2(p.total - p.paid_amount)).join(', ') + ']');
+
+    const pv = await load('../supplier-view.html?id=' + SID);
+    const S = pv.st, D = pv.w.ABM;
+    ok(S.s && String(S.s.id) === String(SID), 'supplier-view loaded the right supplier', S.s && S.s.name);
+    ok(near(S.closing, Number(S.s.balance)), 'ledger running balance == supplier balance', S.closing + ' vs ' + S.s.balance);
+    ok(S.openPurchases.length === bills.length, 'page sees the same open bills', S.openPurchases.map((p) => p.purchase_no).join(','));
+    ok(String(S.openPurchases[0].purchase_no) === String(bills[0].purchase_no), 'open bills are oldest-first', S.openPurchases[0].purchase_no + ' vs ' + bills[0].purchase_no);
+
+    /* ---------- 4. PARTIAL payment allocated to the oldest bill ---------- */
+    const bal0 = Number(S.s.balance);
+    const stx0 = D.db.all('supplier_transactions').length;
+    const oldest = bills[0];
+    const oldestDue = r2(oldest.total - oldest.paid_amount);
+    const part = r2(oldestDue / 2);
+    S.openPay(); await sleep(60);
+    ok(near(Number(S.pay.amount), bal0), 'Pay supplier prefills the outstanding balance', S.pay.amount + ' vs ' + bal0);
+    S.pay.amount = part; S.pay.method = 'cash'; S.pay.allocate = true;
+    S.savePay(); await sleep(140);
+    const t1 = D.db.all('supplier_transactions').slice(-1)[0];
+    ok(D.db.all('supplier_transactions').length === stx0 + 1, 'partial payment wrote exactly one ledger row');
+    ok(t1.type === 'payment' && near(t1.debit, part) && near(t1.credit, 0), 'supplier payment is a DEBIT', 'debit=' + t1.debit + ' credit=' + t1.credit);
+    ok(near(t1.balance_after, r2(bal0 - part)), 'balance_after = balance − payment', t1.balance_after + ' vs ' + r2(bal0 - part));
+    ok(near(D.db.find('suppliers', SID).balance, r2(bal0 - part)), 'supplier.balance updated', D.db.find('suppliers', SID).balance);
+    ok(t1.payment_method === 'cash' && Number(t1.branch_id) === Number(D.session.branchId()), 'method + branch stored', t1.payment_method + '/' + t1.branch_id);
+    const p1 = D.db.find('purchases', oldest.id);
+    ok(near(p1.paid_amount, r2(Number(oldest.paid_amount) + part)), 'oldest bill absorbed the partial payment', oldest.purchase_no + ' paid ' + oldest.paid_amount + '->' + p1.paid_amount);
+    ok(near(D.db.find('purchases', bills[1].id).paid_amount, Number(bills[1].paid_amount)), 'the next bill was NOT touched', bills[1].purchase_no);
+    ok(/applied to/.test(t1.notes) && t1.notes.indexOf(oldest.purchase_no) >= 0, 'ledger note records the allocation', t1.notes);
+    ok(String(t1.reference_type) === 'purchase' && String(t1.reference_id) === String(oldest.id), 'single-bill payment references that purchase', t1.reference_type + '#' + t1.reference_id);
+    const audP = D.db.all('audit_logs').slice(-1)[0];
+    ok(audP && audP.action === 'supplier.payment', 'audit supplier.payment written', audP && audP.action);
+    ok(near(S.closing, Number(S.s.balance)), 'running balance still == supplier balance', S.closing + ' vs ' + S.s.balance);
+
+    /* ---------- 5. payment that spans several bills, oldest first ---------- */
+    const balA = Number(D.db.find('suppliers', SID).balance);
+    const openNow = S.openPurchases.map((p) => ({ id: p.id, no: p.purchase_no, due: p.due }));
+    const span = r2(openNow[0].due + openNow[1].due / 2);
+    S.openPay(); await sleep(60);
+    S.pay.amount = span; S.pay.method = 'bank_transfer'; S.pay.reference = 'QA-TRX-9'; S.pay.allocate = true;
+    S.savePay(); await sleep(140);
+    const t2 = D.db.all('supplier_transactions').slice(-1)[0];
+    const b0 = D.db.find('purchases', openNow[0].id), b1 = D.db.find('purchases', openNow[1].id);
+    ok(near(r2(b0.total - b0.paid_amount), 0), 'oldest bill fully settled', openNow[0].no + ' due=' + r2(b0.total - b0.paid_amount));
+    ok(near(r2(b1.total - b1.paid_amount), r2(openNow[1].due / 2)), 'the rest went to the next-oldest bill', openNow[1].no + ' due=' + r2(b1.total - b1.paid_amount));
+    ok(t2.notes.indexOf(openNow[0].no) >= 0 && t2.notes.indexOf(openNow[1].no) >= 0, 'note lists both bills', t2.notes);
+    ok(t2.reference_type === null && t2.reference_id === null, 'multi-bill payment carries no single reference', t2.reference_type + '/' + t2.reference_id);
+    ok(t2.payment_reference === 'QA-TRX-9', 'payment reference stored', t2.payment_reference);
+    ok(near(D.db.find('suppliers', SID).balance, r2(balA - span)), 'balance reduced by the payment', D.db.find('suppliers', SID).balance);
+
+    /* ---------- 6. OVERPAYMENT -> supplier advance ---------- */
+    const balB = Number(D.db.find('suppliers', SID).balance);
+    S.openPay(); await sleep(60);
+    S.pay.amount = r2(balB + 7500); S.pay.method = 'cash'; S.pay.allocate = true;
+    S.savePay(); await sleep(140);
+    const sOver = D.db.find('suppliers', SID);
+    ok(near(sOver.balance, -7500), 'overpayment leaves a negative balance (advance)', sOver.balance);
+    ok(near(S.advance, 7500) && near(S.outstanding, 0), 'page shows the advance and no outstanding', 'advance=' + S.advance + ' outstanding=' + S.outstanding);
+    const stillOpen = D.db.all('purchases').filter((p) => String(p.supplier_id) === String(SID) && p.status !== 'cancelled' && r2(p.total - p.paid_amount) > 0.005);
+    L('  bills still open after paying the whole balance: ' + stillOpen.length + ' [' + stillOpen.map((p) => p.purchase_no + ':' + r2(p.total - p.paid_amount)).join(', ') + ']');
+
+    /* ---------- 7. adjustments ---------- */
+    S.openAdjust(); await sleep(60);
+    S.adj.dir = 'increase'; S.adj.amount = 3200; S.adj.reason = 'QA driver — missed bill';
+    S.saveAdjust(); await sleep(140);
+    const a1 = D.db.all('supplier_transactions').slice(-1)[0];
+    ok(a1.type === 'adjustment' && near(a1.credit, 3200) && near(a1.debit, 0), 'increase adjustment is a CREDIT for suppliers', 'debit=' + a1.debit + ' credit=' + a1.credit);
+    ok(near(D.db.find('suppliers', SID).balance, r2(-7500 + 3200)), 'balance moved by the adjustment', D.db.find('suppliers', SID).balance);
+    ok(near(a1.balance_after, Number(D.db.find('suppliers', SID).balance)), 'adjustment balance_after == supplier balance', a1.balance_after);
+    S.openAdjust(); await sleep(60);
+    S.adj.dir = 'decrease'; S.adj.amount = 200; S.adj.reason = 'QA driver — reverse';
+    S.saveAdjust(); await sleep(140);
+    const a2 = D.db.all('supplier_transactions').slice(-1)[0];
+    ok(a2.type === 'adjustment' && near(a2.debit, 200), 'decrease adjustment is a DEBIT', 'debit=' + a2.debit + ' credit=' + a2.credit);
+    ok(near(D.db.find('suppliers', SID).balance, -4500), 'balance after both adjustments', D.db.find('suppliers', SID).balance);
+
+    /* ---------- 8. validation guards ---------- */
+    S.openPay(); await sleep(50);
+    S.pay.amount = 0; S.savePay(); await sleep(50);
+    ok(!!S.pay.errors.amount, 'zero payment rejected', S.pay.errors.amount);
+    S.pay.amount = 100; S.pay.method = 'bank_transfer'; S.pay.reference = ''; S.savePay(); await sleep(50);
+    ok(!!S.pay.errors.reference, 'non-cash payment needs a reference', S.pay.errors.reference);
+    S.closePay();
+    S.openAdjust(); await sleep(50);
+    S.adj.amount = 10; S.adj.reason = 'ab'; S.saveAdjust(); await sleep(50);
+    ok(!!S.adj.errors.reason, 'adjustment needs a reason', S.adj.errors.reason);
+    S.closeAdjust();
+
+    /* ---------- 9. driven supplier replays cleanly ---------- */
+    const txN = D.db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(SID)).sort((a, b) => (key(a) < key(b) ? -1 : 1));
+    let run = 0, bad = 0;
+    txN.forEach((t) => { run = r2(run + (Number(t.credit) || 0) - (Number(t.debit) || 0)); if (!near(run, t.balance_after)) bad++; });
+    ok(near(run, Number(D.db.find('suppliers', SID).balance)), 'driven supplier: replay == stored balance', run);
+    L('  driven supplier rows whose balance_after != replay: ' + bad + ' of ' + txN.length);
+
+    /* ---------- 10. date-range bar ---------- */
+    S.range.set('all'); await sleep(90); const nAll = S.ledger.length;
+    S.range.set('today'); await sleep(90); const nToday = S.ledger.length;
+    S.range.set('this_month'); await sleep(90); const nMonth = S.ledger.length;
+    const todayIso = D.utils.today();
+    const rawToday = D.db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(SID) && String(t.created_at).slice(0, 10) === todayIso).length;
+    ok(nToday === rawToday, 'ledger Today count == raw rows dated today', nToday + ' vs ' + rawToday);
+    ok(nToday <= nMonth && nMonth <= nAll && nAll > nToday, 'Today <= This Month <= All', nToday + '/' + nMonth + '/' + nAll);
+    S.range.set('all'); await sleep(60);
+    ok(near(S.opening, 0), 'All-time opening balance is zero', S.opening);
+    const totDebit = D.utils.sum(D.db.all('supplier_transactions').filter((t) => String(t.supplier_id) === String(SID)), 'debit');
+    ok(near(S.totals.debit, totDebit), 'All-time period totals == raw sums', S.totals.debit + ' vs ' + totDebit);
+
+    L('checks=' + checks + ' fails=' + fails);
+    L('RESULT: ' + (fails ? 'FAIL' : 'PASS'));
+  } catch (e) {
+    L('EXCEPTION ' + (e && e.message) + '\n' + (e && e.stack));
+    L('RESULT: FAIL');
+  }
+})();
+</script>
+</body>
+</html>

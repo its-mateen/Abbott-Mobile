@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640" role="img" aria-label="Abbott Mobiles — the name of trust">
+  <!--
+    STAND-IN MARK.  Drop the real artwork in as  assets/img/logo.png  and every screen, print
+    document and the storefront pick it up automatically (ABM.brand.logo() tries the PNG first,
+    then this file, then a plain monogram).  Nothing else needs changing.
+  -->
+  <defs>
+    <linearGradient id="abmBlue" x1="0" y1="0" x2="0.35" y2="1">
+      <stop offset="0" stop-color="#3b8cff"/>
+      <stop offset="0.45" stop-color="#1657f0"/>
+      <stop offset="1" stop-color="#0a35b8"/>
+    </linearGradient>
+    <linearGradient id="abmSteel" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#8b95a3"/>
+      <stop offset="0.5" stop-color="#4a525e"/>
+      <stop offset="1" stop-color="#232931"/>
+    </linearGradient>
+    <linearGradient id="abmSwoosh" x1="0" y1="0" x2="1" y2="0.2">
+      <stop offset="0" stop-color="#5ab8ff"/>
+      <stop offset="1" stop-color="#0b46e0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- A -->
+  <path d="M188 372 L262 72 L332 72 L406 372 L330 372 L316 306 L278 306 L292 240 L302 240 L297 168 L266 306 L262 306 L248 372 Z"
+        fill="url(#abmBlue)" stroke="#0a35b8" stroke-width="6" stroke-linejoin="round"/>
+  <!-- M -->
+  <path d="M330 372 L330 118 L392 118 L452 246 L512 118 L574 118 L574 372 L512 372 L512 232 L470 322 L434 322 L392 232 L392 372 Z"
+        fill="url(#abmSteel)" stroke="#232931" stroke-width="6" stroke-linejoin="round"/>
+  <!-- swoosh -->
+  <path d="M176 330 C284 300 420 236 520 150 C430 262 300 328 186 352 Z" fill="url(#abmSwoosh)"/>
+
+  <g font-family="Inter, Segoe UI, Arial, Helvetica, sans-serif" text-anchor="middle">
+    <text x="320" y="470" font-size="104" font-weight="800" letter-spacing="10" fill="url(#abmSteel)">ABBOTT</text>
+    <text x="320" y="536" font-size="56" font-weight="800" letter-spacing="16" fill="url(#abmBlue)">MOBILES</text>
+    <text x="320" y="596" font-size="28" font-weight="600" letter-spacing="9" fill="#6b7280">THE NAME OF TRUST</text>
+  </g>
+  <rect x="70" y="512" width="150" height="7" rx="3.5" fill="url(#abmBlue)"/>
+  <rect x="420" y="512" width="150" height="7" rx="3.5" fill="url(#abmBlue)"/>
+</svg>

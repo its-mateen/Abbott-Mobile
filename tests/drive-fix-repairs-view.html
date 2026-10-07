@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE fix: repairs render fixture</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+<pre id="out">preparing…</pre>
+<script>
+/* eslint-disable */
+// Render fixture (not a behaviour test — that is drive-fix-repairs.html). Reseeds the demo data, adds repair
+// jobs whose money the seed never has — a cancelled job holding an advance with a refund, a voided payment and
+// its reversal; a job delivered with its balance on khata — then opens the page to screenshot:
+//   ?to=refund   job card with the Refund window open      ?to=card     the same job card, no window
+//   ?to=khata    job card of a job delivered on credit     ?to=invoice  printable invoice of that job
+//   ?to=void     job card with the Void window open        ?to=list     repair jobs list (board)
+// Used as:  powershell -File tests\render.ps1 -Page "tests/drive-fix-repairs-view.html?to=refund" -As manager [-Mobile]
+(function () {
+  const q = new URLSearchParams(location.search);
+  const to = q.get('to') || 'refund';
+  const { db, utils, session } = ABM;
+  db.reset();                                          // the session survives a reset
+  const me = session.user() || db.all('users').find((u) => u.username === 'manager');
+  const B = Number(session.branchId()) || 1;
+  const custs = db.all('customers').filter((c) => !c.is_walkin && c.is_active);
+  const job = (cust, patch) => db.insert('repair_jobs', Object.assign({
+    job_no: db.nextNumber(db.setting('repair_prefix') || 'JOB', db.branchCode(B)), branch_id: B, customer_id: cust.id,
+    device_type: 'mobile', brand: 'Apple', model: 'iPhone 13 Pro Max', serial: '356789012345671', serial_type: 'imei', color: 'Graphite',
+    password_pattern: '', accessories_received: 'Device only', condition_checklist: { screen_ok: false, buttons_ok: true, ports_ok: true, water_damage: false },
+    condition_notes: 'Cracked glass', problem_category: 'screen', problem_description: 'Screen cracked, touch not working', diagnosis: '',
+    priority: 'normal', technician_id: null, estimated_cost: 18000, quoted_at: null, approved_by_customer: 0,
+    total_parts: 0, total_labor: 0, discount: 0, total: 0, paid_amount: 0, due_amount: 0, warranty_days: 7,
+    promised_at: utils.now(), received_at: utils.addDays(new Date(), -3).toISOString(), completed_at: null, delivered_at: null,
+    cancel_reason: '', notes: '', created_by: me.id,
+  }, patch));
+  const pay = (j, row) => db.insert('repair_payments', Object.assign({ job_id: j.id, reference: null, notes: '', shift_id: null, bank_txn_id: null, created_by: me.id }, row));
+
+  // A. cancelled, advance 3000 cash + a card payment keyed by mistake (voided) + 1000 already refunded → 2000 refundable
+  const a = job(custs[0], { status: 'cancelled', cancel_reason: 'Customer declined the quote' });
+  pay(a, { method: 'cash', amount: 3000, kind: 'advance', created_at: utils.addDays(new Date(), -3).toISOString() });
+  const wrong = pay(a, { method: 'card', amount: 500, kind: 'payment', reference: 'AUTH-1182', created_at: utils.addDays(new Date(), -2).toISOString() });
+  const rev = pay(a, { method: 'card', amount: 500, kind: 'refund', reference: 'AUTH-1182', voids_payment_id: wrong.id, notes: 'Void: keyed twice' });
+  db.update('repair_payments', wrong.id, { voided_by_id: rev.id, void_reason: 'keyed twice' });
+  pay(a, { method: 'cash', amount: 1000, kind: 'refund', notes: 'Part of the advance returned' });
+  db.update('repair_jobs', a.id, { paid_amount: 2000, due_amount: 0 });
+
+  // B. delivered, total 5000: 1000 cash + 4000 on the customer's khata
+  const c = custs[1];
+  const b = job(c, { status: 'delivered', total_labor: 5000, total: 5000, paid_amount: 1000, due_amount: 0, completed_at: utils.addDays(new Date(), -1).toISOString(), delivered_at: utils.now(), credit_amount: 4000, on_credit: 1, credit_at: utils.now() });
+  db.insert('repair_items', { job_id: b.id, type: 'labor', product_id: null, description: 'Screen replacement labour', quantity: 1, unit_price: 5000, unit_cost: 0, total: 5000, consumed: 0 });
+  pay(b, { method: 'cash', amount: 1000, kind: 'payment' });
+  const t = ABM.ledger.customer(c.id, B, 'repair', 4000, 0, { referenceType: 'repair_job', referenceId: b.id, notes: 'Repair ' + b.job_no + ' delivered on credit' });
+  db.update('repair_jobs', b.id, { credit_txn_id: t.id });
+
+  const target = {
+    refund: 'repair-view.html?id=' + a.id + '&action=refund',
+    card: 'repair-view.html?id=' + a.id,
+    void: 'repair-view.html?id=' + b.id + '&__click=' + encodeURIComponent('button[title^="Void this payment"]'),
+    khata: 'repair-view.html?id=' + b.id,
+    invoice: 'invoice.html?job=' + b.id + '&layout=' + (q.get('layout') || 'thermal'),
+    list: 'repairs.html?range=all&q=' + encodeURIComponent('iPhone 13 Pro Max'),
+  }[to] || 'repair-view.html?id=' + a.id;
+  document.getElementById('out').textContent = 'fixture ready: jobs ' + a.job_no + ', ' + b.job_no + ' → ' + target;
+  console.log('RESULT: PASS (render fixture only, jobs ' + a.id + ',' + b.id + ')');
+  location.replace('../' + target + (target.indexOf('__layout') >= 0 ? '' : '&__layout=1'));
+})();
+</script>
+</body>
+</html>

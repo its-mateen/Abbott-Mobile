@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Purchases · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="purchases" data-title="Purchases" data-perm="purchases.view">
+  <main x-data="purchasesPage()" @keydown.escape.window="closePay()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Purchases</h2>
+        <p class="page-subtitle">Stock received from suppliers · <span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="purchase-orders.html" class="btn btn-secondary"><span x-html="ABM.icon('document')"></span>Purchase orders</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canAdd">
+          <a href="purchase-create.html" class="btn btn-primary"><span x-html="ABM.icon('plus')"></span>New Purchase</a>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'purchases.html?' + range.query + branchQuery" class="stat stat-accent" title="All purchases in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Purchases · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.value, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('truck')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.count"></span> purchase<span x-text="k.count === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(k.units)"></span> units received<span x-show="k.cancelled"> · <span x-text="k.cancelled"></span> cancelled</span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchases.html?' + range.query + '&pay=paid' + branchQuery" class="stat stat-money" title="Show fully paid purchases">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Paid to suppliers</div><div class="stat-value" x-text="$money(k.paid, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('check-circle')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.paidCount"></span> fully paid · <span x-text="k.partialCount"></span> partial</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchases.html?' + range.query + '&pay=due' + branchQuery" class="stat stat-warning" title="Show purchases with an outstanding balance">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Outstanding</div><div class="stat-value" :class="k.due > 0 ? 'text-rose-600' : ''" x-text="$money(k.due, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.dueCount"></span> purchase<span x-text="k.dueCount === 1 ? '' : 's'"></span> awaiting payment</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-payables.html" class="stat stat-danger" title="Open payables report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Supplier payables</div><div class="stat-value" x-text="$money(k.payables, {decimals:0})"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('store')"></span>
+        </div>
+        <div class="stat-meta">all time · <span x-text="k.creditors"></span> supplier<span x-text="k.creditors === 1 ? '' : 's'"></span> owed</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+          <div class="relative sm:col-span-2" :class="isSuperAdmin ? 'xl:col-span-2' : 'xl:col-span-3'">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search purchase no, PO no, supplier invoice, supplier…" x-model.debounce.200ms="q" aria-label="Search purchases">
+          </div>
+          <select class="select" x-model="f.supplier" aria-label="Supplier">
+            <option value="">All suppliers</option>
+            <template x-for="s in suppliers" :key="s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+          </select>
+          <select class="select" x-model="f.pay" aria-label="Payment status">
+            <option value="">Any payment status</option>
+            <option value="paid">Paid</option>
+            <option value="partial">Partial</option>
+            <option value="unpaid">Unpaid</option>
+            <option value="due">Outstanding (partial + unpaid)</option>
+          </select>
+          <select class="select" x-model="f.status" aria-label="Status">
+            <option value="">Any status</option>
+            <option value="received">Received</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <template x-if="isSuperAdmin">
+            <select class="select" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> purchases in period</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Purchase orders</div><div class="card-subtitle">Newest first · click a purchase number for the goods received note</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Purchase</th>
+              <th class="hidden sm:table-cell">Date</th>
+              <th>Supplier</th>
+              <th class="hidden md:table-cell" x-show="showBranch">Branch</th>
+              <th class="num hidden lg:table-cell">Lines</th>
+              <th class="num hidden lg:table-cell">Units</th>
+              <th class="num">Total</th>
+              <th class="num hidden lg:table-cell">Paid</th>
+              <th class="num hidden md:table-cell">Due</th>
+              <th>Payment</th>
+              <th class="hidden sm:table-cell">Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="r.status === 'cancelled' && 'opacity-60'">
+                <td>
+                  <a :href="'purchase-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.purchase_no"></a>
+                  <div class="text-[11px] text-slate-400 sm:hidden whitespace-nowrap" x-text="$date(r.purchase_date)"></div>
+                  <div class="text-[11px] text-slate-400 truncate max-w-[9rem]" x-show="r.supplier_invoice_no">Inv. <span x-text="r.supplier_invoice_no"></span></div>
+                  <a :href="'purchase-order-view.html?id=' + r.purchase_order_id" class="text-[11px] text-navy-700 font-semibold hover:underline mono block truncate max-w-[9rem]" x-show="r.poNo" x-text="r.poNo"></a>
+                </td>
+                <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(r.purchase_date)"></td>
+                <td>
+                  <a :href="'supplier-view.html?id=' + r.supplier_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[9rem] sm:max-w-[14rem] xl:max-w-[18rem]" x-text="r.supplierName"></a>
+                  <div class="text-[11px] text-slate-400 md:hidden" x-show="showBranch" x-text="r.branchCode"></div>
+                </td>
+                <td class="hidden md:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                <td class="num hidden lg:table-cell text-slate-600" x-text="r.lines"></td>
+                <td class="num hidden lg:table-cell text-slate-600" x-text="ABM.utils.num(r.units)"></td>
+                <td class="num font-semibold whitespace-nowrap" x-text="$money(r.total, {decimals:0})"></td>
+                <td class="num hidden lg:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(r.paid_amount, {decimals:0})"></td>
+                <td class="num hidden md:table-cell whitespace-nowrap" :class="r.due > 0 && r.status !== 'cancelled' ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-text="$money(r.due, {decimals:0})"></td>
+                <td>
+                  <span x-html="$badge(r.payStatus, r.payStatus === 'refund' ? 'Refund due' : undefined)"></span>
+                  <div class="text-[11px] text-rose-600 md:hidden whitespace-nowrap mt-0.5" x-show="r.due > 0 && r.status !== 'cancelled'" x-text="'Due ' + $money(r.due, {decimals:0})"></div>
+                </td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.status)"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'purchase-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="View purchase" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canPay && r.status === 'received' && r.due > 0">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-emerald-700" data-pay title="Pay balance" @click="openPay(r)" x-html="ABM.icon('banknotes','w-4 h-4')"></button>
+                    </template>
+                    <a :href="'purchase-view.html?id=' + r.id + '&print=1'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print goods received note" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="12">
+                <div class="empty">
+                  <span x-html="ABM.icon('truck')"></span>
+                  <div class="empty-title">No purchases found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No stock was received in this period.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <template x-if="canAdd"><a href="purchase-create.html" class="btn btn-primary btn-sm">Receive stock</a></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td colspan="2" class="hidden sm:table-cell">Totals</td>
+              <td class="sm:hidden">Totals</td>
+              <td class="hidden md:table-cell" x-show="showBranch"></td>
+              <td></td>
+              <td class="num hidden lg:table-cell" x-text="filteredTotals.lines"></td>
+              <td class="num hidden lg:table-cell" x-text="ABM.utils.num(filteredTotals.units)"></td>
+              <td class="num whitespace-nowrap" x-text="$money(filteredTotals.total, {decimals:0})"></td>
+              <td class="num hidden lg:table-cell text-emerald-700 whitespace-nowrap" x-text="$money(filteredTotals.paid, {decimals:0})"></td>
+              <td class="num hidden md:table-cell text-rose-600 whitespace-nowrap" x-text="$money(filteredTotals.due, {decimals:0})"></td>
+              <td colspan="3" class="text-xs font-normal text-slate-500">excl. cancelled</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pay balance modal -->
+    <div x-show="pay.open" x-cloak class="modal-backdrop" @click.self="closePay()">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="payTitle">
+        <form @submit.prevent="savePay()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="payTitle">Pay supplier balance</div>
+              <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="pay.purchase.purchase_no"></span> · <span x-text="pay.purchase.supplierName"></span></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closePay()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="flex flex-wrap gap-2">
+              <div class="flex-1 min-w-[6.5rem] rounded-xl bg-slate-50 border border-slate-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total</div><div class="text-sm font-bold text-slate-900 tabular" x-text="$money(pay.purchase.total)"></div></div>
+              <div class="flex-1 min-w-[6.5rem] rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Paid</div><div class="text-sm font-bold text-emerald-700 tabular" x-text="$money(pay.purchase.paid_amount)"></div></div>
+              <div class="flex-1 min-w-[6.5rem] rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="text-[11px] font-bold uppercase tracking-wider text-rose-600">Due</div><div class="text-sm font-bold text-rose-600 tabular" x-text="$money(pay.purchase.due)"></div></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="pay-amount">Amount <span class="req">*</span></label>
+                <div class="input-group"><input id="pay-amount" x-ref="payAmount" type="number" min="0" step="0.01" class="input input-money" x-model.number="pay.amount" :class="pay.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="pay.errors.amount" x-text="pay.errors.amount"></p>
+                <button type="button" class="help text-navy-700 font-semibold hover:underline" @click="pay.amount = pay.purchase.due">Pay full balance</button>
+              </div>
+              <div>
+                <label class="label" for="pay-method">Method <span class="req">*</span></label>
+                <select id="pay-method" class="select" x-model="pay.method" :class="pay.errors.method && 'is-invalid'">
+                  <template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template>
+                </select>
+                <p class="field-error" x-show="pay.errors.method" x-text="pay.errors.method"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="pay-ref">Reference <span class="text-slate-400 font-normal" x-show="pay.method === 'cash'">(optional)</span><span class="req" x-show="pay.method !== 'cash'">*</span></label>
+                <input id="pay-ref" type="text" class="input" x-model="pay.reference" :class="pay.errors.reference && 'is-invalid'" placeholder="Cheque no, transaction id…" maxlength="60">
+                <p class="field-error" x-show="pay.errors.reference" x-text="pay.errors.reference"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="pay-notes">Notes</label>
+                <input id="pay-notes" type="text" class="input" x-model="pay.notes" placeholder="Optional" maxlength="200">
+              </div>
+            </div>
+            <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><span>Posted to the supplier ledger as a payment for <b x-text="ABM.db.branchName(pay.purchase.branch_id)"></b>. Cash payments reduce that branch's drawer at day-end.</span></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="closePay()">Cancel</button>
+            <button type="submit" class="btn btn-money" :disabled="pay.busy"><span x-html="ABM.icon('banknotes')"></span>Record payment</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function purchasesPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const METHODS = ['cash', 'bank_transfer', 'card', 'jazzcash', 'easypaisa'];
+      const blankPurchase = () => ({ id: null, purchase_no: '', supplierName: '', branch_id: null, total: 0, paid_amount: 0, due: 0 });
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('purchases.add'),
+        canPay: session.can('suppliers.payments'),
+        branch: session.branch() || { name: '', code: '' },
+        branches: db.all('branches').filter((b) => b.is_active),
+        suppliers: utils.sortBy(db.all('suppliers'), 'name'),
+        methods: METHODS,
+        range: null, rows: [], page: 1, q: '',
+        f: { supplier: '', pay: '', status: '', branch: String(session.branchId() || '') },
+        k: { count: 0, cancelled: 0, value: 0, units: 0, paid: 0, paidCount: 0, partialCount: 0, due: 0, dueCount: 0, payables: 0, creditors: 0 },
+        pay: { open: false, purchase: blankPurchase(), amount: '', method: 'cash', reference: '', notes: '', errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.isSuperAdmin && this.f.branch === 'all'; },
+        get branchQuery() { return this.isSuperAdmin ? '&branch=' + this.f.branch : ''; },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const sup = utils.qs('supplier', ''); if (sup && db.find('suppliers', sup)) this.f.supplier = String(sup);
+          const pay = utils.qs('pay', ''); if (['paid', 'partial', 'unpaid', 'due'].includes(pay)) this.f.pay = pay;
+          const st = utils.qs('status', ''); if (['received', 'cancelled'].includes(st)) this.f.status = st;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'purchases');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          ['supplier', 'pay', 'status'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(p) { return this.f.branch === 'all' ? true : String(p.branch_id) === String(this.f.branch); },
+        payStatus(p) { if (p.status === 'cancelled') return p.paid_amount > 0 ? 'refund' : 'cancelled'; if (p.total <= 0 || p.paid_amount >= p.total - 0.005) return 'paid'; if (p.paid_amount > 0) return 'partial'; return 'unpaid'; },
+        compute() {
+          const byPurchase = {};
+          db.all('purchase_items').forEach((i) => { (byPurchase[i.purchase_id] = byPurchase[i.purchase_id] || []).push(i); });
+          const all = db.all('purchases').filter((p) => this.inScope(p) && this.range.contains(p.purchase_date));
+          this.rows = utils.sortBy(all.map((p) => {
+            const its = byPurchase[p.id] || [];
+            const due = p.status === 'cancelled' ? 0 : utils.round2(Math.max(0, (Number(p.total) || 0) - (Number(p.paid_amount) || 0)));
+            const order = p.purchase_order_id ? db.find('purchase_orders', p.purchase_order_id) : null;
+            return { ...p, supplierName: db.supplierName(p.supplier_id), branchCode: db.branchCode(p.branch_id), lines: its.length, units: its.reduce((a, i) => a + (Number(i.quantity) || 0), 0), due, payStatus: this.payStatus(p), poNo: order ? order.po_no : '' };
+          }), (r) => String(r.purchase_date || '').slice(0, 10) + '|' + String(r.id).padStart(8, '0'), 'desc');
+          const live = this.rows.filter((r) => r.status !== 'cancelled');
+          const suppliers = db.all('suppliers');
+          this.k = {
+            count: live.length, cancelled: this.rows.length - live.length,
+            value: utils.sum(live, 'total'), units: live.reduce((a, r) => a + r.units, 0),
+            paid: utils.sum(live, 'paid_amount'), paidCount: live.filter((r) => r.payStatus === 'paid').length, partialCount: live.filter((r) => r.payStatus === 'partial').length,
+            due: utils.sum(live, 'due'), dueCount: live.filter((r) => r.due > 0).length,
+            payables: utils.sum(suppliers.filter((s) => s.balance > 0), 'balance'), creditors: suppliers.filter((s) => s.balance > 0).length,
+          };
+        },
+        get hasFilters() { return !!(this.q || this.f.supplier || this.f.pay || this.f.status); },
+        clearFilters() { this.q = ''; this.f.supplier = ''; this.f.pay = ''; this.f.status = ''; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((r) => {
+            if (this.f.supplier && String(r.supplier_id) !== String(this.f.supplier)) return false;
+            if (this.f.status && r.status !== this.f.status) return false;
+            if (this.f.pay === 'due') { if (!(r.due > 0 && r.status !== 'cancelled')) return false; }
+            else if (this.f.pay && r.payStatus !== this.f.pay) return false;
+            if (q && ![r.purchase_no, r.supplier_invoice_no, r.poNo, r.supplierName, r.notes].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotals() {
+          const live = this.filtered.filter((r) => r.status !== 'cancelled');
+          return { lines: live.reduce((a, r) => a + r.lines, 0), units: live.reduce((a, r) => a + r.units, 0), total: utils.sum(live, 'total'), paid: utils.sum(live, 'paid_amount'), due: utils.sum(live, 'due') };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'Purchase No', key: 'purchase_no' }, { label: 'Date', key: 'purchase_date' }, { label: 'Supplier', key: 'supplierName' }, { label: 'Supplier Invoice', key: 'supplier_invoice_no' }, { label: 'Purchase Order', key: 'poNo' },
+            { label: 'Branch', key: 'branchCode' }, { label: 'Lines', key: 'lines' }, { label: 'Units', key: 'units' }, { label: 'Subtotal', key: 'subtotal' }, { label: 'Discount', key: 'discount_amount' },
+            { label: 'Tax', key: 'tax_amount' }, { label: 'Total', key: 'total' }, { label: 'Paid', key: 'paid_amount' }, { label: 'Due', key: 'due' },
+            { label: 'Payment', value: (r) => ui.statusLabel(r.payStatus) }, { label: 'Status', value: (r) => ui.statusLabel(r.status) }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('purchases-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' purchase' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* ------------------------------------------------------- pay modal */
+        openPay(r) {
+          const p = db.find('purchases', r.id);
+          if (!p) { ui.error('Purchase not found.'); return; }
+          if (p.status !== 'received') { ui.warn('Cancelled purchases cannot be paid.'); return; }
+          const due = utils.round2(Math.max(0, p.total - p.paid_amount));
+          if (due <= 0) { ui.toast('This purchase is already fully paid.', 'info'); return; }
+          this.pay = { open: true, purchase: { ...p, supplierName: db.supplierName(p.supplier_id), due }, amount: due, method: 'cash', reference: '', notes: '', errors: {}, busy: false };
+          this.$nextTick(() => { if (this.$refs.payAmount) { this.$refs.payAmount.focus(); this.$refs.payAmount.select(); } });
+        },
+        closePay() { if (this.pay.open) this.pay.open = false; },
+        savePay() {
+          const p = this.pay; const e = {};
+          const amt = Number(p.amount);
+          if (p.amount === '' || p.amount === null || isNaN(amt) || amt <= 0) e.amount = 'Enter an amount greater than zero.';
+          else if (amt > p.purchase.due + 0.005) e.amount = 'Amount cannot exceed the outstanding balance of ' + utils.money(p.purchase.due) + '.';
+          if (!METHODS.includes(p.method)) e.method = 'Select a payment method.';
+          if (p.method !== 'cash' && !String(p.reference || '').trim()) e.reference = 'Enter the transaction or cheque reference.';
+          p.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          p.busy = true;
+          try {
+            const cur = db.find('purchases', p.purchase.id);
+            if (!cur || cur.status !== 'received') throw new Error('This purchase can no longer be paid.');
+            const amount = utils.round2(amt);
+            ABM.ledger.supplier(cur.supplier_id, cur.branch_id, 'payment', amount, 0, { referenceType: 'purchase', referenceId: cur.id, paymentMethod: p.method, paymentReference: String(p.reference || '').trim() || null, notes: String(p.notes || '').trim() || ('Payment against ' + cur.purchase_no) });
+            db.update('purchases', cur.id, { paid_amount: utils.round2((Number(cur.paid_amount) || 0) + amount) });
+            db.audit('purchase.payment', 'purchase', cur.id, `${utils.money(amount)} paid to ${db.supplierName(cur.supplier_id)} against ${cur.purchase_no} (${ui.statusLabel(p.method)})`);
+            ui.success('Payment of ' + utils.money(amount) + ' recorded.');
+            p.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not record payment.');
+          } finally {
+            p.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>Contact Us · Abbott Mobiles</title>
+  <meta name="description" content="Call, WhatsApp, email or visit Abbott Mobile in Lahore — branch addresses, opening hours and a contact form.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .map-frame { width: 100%; height: 100%; border: 0; display: block; }
+    .map-box { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: var(--shop-radius); }
+    @media (min-width: 1024px) { .map-box { aspect-ratio: 21 / 9; } }
+    .map-ph {
+      position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: .5rem; text-align: center; padding: 1.5rem;
+      background:
+        repeating-linear-gradient(45deg, rgb(var(--shop-primary-500) / .05) 0 12px, transparent 12px 24px),
+        linear-gradient(140deg, rgb(var(--shop-primary-500) / .14), rgb(var(--shop-accent-500) / .12));
+    }
+    .map-ph svg { width: 2.25rem; height: 2.25rem; color: rgb(var(--shop-primary-600)); }
+    html[data-shop-mode="dark"] .map-ph svg { color: rgb(var(--shop-primary-200)); }
+  </style>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-contact">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopContact()">
+
+    <!-- ========================================================== INTRO -->
+    <div class="shop-container pt-5 pb-3">
+      <nav class="shop-crumbs" aria-label="Breadcrumb">
+        <a href="index.html">Home</a>
+        <span x-html="SHOP.icon('chevron-right','')"></span>
+        <span class="font-semibold text-slate-700">Contact</span>
+      </nav>
+      <div class="mt-3 max-w-2xl">
+        <span class="shop-eyebrow">We're here to help</span>
+        <h1 class="shop-h2 mt-1">Contact <span x-text="siteName"></span></h1>
+        <p class="shop-lead mt-2 text-sm">
+          Questions about a product, an order or a repair? Call us, WhatsApp us, or drop into either branch —
+          we answer fast during shop hours.
+        </p>
+      </div>
+    </div>
+
+    <!-- ================================================== CONTACT CARDS -->
+    <section class="shop-container pb-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <template x-for="c in cards" :key="c.label">
+          <a :href="c.href" :target="c.external ? '_blank' : null" :rel="c.external ? 'noopener' : null"
+             class="shop-card shop-card-hover shop-card-pad flex items-start gap-3 min-w-0">
+            <span class="shop-tile-icon flex-none" x-html="c.brand ? SHOP.socialIcon('whatsapp','') : SHOP.icon(c.icon,'')"></span>
+            <span class="min-w-0">
+              <span class="block text-[11px] font-bold uppercase tracking-wider text-slate-400" x-text="c.label"></span>
+              <span class="block text-sm font-bold text-slate-900 break-words" x-text="c.value"></span>
+              <span class="block text-xs text-slate-500 mt-0.5 leading-snug" x-text="c.hint"></span>
+            </span>
+          </a>
+        </template>
+      </div>
+    </section>
+
+    <!-- ================================================ FORM + BRANCHES -->
+    <section class="shop-container pb-10">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6 items-start">
+
+        <!-- ----------------------------------------------- the form -->
+        <div class="lg:col-span-2 min-w-0">
+
+          <!-- success -->
+          <template x-if="sent">
+            <div class="shop-card overflow-hidden">
+              <div class="p-6 sm:p-8 text-center text-white shop-on-dark"
+                   style="background:linear-gradient(150deg, rgb(var(--shop-accent-600)), rgb(var(--shop-primary-900)))">
+                <span class="inline-flex w-14 h-14 rounded-2xl items-center justify-center bg-white/15 border border-white/25"
+                      x-html="SHOP.icon('check-circle','w-8 h-8')"></span>
+                <h2 class="shop-h2 mt-4 text-white">Message received</h2>
+                <p class="text-sm text-white/75 mt-2">
+                  Thanks <b class="text-white" x-text="sent.name"></b> — we will get back to you on
+                  <b class="text-white" x-text="sent.phone || sent.email"></b>, usually within a few hours during shop hours.
+                </p>
+              </div>
+              <div class="p-5 sm:p-7">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div class="min-w-0">
+                    <div class="shop-label">Subject</div>
+                    <p class="text-sm font-bold text-slate-900 break-words" x-text="sent.subject || 'General enquiry'"></p>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="shop-label">Reference</div>
+                    <p class="text-sm font-bold text-slate-900" x-text="'MSG-' + ABM.utils.pad(sent.id)"></p>
+                  </div>
+                  <div class="min-w-0 sm:col-span-2">
+                    <div class="shop-label">Your message</div>
+                    <p class="text-sm text-slate-600 break-words whitespace-pre-line" x-text="sent.message"></p>
+                  </div>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2 mt-6">
+                  <a :href="SHOP.waLink('Hello, I just sent a message (MSG-' + ABM.utils.pad(sent.id) + ').')" target="_blank" rel="noopener"
+                     class="shop-btn shop-btn-accent flex-1" x-show="SHOP.waNumber()" x-cloak>
+                    <span x-html="SHOP.socialIcon('whatsapp','')"></span>Continue on WhatsApp
+                  </a>
+                  <button type="button" class="shop-btn shop-btn-outline flex-1" @click="writeAnother()">
+                    <span x-html="SHOP.icon('mail','')"></span>Send another message
+                  </button>
+                </div>
+              </div>
+            </div>
+          </template>
+
+          <!-- form -->
+          <template x-if="!sent">
+            <form class="shop-card shop-card-pad" @submit.prevent="submit()" novalidate>
+              <div class="flex items-center gap-2.5">
+                <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('mail','w-4 h-4')"></span>
+                <div class="min-w-0">
+                  <h2 class="shop-h3">Send us a message</h2>
+                  <p class="text-xs text-slate-500">We reply on WhatsApp or by phone — whichever you prefer.</p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
+                <div class="min-w-0">
+                  <label class="shop-label" for="ct-name">Your name *</label>
+                  <input id="ct-name" type="text" class="shop-input" x-model="form.name" @input="errors.name = ''"
+                         :class="errors.name && '!border-rose-500'" autocomplete="name" placeholder="e.g. Ahmed Raza">
+                  <p class="shop-error" x-show="errors.name" x-cloak x-text="errors.name"></p>
+                </div>
+                <div class="min-w-0">
+                  <label class="shop-label" for="ct-phone">Mobile number *</label>
+                  <input id="ct-phone" type="tel" inputmode="tel" class="shop-input" x-model="form.phone"
+                         @input="errors.phone = ''" @blur="formatPhone()" :class="errors.phone && '!border-rose-500'"
+                         autocomplete="tel" placeholder="03xx-xxxxxxx">
+                  <p class="shop-error" x-show="errors.phone" x-cloak x-text="errors.phone"></p>
+                </div>
+                <div class="min-w-0">
+                  <label class="shop-label" for="ct-email">Email (optional)</label>
+                  <input id="ct-email" type="email" class="shop-input" x-model="form.email" @input="errors.email = ''"
+                         :class="errors.email && '!border-rose-500'" autocomplete="email" placeholder="you@example.com">
+                  <p class="shop-error" x-show="errors.email" x-cloak x-text="errors.email"></p>
+                </div>
+                <div class="min-w-0">
+                  <label class="shop-label" for="ct-subject">Subject</label>
+                  <select id="ct-subject" class="shop-select" x-model="form.subject">
+                    <template x-for="s in subjects" :key="s">
+                      <option :value="s" x-text="s"></option>
+                    </template>
+                  </select>
+                </div>
+                <div class="min-w-0 sm:col-span-2">
+                  <label class="shop-label" for="ct-message">Message *</label>
+                  <textarea id="ct-message" class="shop-textarea" x-model="form.message" @input="errors.message = ''"
+                            :class="errors.message && '!border-rose-500'"
+                            placeholder="Tell us what you need — product, model, order number or the fault on your device."></textarea>
+                  <p class="shop-error" x-show="errors.message" x-cloak x-text="errors.message"></p>
+                </div>
+              </div>
+
+              <div class="alert alert-danger mt-4 text-xs" x-show="formError" x-cloak>
+                <span x-html="SHOP.icon('x-circle','w-4 h-4')"></span>
+                <span class="min-w-0" x-text="formError"></span>
+              </div>
+
+              <div class="flex flex-col sm:flex-row gap-2 mt-5">
+                <button type="submit" class="shop-btn shop-btn-lg flex-1" :disabled="busy">
+                  <span x-html="SHOP.icon(busy ? 'refresh' : 'mail','')"></span>
+                  <span x-text="busy ? 'Sending…' : 'Send message'"></span>
+                </button>
+                <a :href="SHOP.waLink('Hello ' + siteName + '!')" target="_blank" rel="noopener"
+                   class="shop-btn shop-btn-accent shop-btn-lg flex-1" x-show="SHOP.waNumber()" x-cloak>
+                  <span x-html="SHOP.socialIcon('whatsapp','')"></span>Chat instead
+                </a>
+              </div>
+              <p class="text-[11px] text-slate-500 mt-3">
+                We only use your details to answer this message — see our
+                <a href="page.html?slug=privacy" class="shop-link">privacy policy</a>.
+              </p>
+            </form>
+          </template>
+        </div>
+
+        <!-- ----------------------------------------------- branches -->
+        <aside class="min-w-0 space-y-4">
+          <div class="shop-card shop-card-pad">
+            <h2 class="shop-h3">Our branches</h2>
+            <p class="text-xs text-slate-500 mt-1" x-text="hours"></p>
+            <ul class="mt-4 space-y-4">
+              <template x-for="b in branches" :key="b.id">
+                <li class="min-w-0">
+                  <div class="flex items-start gap-3 min-w-0">
+                    <span class="shop-tile-icon !w-9 !h-9 flex-none" x-html="SHOP.icon('store','w-4 h-4')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="text-sm font-bold text-slate-900 break-words" x-text="b.name"></div>
+                      <div class="text-xs text-slate-500 break-words mt-0.5" x-text="b.address"></div>
+                      <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
+                        <a :href="'tel:' + SHOP.digits(b.phone || '')" class="text-xs shop-link break-words"
+                           x-show="b.phone" x-cloak x-text="b.phone"></a>
+                        <a :href="mapLink(b)" target="_blank" rel="noopener" class="text-xs shop-link">Directions</a>
+                      </div>
+                      <div class="text-[11px] text-slate-500 mt-1" x-text="hours"></div>
+                    </div>
+                  </div>
+                </li>
+              </template>
+            </ul>
+            <p class="text-xs text-slate-500 mt-4" x-show="!branches.length" x-cloak>
+              Branch information is being updated — please call us.
+            </p>
+          </div>
+
+          <div class="shop-card shop-card-pad">
+            <h2 class="shop-h3">Follow us</h2>
+            <p class="text-xs text-slate-500 mt-1">New stock, price drops and repair tips.</p>
+            <div class="flex flex-wrap items-center gap-2 mt-3" x-show="socials.length" x-cloak>
+              <template x-for="s in socials" :key="s.key">
+                <a :href="s.url" target="_blank" rel="noopener"
+                   class="shop-social !bg-slate-900/5 !text-slate-600 hover:!bg-slate-900/10 hover:!text-slate-900"
+                   :aria-label="s.label" :title="s.label" x-html="SHOP.socialIcon(s.key,'')"></a>
+              </template>
+            </div>
+            <p class="text-xs text-slate-500 mt-3" x-show="!socials.length" x-cloak>
+              We are not on social media yet — WhatsApp is the fastest way to reach us.
+            </p>
+          </div>
+
+          <div class="shop-card shop-card-pad">
+            <h2 class="shop-h3">Quick links</h2>
+            <div class="mt-3 space-y-2">
+              <a href="order.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                <span x-html="SHOP.icon('truck','')"></span>Track an order
+              </a>
+              <a href="repair.html" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                <span x-html="SHOP.icon('wrench','')"></span>Book a repair
+              </a>
+              <a href="page.html?slug=faq" class="shop-btn shop-btn-outline shop-btn-block shop-btn-sm">
+                <span x-html="SHOP.icon('info','')"></span>Read the FAQs
+              </a>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============================================================ MAP -->
+    <section class="shop-container pb-14">
+      <div class="shop-card overflow-hidden">
+        <div class="p-5 pb-3 flex flex-wrap items-center justify-between gap-2">
+          <div class="min-w-0">
+            <h2 class="shop-h3">Find us</h2>
+            <p class="text-xs text-slate-500 break-words" x-text="address"></p>
+          </div>
+          <a :href="mapLink()" target="_blank" rel="noopener" class="shop-btn shop-btn-outline shop-btn-sm">
+            <span x-html="SHOP.icon('map-pin','')"></span>Open in Maps
+          </a>
+        </div>
+        <div class="px-3 pb-3">
+          <div class="map-box">
+            <template x-if="mapUrl">
+              <iframe class="map-frame" :src="mapUrl" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+                      title="Map to our shop" allowfullscreen></iframe>
+            </template>
+            <template x-if="!mapUrl">
+              <div class="map-ph">
+                <span x-html="SHOP.icon('map-pin','')"></span>
+                <div class="text-sm font-extrabold text-slate-900 break-words" x-text="address || siteName"></div>
+                <div class="text-xs text-slate-600 max-w-sm" x-text="hours"></div>
+                <a :href="mapLink()" target="_blank" rel="noopener" class="shop-btn shop-btn-sm mt-1">
+                  <span x-html="SHOP.icon('arrow-up-right','')"></span>Get directions
+                </a>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopContact() {
+      const { db, utils } = ABM;
+      return {
+        contact: {}, branches: [], cards: [], socials: [], siteName: '', address: '', hours: '', mapUrl: '',
+        busy: false, sent: null, formError: '',
+        subjects: ['General enquiry', 'Product availability & price', 'My online order', 'Repair / service', 'Warranty claim', 'Wholesale / bulk order', 'Complaint or feedback'],
+        form: { name: '', phone: '', email: '', subject: 'General enquiry', message: '' },
+        errors: { name: '', phone: '', email: '', message: '' },
+
+        init() {
+          this.contact = SHOP.contact();
+          this.siteName = SHOP.site().name || 'Abbott Mobile';
+          this.address = this.contact.address || '';
+          this.hours = this.contact.hours || 'Mon–Sat 10:00 – 21:00';
+          this.branches = SHOP.branches();
+          this.mapUrl = /^https:\/\//i.test(String(this.contact.map_url || '')) ? this.contact.map_url : '';
+
+          const wa = SHOP.waNumber();
+          const cards = [];
+          if (this.contact.phone) {
+            cards.push({ label: 'Call us', value: this.contact.phone, hint: this.hours, icon: 'phone-call',
+              href: 'tel:' + SHOP.digits(this.contact.phone) });
+          }
+          if (wa) {
+            cards.push({ label: 'WhatsApp', value: this.contact.whatsapp || ('+' + wa), hint: 'Fastest reply — send photos too',
+              icon: 'chat', brand: true, external: true, href: SHOP.waLink('Hello ' + this.siteName + '!') });
+          }
+          if (this.contact.email) {
+            cards.push({ label: 'Email', value: this.contact.email, hint: 'We reply within one working day', icon: 'mail',
+              href: 'mailto:' + this.contact.email });
+          }
+          cards.push({ label: 'Visit', value: this.address || 'Our store', hint: this.hours, icon: 'map-pin',
+            external: true, href: this.mapLink() });
+          this.cards = cards;
+
+          // QA aid (same family as ?__layout=1 / ?__click= in shop.js): prefill a valid message.
+          if (utils.qs('__demo') === '1') {
+            this.form.name = 'Demo Customer';
+            this.form.phone = '0300-1234567';
+            this.form.email = 'demo@example.com';
+            this.form.subject = 'Product availability & price';
+            this.form.message = 'Do you have the Galaxy A55 8GB/256GB in stock in Awesome Navy, and what is your best price?';
+          }
+
+          const so = SHOP.social();
+          this.socials = ['facebook', 'instagram', 'tiktok', 'youtube', 'whatsapp']
+            .filter((k) => so[k])
+            .map((k) => ({ key: k, url: so[k], label: utils.titleCase(k) }));
+        },
+
+        mapLink(branch) {
+          const q = branch ? [branch.name, branch.address].filter(Boolean).join(', ')
+            : (this.address || this.siteName);
+          return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+        },
+
+        normalisePhone(v) {
+          let d = SHOP.digits(v);
+          if (d.slice(0, 4) === '0092') d = d.slice(4);
+          if (d.slice(0, 2) === '92' && d.length === 12) d = '0' + d.slice(2);
+          if (d.length === 10 && d.charAt(0) === '3') d = '0' + d;
+          return d;
+        },
+        formatPhone() {
+          const d = this.normalisePhone(this.form.phone);
+          if (/^03\d{9}$/.test(d)) this.form.phone = d.slice(0, 4) + '-' + d.slice(4);
+        },
+
+        validate() {
+          const e = { name: '', phone: '', email: '', message: '' };
+          if (String(this.form.name || '').trim().length < 2) e.name = 'Please enter your name.';
+          const phone = this.normalisePhone(this.form.phone);
+          if (!phone) e.phone = 'Please enter your mobile number.';
+          else if (!/^03\d{9}$/.test(phone)) e.phone = 'Enter a Pakistani mobile number in the format 03xx-xxxxxxx.';
+          const email = String(this.form.email || '').trim();
+          if (email && !/^[^@\s]+@[^@\s.]+\.[^@\s]{2,}$/.test(email)) e.email = 'That email address does not look right.';
+          if (String(this.form.message || '').trim().length < 5) e.message = 'Please write your message.';
+          this.errors = e;
+          return !Object.keys(e).some((k) => e[k]);
+        },
+
+        submit() {
+          if (this.busy) return;
+          this.formError = '';
+          if (!this.validate()) {
+            this.formError = 'Please fix the highlighted fields and try again.';
+            SHOP.toast('Please check the highlighted fields.', 'error');
+            return;
+          }
+          this.busy = true;
+          try {
+            const d = this.normalisePhone(this.form.phone);
+            const row = SHOP.sendMessage({
+              name: String(this.form.name).trim(),
+              phone: /^03\d{9}$/.test(d) ? d.slice(0, 4) + '-' + d.slice(4) : String(this.form.phone).trim(),
+              email: String(this.form.email || '').trim(),
+              subject: String(this.form.subject || '').trim(),
+              message: String(this.form.message).trim(),
+            });
+            db.audit('contact_message.create', 'contact_message', row.id, 'Website message from ' + row.name);
+            this.sent = row;
+            SHOP.toast('Message sent. We will be in touch shortly.', 'success');
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (err) { window.scrollTo(0, 0); }
+          } catch (e) {
+            this.formError = e.message;
+            SHOP.toast(e.message, 'error');
+          } finally { this.busy = false; }
+        },
+
+        writeAnother() {
+          this.sent = null; this.formError = '';
+          this.form.message = ''; this.form.subject = 'General enquiry';
+          this.errors = { name: '', phone: '', email: '', message: '' };
+        },
+      };
+    }
+  </script>
+</body>
+</html>

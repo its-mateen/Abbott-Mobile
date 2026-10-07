@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE · website CMS</title>
+  <script src="../assets/js/tailwind-config.js"></script>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/shop.js"></script>
+</head>
+<body data-public>
+<pre id="out"></pre>
+<div id="editor-host" style="position:absolute;left:-9999px"><div contenteditable="true" id="rte"></div></div>
+<iframe id="frame" style="width:1200px;height:700px;border:1px solid #ccc"></iframe>
+<script>
+(function () {
+  var pass = 0, fail = 0, log = [];
+  function say(m) { log.push(m); console.log('DRIVE ' + m); }
+  function ok(cond, label, extra) {
+    if (cond) { pass++; say('PASS ' + label + (extra ? '  [' + extra + ']' : '')); }
+    else { fail++; say('FAIL ' + label + (extra ? '  [' + extra + ']' : '')); }
+  }
+  function eq(a, b, label) { ok(String(a) === String(b), label, 'got=' + a + ' want=' + b); }
+  function done() {
+    say('TOTAL pass=' + pass + ' fail=' + fail);
+    console.log('RESULT: ' + (fail === 0 ? 'PASS' : 'FAIL'));
+    document.getElementById('out').textContent = log.join('\n') + '\nRESULT: ' + (fail === 0 ? 'PASS' : 'FAIL');
+  }
+  function loadComponent(url, fnName, cb) {
+    var x = new XMLHttpRequest();
+    x.open('GET', url, true);
+    x.onload = function () {
+      var html = x.responseText;
+      var i = html.indexOf('function ' + fnName);
+      if (i < 0) { fail++; say('FAIL could not find ' + fnName); return cb(null); }
+      var start = html.lastIndexOf('<script>', i) + '<script>'.length;
+      var end = html.indexOf('<' + '/script>', i);
+      console.log('DRIVE BOOT fetched ' + url + ' bytes=' + html.length + ' slice=' + (end - start));
+      try { (0, eval)(html.slice(start, end)); } catch (e) { fail++; say('FAIL eval: ' + e.message); return cb(null); }
+      console.log('DRIVE BOOT eval ok, fn=' + typeof window[fnName]);
+      cb(window[fnName]);
+    };
+    x.onerror = function () { fail++; say('FAIL fetch ' + url); cb(null); };
+    x.send();
+  }
+
+  console.log('DRIVE BOOT ok=' + (typeof ABM) + '/' + (typeof SHOP));
+  var db = ABM.db, utils = ABM.utils;
+  var NEW_NAME = 'Zee Gadget House';
+  var NEW_TAGLINE = 'Driven by the CMS audit';
+  var NEW_HERO = 'Phones, laptops and repairs under one roof';
+  var NEW_MENU = 'Clearance Deals';
+  var NEW_FEE = 399, NEW_FREE = 12000;
+  var NEW_PRIMARY = '#7c2d12', NEW_ACCENT = '#0ea5e9';
+  var PAGE_SLUG = 'warranty-promise';
+
+  try {
+    db.reset();
+    ABM.session.login(db.all('users').filter(function (u) { return u.username === 'admin'; })[0]);
+    ABM.ui.confirm = function () { return Promise.resolve(true); };
+  } catch (e) { fail++; say('FAIL setup ' + e.message); return done(); }
+
+  loadComponent('../website.html', 'websitePage', function (factory) {
+    if (!factory) return done();
+    var w;
+    try {
+      w = factory();
+      w.$nextTick = function (fn) { if (fn) fn(); };
+      w.$watch = function () {};
+      w.$el = document.body;
+      var rte = document.getElementById('rte');
+      w.$refs = { editor: rte, rteUrl: null, cancelReason: null };
+      // the page guards against leaving with unsaved changes; that dialog would hang headless Chrome
+      var addEL = window.addEventListener;
+      window.addEventListener = function (t) { if (t === 'beforeunload') return; return addEL.apply(window, arguments); };
+      w.init();
+      window.addEventListener = addEL;
+
+      var before = { name: db.cms().site.name, fee: SHOP.commerce().delivery_fee };
+      say('INFO before: name=' + before.name + ' fee=' + before.fee + ' menu=' + SHOP.menu().length + ' pages=' + SHOP.pages().length);
+
+      /* ------------------------------------------------ 1. branding (name + hero) */
+      w.setTab('branding');
+      w.f.site.name = NEW_NAME;
+      w.f.site.tagline = NEW_TAGLINE;
+      w.f.site.hero.title = NEW_HERO;
+      ok(w.dirty('branding'), 'branding tab reports itself dirty after an edit');
+      w.save('branding');
+      ok(!Object.keys(w.errors).length, 'branding saved without validation errors', JSON.stringify(w.errors));
+      eq(db.cms().site.name, NEW_NAME, 'site name persisted to the CMS document');
+      eq(SHOP.site().name, NEW_NAME, 'SHOP.site() sees the new name');
+      eq(SHOP.site().hero.title, NEW_HERO, 'hero title persisted');
+      ok(!w.dirty('branding'), 'branding tab is clean again after saving');
+      // a required field must block the save
+      w.f.site.name = '';
+      w.save('branding');
+      ok(!!w.errors.name, 'empty site name is rejected', w.errors.name);
+      eq(db.cms().site.name, NEW_NAME, 'rejected save did not touch the stored name');
+      w.f.site.name = NEW_NAME; w.errors = {};
+
+      /* -------------------------------------------------------------- 2. menu */
+      w.setTab('menu');
+      var menuBefore = w.f.menu.length;
+      w.addMenuItem(NEW_MENU, 'products.html?type=accessory');
+      eq(w.f.menu.length, menuBefore + 1, 'menu item added to the form');
+      w.save('menu');
+      var live = SHOP.menu();
+      ok(live.some(function (m) { return m.label === NEW_MENU; }), 'new menu item is live on the storefront',
+         live.map(function (m) { return m.label; }).join(' | '));
+      // reorder: move the new item to the top and check the storefront order follows
+      w.move(w.f.menu, w.f.menu.length - 1, -(w.f.menu.length - 1));
+      w.save('menu');
+      eq(SHOP.menu()[0].label, NEW_MENU, 'menu reorder is reflected on the storefront');
+      // javascript: urls are refused
+      w.f.menu[0].url = 'javascript:alert(1)';
+      w.save('menu');
+      ok(!!w.errors['mnu.0'], 'javascript: menu url rejected', w.errors['mnu.0']);
+      w.f.menu[0].url = 'products.html?type=accessory'; w.errors = {};
+      w.save('menu');
+
+      /* ------------------------------------------------------- 3. a CMS page */
+      w.setTab('pages');
+      w.newPage();
+      var pg = w.cur;
+      ok(!!pg, 'new page created in the editor');
+      w.onPageTitle('Warranty Promise');
+      eq(pg.slug, PAGE_SLUG, 'slug auto-derived from the title');
+      // type into the real contenteditable, including hostile markup
+      rte.innerHTML = '<h2>Our promise</h2><p onclick="alert(1)">Every device carries a warranty.</p>' +
+                      '<script>alert("xss")<\/script><img src="x" onerror="alert(2)">' +
+                      '<a href="javascript:alert(3)">bad link</a><iframe src="//evil.example"></iframe>';
+      w.syncEditor();
+      pg.is_published = 1; pg.show_in_menu = 1;
+      w.save('pages');
+      ok(!Object.keys(w.errors).length, 'page saved without validation errors', JSON.stringify(w.errors));
+      var saved = (db.cms().pages || []).filter(function (p) { return p.slug === PAGE_SLUG; })[0];
+      ok(!!saved, 'page stored in the CMS');
+      if (saved) {
+        ok(saved.content_html.indexOf('Our promise') >= 0, 'page keeps its real content');
+        ok(saved.content_html.toLowerCase().indexOf('<script') < 0, 'RTE save strips <script>', saved.content_html.slice(0, 160));
+        ok(!/\son\w+\s*=/i.test(saved.content_html), 'RTE save strips on* attributes', saved.content_html.slice(0, 200));
+        ok(saved.content_html.toLowerCase().indexOf('javascript:') < 0, 'RTE save strips javascript: hrefs');
+        ok(saved.content_html.toLowerCase().indexOf('<iframe') < 0, 'RTE save strips <iframe>');
+      }
+      var live2 = SHOP.page(PAGE_SLUG);
+      ok(!!live2, 'published page is visible to the storefront');
+      // duplicate slug must be rejected
+      w.newPage(); w.onPageTitle('Warranty Promise');
+      w.save('pages');
+      ok(!!w.errors['pg.slug'], 'duplicate slug rejected', w.errors['pg.slug']);
+      w.onPageTitle('Second Page'); w.errors = {};
+      w.cur.is_published = 0;
+      w.save('pages');
+      ok(!SHOP.page('second-page'), 'unpublished page is NOT exposed on the storefront');
+
+      /* --------------------------------------------------------- 4. commerce */
+      w.setTab('commerce');
+      w.f.site.commerce.delivery_fee = NEW_FEE;
+      w.f.site.commerce.free_delivery_above = NEW_FREE;
+      w.save('commerce');
+      ok(!Object.keys(w.errors).length, 'commerce saved without validation errors', JSON.stringify(w.errors));
+      eq(SHOP.commerce().delivery_fee, NEW_FEE, 'storefront sees the new delivery fee');
+      eq(SHOP.deliveryFee(NEW_FREE - 1), NEW_FEE, 'fee applies below the new threshold');
+      eq(SHOP.deliveryFee(NEW_FREE), 0, 'free delivery at the new threshold');
+      // bad prefix rejected
+      w.f.site.commerce.order_prefix = '12';
+      w.save('commerce');
+      ok(!!w.errors.order_prefix, 'bad order prefix rejected', w.errors.order_prefix);
+      w.f.site.commerce.order_prefix = 'WEB'; w.errors = {}; w.save('commerce');
+      // turning COD off must remove it from checkout
+      w.f.site.commerce.cod_enabled = 0;
+      w.save('commerce');
+      ok(!SHOP.paymentMethods().some(function (m) { return m.key === 'cod'; }), 'disabling COD removes it from checkout',
+         SHOP.paymentMethods().map(function (m) { return m.key; }).join(','));
+      w.f.site.commerce.cod_enabled = 1; w.save('commerce');
+      // the wallet accounts the checkout page tells customers to pay into must be editable here
+      ok('jazzcash_number' in w.f.site.commerce && 'easypaisa_number' in w.f.site.commerce,
+         'commerce tab exposes the JazzCash / EasyPaisa account numbers');
+      w.f.site.commerce.jazzcash_number = '0321-1112223';
+      w.f.site.commerce.easypaisa_number = '0345-9998887';
+      w.f.site.commerce.wallet_account_name = 'Zee Gadget House Ltd';
+      w.save('commerce');
+      eq(SHOP.commerce().jazzcash_number, '0321-1112223', 'JazzCash number reaches the storefront');
+      eq(SHOP.commerce().easypaisa_number, '0345-9998887', 'EasyPaisa number reaches the storefront');
+      ok(SHOP.commerce().jazzcash_number !== SHOP.commerce().easypaisa_number, 'the two wallets keep DIFFERENT numbers');
+      w.f.site.commerce.easypaisa_number = '';
+      w.save('commerce');
+      ok(!!w.errors.easypaisa_number, 'wallets on with no EasyPaisa number is rejected', w.errors.easypaisa_number);
+      w.f.site.commerce.easypaisa_number = '0345-9998887'; w.errors = {}; w.save('commerce');
+
+      /* ------------------------------------------------------------ 5. theme */
+      w.setTab('theme');
+      w.f.site.theme.primary = NEW_PRIMARY;
+      w.f.site.theme.accent = NEW_ACCENT;
+      w.save('theme');
+      ok(!Object.keys(w.errors).length, 'theme saved without validation errors', JSON.stringify(w.errors));
+      eq(db.cms().site.theme.primary, NEW_PRIMARY, 'primary colour persisted');
+      var applied = SHOP.applyTheme();
+      eq(applied.primary, NEW_PRIMARY, 'SHOP.applyTheme() picks up the new primary');
+      ok(!!document.documentElement.style.getPropertyValue('--shop-primary-600'), 'primary shade scale written to CSS vars',
+         document.documentElement.style.getPropertyValue('--shop-primary-600'));
+      w.f.site.theme.primary = 'nonsense';
+      w.save('theme');
+      ok(!!w.errors['theme.primary'], 'invalid hex colour rejected', w.errors['theme.primary']);
+      w.f.site.theme.primary = NEW_PRIMARY; w.errors = {};
+
+      /* ------------------------------------------------------ 6. announcement */
+      w.setTab('announcement');
+      w.f.site.announcement.enabled = 1;
+      w.f.site.announcement.text = 'Free delivery over Rs. 12,000 this week';
+      w.save('announcement');
+      eq(SHOP.site().announcement.text, 'Free delivery over Rs. 12,000 this week', 'announcement text live');
+      ok(SHOP.header().indexOf('Free delivery over Rs. 12,000') > 0, 'announcement renders in the storefront header');
+
+      /* ------------------- 7. nothing else was clobbered by the partial saves */
+      var c = db.cms();
+      eq(c.site.name, NEW_NAME, 'site name survived every later tab save');
+      eq(c.site.commerce.delivery_fee, NEW_FEE, 'commerce survived the theme save');
+      eq(c.site.theme.accent, NEW_ACCENT, 'theme survived the announcement save');
+      ok(Array.isArray(c.pages) && c.pages.length >= 1, 'pages survived');
+      ok((c.site.contact || {}).phone !== undefined, 'contact block was not wiped by partial saves');
+      ok(db.all('audit_logs').some(function (a) { return a.action === 'website.update'; }), 'CMS saves are audited');
+    } catch (e) {
+      fail++; say('FAIL EXCEPTION cms: ' + e.message + '\n' + e.stack);
+      return done();
+    }
+
+    /* ---- 8. chrome parts the CMS drives, rendered from the same localStorage ---- */
+    try {
+      var head = SHOP.header(), foot = SHOP.footer();
+      ok(head.indexOf(NEW_NAME) > 0, 'header HTML carries the new site name');
+      ok(head.indexOf(NEW_TAGLINE) > 0, 'header HTML carries the new tagline');
+      ok(head.indexOf(NEW_MENU) > 0, 'header nav HTML carries the new menu item');
+      ok(foot.indexOf(NEW_NAME) > 0, 'footer HTML carries the new site name');
+      ok(foot.indexOf('Warranty Promise') > 0, 'footer lists the new published CMS page');
+      var scale = ABM.theme.shadeScale(NEW_PRIMARY);
+      ok(!!(scale && scale[600]), 'the new primary generates a full shade scale', scale && scale[600]);
+      say('MARKER site_name=' + db.cms().site.name);
+      say('MARKER delivery_fee=' + SHOP.commerce().delivery_fee);
+    } catch (e) { fail++; say('FAIL EXCEPTION chrome: ' + e.message); }
+    done();
+  });
+})();
+</script>
+</body>
+</html>

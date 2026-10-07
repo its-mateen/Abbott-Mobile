@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>New Purchase Order · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="purchase-order-create" data-title="New Purchase Order" data-perm="purchase_orders.add|purchase_orders.edit">
+  <main x-data="purchaseOrderCreatePage()" @keydown.escape.window="onEscape()">
+    <!-- Blocked: the order can no longer be edited -->
+    <template x-if="blocked">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('document','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900" x-text="blocked.title"></h2>
+          <p class="text-sm text-slate-600 mt-2" x-text="blocked.message"></p>
+          <div class="mt-6 flex justify-center gap-2 flex-wrap">
+            <a href="purchase-orders.html" class="btn btn-secondary">All purchase orders</a>
+            <a :href="blocked.id ? 'purchase-order-view.html?id=' + blocked.id : 'purchase-order-create.html'" class="btn btn-primary" x-text="blocked.id ? 'Open the order' : 'Start a new order'"></a>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <div x-show="!blocked" x-cloak>
+      <!-- Page header -->
+      <div class="page-header">
+        <div class="min-w-0">
+          <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="purchase-orders.html" class="hover:text-navy-700">Purchase orders</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="editing ? 'Edit ' + form.po_no : 'New order'"></span></div>
+          <h2 class="page-title" x-text="editing ? 'Edit purchase order' : 'New purchase order'"></h2>
+          <p class="page-subtitle">Nothing moves in stock yet — units are added when the delivery is received against this order.</p>
+        </div>
+        <div class="page-actions">
+          <a href="purchase-orders.html" class="btn btn-secondary">Cancel</a>
+          <button type="button" class="btn btn-secondary" :disabled="busy || !lines.length" @click="save(false)" x-show="canSaveDraft"><span x-html="ABM.icon('edit')"></span>Save draft</button>
+          <button type="button" class="btn btn-primary" :disabled="busy || !lines.length" @click="save(true)"><span x-html="ABM.icon('check')"></span><span x-text="sendLabel"></span></button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <!-- LEFT: supplier + lines -->
+        <div class="xl:col-span-2 space-y-4 min-w-0">
+          <!-- Supplier & details -->
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Supplier &amp; delivery</div><div class="card-subtitle">Who we are ordering from and when it is promised</div></div>
+              <a href="suppliers.html" class="text-xs font-semibold text-navy-700 hover:underline">Manage suppliers</a>
+            </div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div class="sm:col-span-2">
+                  <label class="label" for="po-supplier">Supplier <span class="req">*</span></label>
+                  <template x-if="!supplier">
+                    <div class="relative" @click.outside="sup.open = false">
+                      <div class="input-icon">
+                        <span x-html="ABM.icon('search')"></span>
+                        <input id="po-supplier" x-ref="supInput" type="text" class="input" :class="errors.supplier && 'is-invalid'" placeholder="Search supplier by name, contact person or phone…" x-model="sup.q" @focus="sup.open = true" @input="sup.open = true" @keydown.enter.prevent="pickFirstSupplier()" @keydown.down.prevent="sup.open = true" autocomplete="off">
+                      </div>
+                      <div x-show="sup.open" x-cloak class="dropdown left-0 right-0 mt-1 max-h-72">
+                        <div class="dropdown-label" x-text="sup.q.trim() ? 'Matching suppliers' : 'Active suppliers'"></div>
+                        <template x-for="s in supplierResults" :key="s.id">
+                          <button type="button" class="dropdown-item" @click="selectSupplier(s)">
+                            <span class="w-8 h-8 rounded-lg bg-navy-50 text-navy-700 flex-none flex items-center justify-center" x-html="ABM.icon('store','w-4 h-4')"></span>
+                            <span class="min-w-0 flex-1">
+                              <span class="block truncate font-medium text-slate-800" x-text="s.name"></span>
+                              <span class="block text-xs text-slate-500 truncate" x-text="[s.contact_person, s.phone].filter(Boolean).join(' · ') || 'No contact details'"></span>
+                            </span>
+                            <span class="badge flex-none" :class="s.balance > 0 ? 'badge-red' : 'badge-green'" x-text="s.balance > 0 ? 'Owe ' + $money(s.balance, {decimals:0}) : 'Settled'"></span>
+                          </button>
+                        </template>
+                        <div x-show="!supplierResults.length" class="px-2.5 py-3 text-sm text-slate-500">No supplier matches. <a href="suppliers.html" class="text-navy-700 font-semibold hover:underline">Add one in Suppliers</a>.</div>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="supplier">
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <span class="chip chip-navy" x-html="ABM.icon('store')"></span>
+                      <div class="min-w-0 flex-1">
+                        <a :href="'supplier-view.html?id=' + supplier.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate" x-text="supplier.name"></a>
+                        <div class="text-xs text-slate-500 truncate" x-text="[supplier.contact_person, supplier.phone, supplier.email].filter(Boolean).join(' · ') || 'No contact details'"></div>
+                      </div>
+                      <div class="text-right flex-none min-w-0">
+                        <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Payable</div>
+                        <div class="text-sm font-bold tabular" :class="supplier.balance > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(supplier.balance, {decimals:0})"></div>
+                      </div>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon flex-none" title="Change supplier" @click="clearSupplier()" x-html="ABM.icon('x','w-4 h-4')"></button>
+                    </div>
+                  </template>
+                  <p class="field-error" x-show="errors.supplier" x-text="errors.supplier"></p>
+                </div>
+
+                <div>
+                  <label class="label" for="po-branch">Deliver to branch <span class="req">*</span></label>
+                  <template x-if="isSuperAdmin && !editing">
+                    <select id="po-branch" class="select" x-model="form.branch_id" :class="errors.branch && 'is-invalid'">
+                      <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                    </select>
+                  </template>
+                  <template x-if="!isSuperAdmin || editing">
+                    <div class="input bg-slate-50 flex items-center gap-2"><span class="badge badge-slate" x-text="branchCode"></span><span class="truncate" x-text="branchName"></span></div>
+                  </template>
+                  <p class="help" x-show="editing">The order number carries this branch, so it cannot be moved. Cancel it and raise a new one instead.</p>
+                  <p class="field-error" x-show="errors.branch" x-text="errors.branch"></p>
+                </div>
+                <div>
+                  <label class="label" for="po-date">Order date <span class="req">*</span></label>
+                  <input id="po-date" type="date" class="input" x-model="form.order_date" :max="today" :class="errors.date && 'is-invalid'">
+                  <p class="field-error" x-show="errors.date" x-text="errors.date"></p>
+                </div>
+                <div>
+                  <label class="label" for="po-expected">Expected delivery</label>
+                  <input id="po-expected" type="date" class="input" x-model="form.expected_date" :min="form.order_date" :class="errors.expected && 'is-invalid'">
+                  <p class="field-error" x-show="errors.expected" x-text="errors.expected"></p>
+                  <p class="help" x-show="!errors.expected">Used to flag the order as overdue. <button type="button" class="text-navy-700 font-semibold hover:underline" @click="setExpected(7)">+7 days</button> · <button type="button" class="text-navy-700 font-semibold hover:underline" @click="setExpected(14)">+14 days</button></p>
+                </div>
+                <div>
+                  <label class="label" for="po-terms">Payment terms</label>
+                  <input id="po-terms" type="text" class="input" x-model="form.terms" list="po-terms-list" placeholder="e.g. 30 days credit" maxlength="80">
+                  <datalist id="po-terms-list"><option value="Cash on delivery"></option><option value="50% advance"></option><option value="15 days credit"></option><option value="30 days credit"></option></datalist>
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="label" for="po-notes">Notes for the supplier</label>
+                  <input id="po-notes" type="text" class="input" x-model="form.notes" placeholder="Optional — packing, delivery instructions, contact…" maxlength="300">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Items -->
+          <div class="card">
+            <div class="card-header">
+              <div><div class="card-title">Items ordered</div><div class="card-subtitle"><span x-text="lines.length"></span> line<span x-text="lines.length === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(totals.units)"></span> units</div></div>
+              <div class="flex items-center gap-1 flex-wrap">
+                <button type="button" class="btn btn-secondary btn-sm" @click="openSuggest()"><span x-html="ABM.icon('sparkles')"></span>Suggest low stock</button>
+                <button type="button" class="btn btn-primary btn-sm" @click="openBrowse()"><span x-html="ABM.icon('cube')"></span>Browse products</button>
+              </div>
+            </div>
+            <div class="card-body space-y-4">
+              <div class="relative" @click.outside="search.open = false">
+                <div class="input-icon">
+                  <span x-html="ABM.icon('scan')"></span>
+                  <input x-ref="productSearch" type="text" class="input" placeholder="Scan barcode or search by name, model, SKU, brand…" x-model="search.q" @focus="search.open = true" @input="onSearchInput()" @keydown.enter.prevent="pickFirstProduct()" autocomplete="off" aria-label="Search products">
+                </div>
+                <div x-show="search.open && search.q.trim()" x-cloak class="dropdown left-0 right-0 mt-1 max-h-80">
+                  <template x-for="p in productResults" :key="p.id">
+                    <button type="button" class="dropdown-item" @click="addLine(p.id)">
+                      <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center" :class="p.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                      <span class="min-w-0 flex-1">
+                        <span class="block truncate font-medium text-slate-800" x-text="p.label"></span>
+                        <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · <span x-text="p.categoryName"></span> · stock <span x-text="p.qty"></span><span x-show="p.min_stock"> / min <span x-text="p.min_stock"></span></span></span>
+                      </span>
+                      <span class="text-xs font-semibold tabular text-slate-600 flex-none" x-text="$money(p.cost_price, {decimals:0})"></span>
+                    </button>
+                  </template>
+                  <div x-show="!productResults.length" class="px-2.5 py-3 text-sm text-slate-500">No stock-tracked product matches. Services and inactive products cannot be ordered.</div>
+                </div>
+                <p class="help">Press <span class="kbd">Enter</span> to add the first match. IMEI / serial numbers are captured later, when the delivery is received.</p>
+              </div>
+              <p class="field-error" x-show="errors.lines" x-text="errors.lines"></p>
+
+              <template x-if="!lines.length">
+                <div class="empty border border-dashed border-slate-300 rounded-xl">
+                  <span x-html="ABM.icon('document')"></span>
+                  <div class="empty-title">Nothing ordered yet</div>
+                  <div class="text-sm mt-1">Search above, browse the catalog, or let the system suggest what is running low.</div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="openBrowse()">Browse products</button>
+                    <button type="button" class="btn btn-primary btn-sm" @click="openSuggest()">Suggest low stock</button>
+                  </div>
+                </div>
+              </template>
+
+              <!-- phone: one card per line, so the quantity and cost are always reachable -->
+              <div class="space-y-3 sm:hidden" x-show="lines.length">
+                <template x-for="(line, idx) in lines" :key="'m' + line.key">
+                  <div class="rounded-xl border p-3" :class="line.error ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'">
+                    <div class="flex items-start gap-2.5">
+                      <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="line.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(line.icon,'w-4 h-4')"></span>
+                      <div class="min-w-0 flex-1">
+                        <a :href="'product-view.html?id=' + line.product_id" class="font-semibold text-slate-800 block truncate" x-text="line.label"></a>
+                        <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="line.sku"></span> · in stock <b class="text-slate-700" x-text="line.stockQty"></b><span x-show="line.min_stock"> / min <span x-text="line.min_stock"></span></span></div>
+                        <div class="text-[11px] text-amber-700 font-semibold" x-show="line.retired">Product is no longer active — kept from the original order</div>
+                      </div>
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600 flex-none" title="Remove line" @click="removeLine(idx)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                      <div>
+                        <label class="label !text-[11px]">Quantity</label>
+                        <input type="number" min="1" step="1" class="input input-sm text-right" x-model.number="line.qty" @input="recalc()" :aria-label="'Quantity for ' + line.label">
+                      </div>
+                      <div>
+                        <label class="label !text-[11px]">Unit cost</label>
+                        <div class="input-group"><input type="number" min="0" step="0.01" class="input input-sm input-money" x-model.number="line.unit_cost" @input="recalc()" :aria-label="'Unit cost for ' + line.label"><span class="addon">Rs.</span></div>
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-between gap-2 mt-2 text-sm">
+                      <span class="text-slate-500">Line total</span>
+                      <b class="tabular text-slate-800" x-text="$money(line.total, {decimals:0})"></b>
+                    </div>
+                    <p class="field-error" x-show="line.error" x-text="line.error"></p>
+                  </div>
+                </template>
+              </div>
+
+              <div class="table-wrap hidden sm:block" x-show="lines.length">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th class="num hidden sm:table-cell">In stock</th>
+                      <th class="num">Qty</th>
+                      <th class="num">Unit cost</th>
+                      <th class="num hidden sm:table-cell">Line total</th>
+                      <th class="actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template x-for="(line, idx) in lines" :key="line.key">
+                      <tr :class="line.error && '!bg-rose-50'">
+                        <td>
+                          <div class="flex items-center gap-3 min-w-0">
+                            <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="line.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(line.icon,'w-4 h-4')"></span>
+                            <div class="min-w-0">
+                              <a :href="'product-view.html?id=' + line.product_id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate max-w-[9rem] sm:max-w-[16rem]" x-text="line.label"></a>
+                              <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="line.sku"></span><span class="sm:hidden"> · stock <b class="text-slate-700" x-text="line.stockQty"></b></span><span x-show="line.serialized"> · <span x-text="line.serialLabel"></span> on receipt</span></div>
+                              <div class="text-[11px] text-amber-700 font-semibold" x-show="line.retired">Product is no longer active — kept from the original order</div>
+                              <p class="field-error !mt-0.5" x-show="line.error" x-text="line.error"></p>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="num hidden sm:table-cell">
+                          <span :class="line.low ? 'text-amber-700 font-semibold' : 'text-slate-600'" x-text="line.stockQty"></span>
+                          <div class="text-[11px] text-slate-400" x-show="line.min_stock">min <span x-text="line.min_stock"></span></div>
+                        </td>
+                        <td class="num"><input type="number" min="1" step="1" class="input input-sm !w-20 text-right" x-model.number="line.qty" @input="recalc()" :aria-label="'Quantity for ' + line.label"></td>
+                        <td class="num"><div class="input-group !w-28 ml-auto"><input type="number" min="0" step="0.01" class="input input-sm input-money" x-model.number="line.unit_cost" @input="recalc()" :aria-label="'Unit cost for ' + line.label"></div></td>
+                        <td class="num hidden sm:table-cell font-semibold whitespace-nowrap" x-text="$money(line.total, {decimals:0})"></td>
+                        <td class="actions"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove line" @click="removeLine(idx)" x-html="ABM.icon('trash','w-4 h-4')"></button></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: summary -->
+        <div class="space-y-4 min-w-0">
+          <div class="card xl:sticky xl:top-20">
+            <div class="card-header"><div><div class="card-title">Order summary</div><div class="card-subtitle" x-text="lines.length ? lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' · ' + ABM.utils.num(totals.units) + ' units' : 'Nothing added yet'"></div></div></div>
+            <div class="card-body space-y-3">
+              <div class="flex items-center justify-between text-sm"><span class="text-slate-500">Subtotal</span><b class="tabular text-slate-800" x-text="$money(totals.subtotal)"></b></div>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="label" for="po-disc">Discount</label>
+                  <div class="input-group"><input id="po-disc" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.discount" :class="errors.discount && 'is-invalid'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="errors.discount" x-text="errors.discount"></p>
+                </div>
+                <div>
+                  <label class="label" for="po-tax">Tax</label>
+                  <div class="input-group"><input id="po-tax" type="number" min="0" step="0.01" class="input input-money" x-model.number="form.tax" :class="errors.tax && 'is-invalid'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="errors.tax" x-text="errors.tax"></p>
+                </div>
+              </div>
+              <div class="flex items-center justify-between gap-3 rounded-xl bg-navy-800 text-white px-4 py-3 min-w-0">
+                <span class="text-xs font-bold uppercase tracking-wider text-white/70">Order value</span>
+                <span class="text-xl font-extrabold tabular truncate" x-text="$money(totals.total)"></span>
+              </div>
+              <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><span>No stock and no supplier balance changes yet. Both move when you receive the delivery against this order.</span></div>
+            </div>
+            <div class="card-footer space-y-2">
+              <button type="button" class="btn btn-primary btn-block btn-lg" :disabled="busy || !lines.length" @click="save(true)"><span x-html="ABM.icon('check')"></span><span x-text="busy ? 'Saving…' : sendLabel"></span></button>
+              <button type="button" class="btn btn-secondary btn-block" :disabled="busy || !lines.length" @click="save(false)" x-show="canSaveDraft"><span x-html="ABM.icon('edit')"></span>Save as draft</button>
+              <p class="text-[11px] text-slate-500 text-center" x-show="!editing">An order number (PO-<span x-text="branchCode"></span>-…) is assigned on save.</p>
+              <p class="text-[11px] text-slate-500 text-center" x-show="editing">Editing <span class="mono" x-text="form.po_no"></span> · <span x-text="ABM.ui.statusLabel(form.status)"></span></p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="h-24 lg:hidden" aria-hidden="true"></div>
+
+      <!-- Sticky mobile action bar -->
+      <div class="fixed bottom-0 inset-x-0 z-30 lg:hidden bg-white/95 backdrop-blur border-t border-slate-200 px-4 py-3 flex items-center gap-3 no-print">
+        <div class="min-w-0 flex-1">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Order · <span x-text="ABM.utils.num(totals.units)"></span> units</div>
+          <div class="text-lg font-extrabold text-slate-900 truncate tabular" x-text="$money(totals.total)"></div>
+        </div>
+        <button type="button" class="btn btn-secondary flex-none" :disabled="busy || !lines.length" @click="save(false)" x-show="canSaveDraft">Draft</button>
+        <button type="button" class="btn btn-primary flex-none" :disabled="busy || !lines.length" @click="save(true)"><span x-html="ABM.icon('check')"></span><span x-text="sendShortLabel"></span></button>
+      </div>
+    </div>
+
+    <!-- Browse products modal -->
+    <div x-show="browse.open" x-cloak class="modal-backdrop" @click.self="browse.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="browseTitle">
+        <div class="modal-header">
+          <div class="min-w-0"><div class="modal-title" id="browseTitle">Browse products</div><div class="text-xs text-slate-500">Stock-tracked products only · stock shown for <span x-text="branchCode"></span></div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="browse.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="input-icon sm:col-span-2"><span x-html="ABM.icon('search')"></span><input x-ref="browseSearch" type="search" class="input" placeholder="Search name, model, SKU…" x-model="browse.q" aria-label="Search catalog"></div>
+            <select class="select" x-model="browse.category" aria-label="Category">
+              <option value="">All categories</option>
+              <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" x-show="form.supplier_id">
+            <input type="checkbox" class="checkbox" x-model="browse.supplierOnly">
+            <span class="text-slate-600">Only products usually bought from <b class="text-slate-800" x-text="supplier ? supplier.name : ''"></b></span>
+          </label>
+          <div class="border border-slate-200 rounded-xl overflow-y-auto max-h-[50vh] divide-y divide-slate-100">
+            <template x-for="p in browseResults" :key="p.id">
+              <button type="button" class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 min-w-0" @click="addLine(p.id, true)">
+                <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="p.serialized ? 'bg-navy-50 text-navy-700' : 'bg-slate-100 text-slate-500'" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-medium text-slate-800 text-sm" x-text="p.label"></span>
+                  <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · <span x-text="p.categoryName"></span></span>
+                </span>
+                <span class="flex flex-col items-end gap-0.5 flex-none">
+                  <span class="text-xs font-semibold tabular text-slate-700" x-text="$money(p.cost_price, {decimals:0})"></span>
+                  <span class="badge" :class="p.qty === 0 ? 'badge-red' : p.low ? 'badge-amber' : 'badge-slate'" x-text="'stock ' + p.qty"></span>
+                </span>
+                <span class="badge badge-green flex-none" x-show="p.inCart" x-text="'Added ×' + p.inCart"></span>
+              </button>
+            </template>
+            <div x-show="!browseResults.length" class="empty py-8 text-sm">No products match.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="text-xs text-slate-500 mr-auto self-center" x-text="lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' on this order'"></span>
+          <button type="button" class="btn btn-primary" @click="browse.open = false">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Low-stock suggestions modal -->
+    <div x-show="suggest.open" x-cloak class="modal-backdrop" @click.self="suggest.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="suggestTitle">
+        <div class="modal-header">
+          <div class="min-w-0"><div class="modal-title" id="suggestTitle">What needs re-ordering</div><div class="text-xs text-slate-500">Products at or below their minimum level at <span x-text="branchCode"></span> · quantity tops stock back up</div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="suggest.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-3">
+          <label class="flex items-center gap-2 text-sm cursor-pointer select-none" x-show="form.supplier_id">
+            <input type="checkbox" class="checkbox" x-model="suggest.supplierOnly">
+            <span class="text-slate-600">Only products usually bought from <b class="text-slate-800" x-text="supplier ? supplier.name : ''"></b></span>
+          </label>
+          <div class="border border-slate-200 rounded-xl overflow-y-auto max-h-[50vh] divide-y divide-slate-100">
+            <template x-for="s in suggestions" :key="s.id">
+              <label class="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 min-w-0 cursor-pointer">
+                <input type="checkbox" class="checkbox flex-none" :checked="suggest.picked[s.id] !== false" @change="suggest.picked[s.id] = $event.target.checked">
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-medium text-slate-800 text-sm" x-text="s.label"></span>
+                  <span class="block text-xs truncate"><span class="mono text-slate-500" x-text="s.sku"></span> · <span :class="s.qty === 0 ? 'text-rose-600 font-semibold' : 'text-amber-700 font-semibold'" x-text="s.qty === 0 ? 'out of stock' : 'stock ' + s.qty"></span> <span class="text-slate-400">/ min <span x-text="s.min_stock"></span></span></span>
+                </span>
+                <span class="flex items-center gap-1 flex-none">
+                  <input type="number" min="1" step="1" class="input input-sm !w-20 text-right" x-model.number="s.suggested" @click.stop :aria-label="'Order quantity for ' + s.label">
+                  <span class="text-xs text-slate-400 hidden sm:inline" x-text="s.unit"></span>
+                </span>
+              </label>
+            </template>
+            <div x-show="!suggestions.length" class="empty py-8 text-sm">
+              <div class="empty-title">Nothing is running low</div>
+              <div x-show="suggest.supplierOnly">No product from this supplier is at or below its minimum level at <span x-text="branchCode"></span>.</div>
+              <div x-show="!suggest.supplierOnly">Every stock-tracked product is above its minimum level at <span x-text="branchCode"></span>.</div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="text-xs text-slate-500 mr-auto self-center"><b x-text="pickedSuggestions.length"></b> selected · <span x-text="ABM.utils.num(pickedSuggestions.reduce((a, s) => a + (Number(s.suggested) || 0), 0))"></span> units</span>
+          <button type="button" class="btn btn-secondary" @click="suggest.open = false">Cancel</button>
+          <button type="button" class="btn btn-primary" :disabled="!pickedSuggestions.length" @click="addSuggested()"><span x-html="ABM.icon('plus')"></span>Add to order</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function purchaseOrderCreatePage() {
+      const { db, utils, ui, session } = ABM;
+      let lineKey = 0;
+      const iconFor = (p) => (['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : db.isSerialized(p) ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube');
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories').filter((c) => c.is_active && c.product_type !== 'service'), 'name'),
+        today: utils.today(),
+        products: [],
+        editing: null, blocked: null,
+        form: { po_no: '', status: 'draft', supplier_id: '', branch_id: String(session.branchId() || ''), order_date: utils.today(), expected_date: '', terms: '', notes: '', discount: 0, tax: 0 },
+        sup: { q: '', open: false },
+        search: { q: '', open: false },
+        browse: { open: false, q: '', category: '', supplierOnly: false },
+        suggest: { open: false, supplierOnly: true, picked: {}, rows: [] },
+        lines: [], errors: {}, busy: false, saved: false,
+
+        /* ------------------------------------------------------- getters */
+        get supplier() { return this.form.supplier_id ? db.find('suppliers', this.form.supplier_id) : null; },
+        get branchName() { return db.branchName(this.form.branch_id); },
+        get branchCode() { return db.branchCode(this.form.branch_id); },
+        get canSaveDraft() { return !this.editing || this.form.status === 'draft'; },
+        get sendLabel() { return this.editing && this.form.status !== 'draft' ? 'Save changes' : 'Send to supplier'; },
+        get sendShortLabel() { return this.editing && this.form.status !== 'draft' ? 'Save' : 'Send'; },
+        get supplierResults() {
+          const q = this.sup.q.trim().toLowerCase();
+          return utils.sortBy(db.all('suppliers').filter((s) => s.is_active && (!q || [s.name, s.contact_person, s.phone, s.email].some((v) => String(v || '').toLowerCase().includes(q)))), 'name').slice(0, 8);
+        },
+        get productResults() {
+          const q = this.search.q.trim().toLowerCase();
+          if (!q) return [];
+          return this.products.filter((p) => [p.label, p.sku, p.barcode, p.model, p.brandName, p.categoryName].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 12).map((p) => this.withStock(p));
+        },
+        get browseResults() {
+          const q = this.browse.q.trim().toLowerCase();
+          const counts = {}; this.lines.forEach((l) => { counts[l.product_id] = (Number(l.qty) || 0); });
+          return this.products.filter((p) => (!this.browse.category || String(p.category_id) === String(this.browse.category))
+            && (!this.browse.supplierOnly || !this.form.supplier_id || String(p.supplier_id) === String(this.form.supplier_id))
+            && (!q || [p.label, p.sku, p.barcode, p.model, p.brandName].some((v) => String(v || '').toLowerCase().includes(q))))
+            .slice(0, 60).map((p) => ({ ...this.withStock(p), inCart: counts[p.id] || 0 }));
+        },
+        get suggestions() {
+          return this.suggest.rows.filter((s) => !this.suggest.supplierOnly || !this.form.supplier_id || String(s.supplier_id) === String(this.form.supplier_id));
+        },
+        get pickedSuggestions() { return this.suggestions.filter((s) => this.suggest.picked[s.id] !== false && Number(s.suggested) > 0); },
+        get totals() {
+          const subtotal = utils.sum(this.lines, 'total');
+          const discount = Number(this.form.discount) || 0, tax = Number(this.form.tax) || 0;
+          return { subtotal, discount, tax, total: utils.round2(Math.max(0, subtotal - discount + tax)), units: this.lines.reduce((a, l) => a + (Number(l.qty) || 0), 0) };
+        },
+        withStock(p) { const qty = ABM.stock.qty(this.form.branch_id, p.id); return { ...p, qty, low: p.min_stock > 0 && qty <= p.min_stock }; },
+
+        init() {
+          this.loadProducts();
+          if (!this.isSuperAdmin) this.form.branch_id = String(session.branchId());
+          if (!this.loadExisting()) return;
+          this.$watch('form.branch_id', () => { this.lines.forEach((l) => { l.stockQty = ABM.stock.qty(this.form.branch_id, l.product_id); l.low = l.min_stock > 0 && l.stockQty <= l.min_stock; }); this.buildSuggestions(); });
+          this.$nextTick(() => { if (!this.form.supplier_id && this.$refs.supInput) this.$refs.supInput.focus(); });
+          window.addEventListener('beforeunload', (e) => { if (this.lines.length && !this.saved) { e.preventDefault(); e.returnValue = ''; } });
+        },
+        /** New order from ?supplier= / ?product=, or an existing draft from ?id=. Returns false when the page is blocked. */
+        loadExisting() {
+          const id = utils.qs('id');
+          if (!id) {
+            if (!session.can('purchase_orders.add')) { this.blocked = { title: 'Not allowed', message: 'Your role is not allowed to create purchase orders.', id: null }; return false; }
+            const sid = utils.qs('supplier');
+            if (sid && db.find('suppliers', sid)) this.form.supplier_id = String(sid);
+            const pid = utils.qs('product');
+            if (pid) { if (this.products.some((p) => String(p.id) === String(pid))) this.addLine(pid, true); else ui.warn('That product is inactive or not stock-tracked, so it cannot be ordered.'); }
+            this.setExpected(7);
+            return true;
+          }
+          if (!session.can('purchase_orders.edit')) { this.blocked = { title: 'Not allowed', message: 'Your role is not allowed to edit purchase orders.', id: null }; return false; }
+          const po = db.find('purchase_orders', id);
+          if (!po) { this.blocked = { title: 'Purchase order not found', message: 'No order matches id ' + id + '. It may have been deleted or the link is wrong.', id: null }; return false; }
+          if (!this.isSuperAdmin && String(po.branch_id) !== String(session.branchId())) { this.blocked = { title: 'Order belongs to another branch', message: 'You can only edit purchase orders raised for ' + (session.branch() || {}).name + '.', id: null }; return false; }
+          const items = db.where('purchase_order_items', { po_id: po.id });
+          const received = items.reduce((a, i) => a + (Number(i.received_quantity) || 0), 0);
+          if (!['draft', 'ordered'].includes(po.status) || received > 0) {
+            this.blocked = { title: 'This order can no longer be edited', message: po.status === 'cancelled' ? 'Order ' + po.po_no + ' was cancelled.' : received > 0 ? 'Part of ' + po.po_no + ' has already been delivered, so its lines are locked. Receive the balance or cancel the order instead.' : 'Order ' + po.po_no + ' is already ' + ui.statusLabel(po.status).toLowerCase() + '.', id: po.id };
+            return false;
+          }
+          this.editing = po.id;
+          this.form = {
+            po_no: po.po_no, status: po.status, supplier_id: String(po.supplier_id), branch_id: String(po.branch_id),
+            order_date: po.order_date, expected_date: po.expected_date || '', terms: po.terms || '', notes: po.notes || '',
+            discount: Number(po.discount_amount) || 0, tax: Number(po.tax_amount) || 0,
+          };
+          let retired = 0;
+          items.forEach((it) => {
+            const p = this.products.find((x) => String(x.id) === String(it.product_id));
+            if (p) { this.lines.push(this.makeLine(p, Number(it.quantity) || 1, Number(it.unit_cost) || 0)); return; }
+            // the product was de-activated (or stopped being stock-tracked) after the order was raised:
+            // keep the line so saving never drops it silently — it is shown locked, and can be removed by hand
+            const raw = db.find('products', it.product_id);
+            retired++;
+            this.lines.push({
+              key: ++lineKey, product_id: it.product_id, label: raw ? db.productLabel(raw.id) : 'Deleted product #' + it.product_id,
+              sku: raw ? raw.sku : '', icon: 'cube', serialized: raw ? db.isSerialized(raw) : false, serialLabel: raw ? db.serialLabel(raw) : '',
+              min_stock: 0, unit: raw ? raw.unit || 'pcs' : 'pcs', catalogCost: Number(it.unit_cost) || 0, unit_cost: Number(it.unit_cost) || 0,
+              qty: Number(it.quantity) || 1, total: utils.round2((Number(it.quantity) || 1) * (Number(it.unit_cost) || 0)),
+              stockQty: ABM.stock.qty(po.branch_id, it.product_id), low: false, error: '', retired: true,
+            });
+          });
+          if (retired) ui.warn(retired + ' line' + (retired === 1 ? ' is' : 's are') + ' for a product that is no longer active. It stays on the order — remove it by hand if it is not coming.');
+          this.recalc();
+          return true;
+        },
+        loadProducts() {
+          this.products = utils.sortBy(db.all('products').filter((p) => p.is_active && db.isStockTracked(p)).map((p) => ({
+            id: p.id, label: db.productLabel(p.id), sku: p.sku, barcode: p.barcode || '', model: p.model || '', brandName: db.brandName(p.brand_id), categoryName: db.categoryName(p.category_id), category_id: p.category_id,
+            cost_price: Number(p.cost_price) || 0, serialized: db.isSerialized(p), serialLabel: db.isSerialized(p) ? db.serialLabel(p) : '', product_type: db.productType(p), icon: iconFor(p),
+            min_stock: Number(p.min_stock) || 0, max_stock: Number(p.max_stock) || 0, reorder_qty: Number(p.reorder_qty) || 0, supplier_id: p.supplier_id, unit: p.unit || 'pcs',
+          })), 'label');
+          this.buildSuggestions();
+        },
+        onEscape() { this.browse.open = false; this.search.open = false; this.sup.open = false; this.suggest.open = false; },
+        setExpected(days) { this.form.expected_date = utils.isoDate(utils.addDays(this.form.order_date || this.today, days)); this.errors.expected = ''; },
+
+        /* ------------------------------------------------------ supplier */
+        selectSupplier(s) { this.form.supplier_id = String(s.id); this.sup.open = false; this.sup.q = ''; this.errors.supplier = ''; this.$nextTick(() => { if (this.$refs.productSearch && !this.lines.length) this.$refs.productSearch.focus(); }); },
+        pickFirstSupplier() { const s = this.supplierResults[0]; if (s) this.selectSupplier(s); },
+        clearSupplier() { this.form.supplier_id = ''; this.$nextTick(() => { if (this.$refs.supInput) this.$refs.supInput.focus(); }); },
+
+        /* --------------------------------------------------------- lines */
+        makeLine(p, qty, cost) {
+          const stockQty = ABM.stock.qty(this.form.branch_id, p.id);
+          return { key: ++lineKey, product_id: p.id, label: p.label, sku: p.sku, icon: p.icon, serialized: p.serialized, serialLabel: p.serialLabel, min_stock: p.min_stock, unit: p.unit, catalogCost: p.cost_price, unit_cost: cost, qty, total: utils.round2(qty * cost), stockQty, low: p.min_stock > 0 && stockQty <= p.min_stock, error: '' };
+        },
+        onSearchInput() {
+          this.search.open = true;
+          const q = this.search.q.trim();
+          if (q.length >= 8) { const exact = this.products.find((p) => ABM.utils.sameBarcode(p.barcode, q)); if (exact) this.addLine(exact.id); }
+        },
+        pickFirstProduct() { const p = this.productResults[0]; if (p) this.addLine(p.id); else if (this.search.q.trim()) ui.warn('No stock-tracked product matches "' + this.search.q.trim() + '".'); },
+        openBrowse() { this.browse.open = true; this.$nextTick(() => { if (this.$refs.browseSearch) this.$refs.browseSearch.focus(); }); },
+        addLine(productId, fromBrowse = false, qty = 1) {
+          const p = this.products.find((x) => String(x.id) === String(productId));
+          if (!p) { ui.error('Product not found or not stock-tracked.'); return; }
+          const existing = this.lines.find((l) => l.product_id === p.id);
+          if (existing) {
+            existing.qty = (Number(existing.qty) || 0) + qty;
+            this.recalc();
+            ui.toast(p.label + ' — quantity +' + qty, 'info');
+          } else {
+            this.lines.push(this.makeLine(p, qty, p.cost_price));
+            this.recalc();
+            if (fromBrowse) ui.success(p.label + ' added.');
+          }
+          this.errors.lines = '';
+          this.search.q = ''; this.search.open = false;
+          if (!fromBrowse) this.$nextTick(() => { if (this.$refs.productSearch) this.$refs.productSearch.focus(); });
+        },
+        removeLine(idx) { this.lines.splice(idx, 1); this.recalc(); },
+        recalc() { this.lines.forEach((l) => { l.total = utils.round2((Number(l.qty) || 0) * (Number(l.unit_cost) || 0)); }); },
+
+        /* --------------------------------------------------- suggestions */
+        buildSuggestions() {
+          const picked = {};
+          this.suggest.rows = this.products.filter((p) => p.min_stock > 0).map((p) => {
+            const qty = ABM.stock.qty(this.form.branch_id, p.id);
+            const target = p.max_stock > 0 ? p.max_stock : p.min_stock * 2;
+            const suggested = Math.max(1, p.reorder_qty || 0, target - qty);
+            return { ...p, qty, suggested };
+          }).filter((p) => p.qty <= p.min_stock);
+          this.suggest.rows = utils.sortBy(this.suggest.rows, (s) => s.qty - s.min_stock);
+          this.suggest.rows.forEach((s) => { picked[s.id] = this.suggest.picked[s.id] !== false; });
+          this.suggest.picked = picked;
+        },
+        openSuggest() {
+          this.buildSuggestions();
+          if (!this.suggest.rows.length) { ui.toast('Nothing is at or below its minimum level at ' + this.branchCode + '.', 'info'); return; }
+          this.suggest.open = true;
+        },
+        addSuggested() {
+          const picked = this.pickedSuggestions;
+          if (!picked.length) return;
+          let added = 0, bumped = 0;
+          picked.forEach((s) => {
+            const qty = Math.max(1, Math.round(Number(s.suggested) || 1));
+            const existing = this.lines.find((l) => l.product_id === s.id);
+            if (existing) { existing.qty = (Number(existing.qty) || 0) + qty; bumped++; }
+            else { const p = this.products.find((x) => x.id === s.id); if (p) { this.lines.push(this.makeLine(p, qty, p.cost_price)); added++; } }
+          });
+          this.recalc();
+          this.errors.lines = '';
+          this.suggest.open = false;
+          ui.success(added + ' product' + (added === 1 ? '' : 's') + ' added to the order' + (bumped ? ' · ' + bumped + ' existing line' + (bumped === 1 ? '' : 's') + ' increased' : '') + '.');
+        },
+
+        /* ---------------------------------------------------------- save */
+        validate() {
+          const e = {}; const f = this.form;
+          if (!f.supplier_id || !db.find('suppliers', f.supplier_id)) e.supplier = 'Select the supplier you are ordering from.';
+          if (!f.branch_id || !this.branches.some((b) => String(b.id) === String(f.branch_id))) e.branch = 'Select an active receiving branch.';
+          if (!f.order_date) e.date = 'Enter the order date.'; else if (f.order_date > this.today) e.date = 'Order date cannot be in the future.';
+          if (f.expected_date && f.order_date && f.expected_date < f.order_date) e.expected = 'Expected delivery cannot be before the order date.';
+          let lineErrors = 0;
+          this.lines.forEach((l) => {
+            l.error = '';
+            const qty = Number(l.qty), cost = Number(l.unit_cost);
+            if (l.qty === '' || l.qty === null || !Number.isInteger(qty) || qty < 1) l.error = 'Quantity must be a whole number of at least 1.';
+            else if (l.unit_cost === '' || l.unit_cost === null || isNaN(cost) || cost < 0) l.error = 'Enter a unit cost of 0 or more.';
+            if (l.error) lineErrors++;
+          });
+          if (!this.lines.length) e.lines = 'Add at least one product to order.';
+          else if (lineErrors) e.lines = lineErrors + ' line' + (lineErrors === 1 ? ' needs' : 's need') + ' attention — see the messages below.';
+          const t = this.totals;
+          const disc = Number(f.discount), tax = Number(f.tax);
+          if (f.discount === '' || f.discount === null || isNaN(disc) || disc < 0) e.discount = 'Discount must be 0 or more.'; else if (disc > t.subtotal) e.discount = 'Discount cannot exceed the subtotal.';
+          if (f.tax === '' || f.tax === null || isNaN(tax) || tax < 0) e.tax = 'Tax must be 0 or more.';
+          this.errors = e;
+          return !Object.keys(e).length;
+        },
+        scrollToError() {
+          this.$nextTick(() => { const el = document.querySelector('main .is-invalid, main .field-error:not([style*="display: none"])'); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+        },
+        save(send) {
+          if (this.busy) return;
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); this.scrollToError(); return; }
+          this.busy = true;
+          try {
+            const f = this.form, t = this.totals;
+            const branchId = Number(f.branch_id), supplierId = Number(f.supplier_id);
+            const status = send ? (this.editing && this.form.status !== 'draft' ? this.form.status : 'ordered') : 'draft';
+            const patch = {
+              branch_id: branchId, supplier_id: supplierId, order_date: f.order_date, expected_date: f.expected_date || null,
+              status, subtotal: t.subtotal, discount_amount: utils.round2(f.discount), tax_amount: utils.round2(f.tax), total: t.total,
+              terms: String(f.terms || '').trim(), notes: String(f.notes || '').trim(),
+            };
+            let po;
+            if (this.editing) {
+              const cur = db.find('purchase_orders', this.editing);
+              if (!cur) throw new Error('This purchase order no longer exists.');
+              const items = db.where('purchase_order_items', { po_id: cur.id });
+              if (items.some((i) => (Number(i.received_quantity) || 0) > 0)) throw new Error('Part of this order has already been delivered — it can no longer be edited.');
+              if (!['draft', 'ordered'].includes(cur.status)) throw new Error('This order is ' + ui.statusLabel(cur.status).toLowerCase() + ' and can no longer be edited.');
+              patch.branch_id = cur.branch_id;                      // the PO number carries the branch code: an existing order never moves
+              items.forEach((i) => db.remove('purchase_order_items', i.id));
+              if (status !== 'draft' && !cur.ordered_at) patch.ordered_at = utils.now();
+              po = db.update('purchase_orders', cur.id, patch);
+            } else {
+              po = db.insert('purchase_orders', {
+                po_no: db.nextNumber('PO', db.branchCode(branchId)), ...patch,
+                created_by: (session.user() || {}).id || null,
+                ordered_at: status === 'draft' ? null : utils.now(), closed_at: null, cancelled_at: null,
+              });
+            }
+            this.lines.forEach((l) => {
+              const qty = Math.round(Number(l.qty));
+              const cost = utils.round2(l.unit_cost);
+              db.insert('purchase_order_items', { po_id: po.id, product_id: l.product_id, quantity: qty, received_quantity: 0, unit_cost: cost, total: utils.round2(qty * cost), notes: '' });
+            });
+            db.audit(this.editing ? 'purchase_order.update' : 'purchase_order.create', 'purchase_order', po.id,
+              `Purchase order ${po.po_no} ${this.editing ? 'updated' : 'raised'} for ${db.supplierName(supplierId)}: ${this.lines.length} line(s), ${t.units} unit(s), ${utils.money(t.total)} — ${ui.statusLabel(status)}`, po.branch_id);
+            this.saved = true;
+            ui.success('Purchase order ' + po.po_no + (status === 'draft' ? ' saved as a draft.' : ' sent to ' + db.supplierName(supplierId) + '.'));
+            setTimeout(() => { location.href = 'purchase-order-view.html?id=' + po.id; }, 350);
+          } catch (err) {
+            ui.error(err.message || 'Could not save the purchase order.');
+            this.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

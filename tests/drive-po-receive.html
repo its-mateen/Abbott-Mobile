@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: receiving against a purchase order</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async () => true;
+      ui.toast = () => {}; ui.warn = (m) => log('   warn: ' + m); ui.error = (m) => log('   error: ' + m); ui.success = () => {};
+
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        if (!body) throw new Error('no ' + fnName + ' in ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+      let seq = 0;
+      const luhn = (d14) => { let s = 0; for (let i = 0; i < 14; i++) { let d = +d14[i]; if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; } s += d; } return String((10 - (s % 10)) % 10); };
+      const unit = (product) => { seq++; if (db.serialType(product) === 'serial') return 'DRV' + String(seq).padStart(5, '0'); const base = '35' + String(700000000000 + seq).slice(0, 12); return base + luhn(base); };
+      const fill = (page) => page.lines.filter((l) => l.serialized).forEach((l) => {
+        const p = db.find('products', l.product_id);
+        l.unitsText = Array.from({ length: Number(l.expected) || 0 }, () => unit(p)).join('\n');
+        page.revalidate();
+      });
+
+      await source('purchase-create.html', 'purchaseCreatePage');
+      await source('purchase-view.html', 'purchaseViewPage');
+      await source('purchase-order-view.html', 'purchaseOrderViewPage');
+
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(mgr);
+      const BID = session.branchId();
+      const SUP = db.all('suppliers').find((s) => s.is_active).id;
+
+      // pick clean products
+      const cat = (p) => db.isStockTracked(p) && p.is_active;
+      const PA = db.all('products').find((p) => cat(p) && !db.isSerialized(p));
+      const PB = db.all('products').find((p) => cat(p) && !db.isSerialized(p) && p.id !== PA.id);
+      const PC = db.all('products').find((p) => cat(p) && !db.isSerialized(p) && ![PA.id, PB.id].includes(p.id));
+      const PS = db.all('products').find((p) => cat(p) && db.isSerialized(p));
+      log('products: A=' + PA.id + ' B=' + PB.id + ' C=' + PC.id + ' S=' + PS.id + ' branch=' + BID + ' supplier=' + SUP);
+
+      let poSeq = 900;
+      const mkPo = (items, opts = {}) => {
+        const po = db.insert('purchase_orders', {
+          po_no: 'PO-' + db.branchCode(BID) + '-' + String(++poSeq), branch_id: opts.branch || BID, supplier_id: SUP,
+          order_date: utils.today(), expected_date: utils.addDays(utils.today(), 7), status: opts.status || 'ordered',
+          subtotal: 0, discount_amount: 0, tax_amount: 0, total: 0, terms: '', notes: '', created_by: mgr.id,
+          ordered_at: utils.now(), closed_at: null, cancelled_at: null,
+        });
+        let sub = 0;
+        items.forEach((it) => {
+          const p = db.find('products', it.pid);
+          const cost = it.cost != null ? it.cost : p.cost_price;
+          db.insert('purchase_order_items', { po_id: po.id, product_id: it.pid, quantity: it.qty, received_quantity: it.recv || 0, unit_cost: cost, total: utils.round2(cost * it.qty), notes: '' });
+          sub += cost * it.qty;
+        });
+        db.update('purchase_orders', po.id, { subtotal: utils.round2(sub), total: utils.round2(sub) });
+        return db.find('purchase_orders', po.id);
+      };
+      const poItems = (id) => db.where('purchase_order_items', { po_id: id });
+      const recvOf = (id, pid) => poItems(id).filter((i) => String(i.product_id) === String(pid)).map((i) => i.received_quantity);
+      const bal = () => db.find('suppliers', SUP).balance;
+      const imeiCount = (pid) => db.all('product_imeis').filter((u) => String(u.product_id) === String(pid)).length;
+      const moveCount = (pid) => db.all('stock_movements').filter((m) => String(m.product_id) === String(pid)).length;
+
+      /* ================= T1: a full delivery balances everything ================= */
+      log('=== T1 full delivery: stock / registry / ledger / order line move once');
+      const po1 = mkPo([{ pid: PA.id, qty: 10 }, { pid: PS.id, qty: 3 }]);
+      const s0 = { a: stock.qty(BID, PA.id), s: stock.qty(BID, PS.id), imeis: imeiCount(PS.id), bal: bal(), mvA: moveCount(PA.id), mvS: moveCount(PS.id) };
+      let r = mk(purchaseCreatePage, '?po=' + po1.id);
+      eq(r.lines.length, 2, 'T1 two lines pre-filled');
+      fill(r);
+      r.form.pay_amount = 0;
+      noNav(() => r.save());
+      const gr1 = db.all('purchases').slice(-1)[0];
+      eq(stock.qty(BID, PA.id), s0.a + 10, 'T1 bulk stock +10');
+      eq(stock.qty(BID, PS.id), s0.s + 3, 'T1 serialized stock +3');
+      eq(imeiCount(PS.id), s0.imeis + 3, 'T1 exactly 3 units registered');
+      eq(moveCount(PA.id), s0.mvA + 1, 'T1 one movement for the bulk line');
+      eq(moveCount(PS.id), s0.mvS + 3, 'T1 one movement per serialized unit');
+      near(bal(), utils.round2(s0.bal + gr1.total), 'T1 supplier ledger owes the delivery total');
+      eq(recvOf(po1.id, PA.id)[0], 10, 'T1 order line credited 10');
+      eq(recvOf(po1.id, PS.id)[0], 3, 'T1 order line credited 3');
+      eq(db.find('purchase_orders', po1.id).status, 'completed', 'T1 order completed');
+      const it1 = db.where('purchase_items', { purchase_id: gr1.id });
+      const sItem = it1.find((i) => String(i.product_id) === String(PS.id));
+      eq(sItem.quantity, sItem.imeis.length, 'T1 serialized purchase_item qty == registered serials');
+      eq(db.all('product_imeis').filter((u) => String(u.purchase_item_id) === String(sItem.id)).length, sItem.quantity, 'T1 registry rows carry the purchase item id');
+
+      /* ================= T2: cancelling gives back exactly what arrived ================= */
+      log('=== T2 cancel the delivery');
+      let pv = mk(purchaseViewPage, '?id=' + gr1.id);
+      ok(pv.cancelCheck.ok, 'T2 cancellable');
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(stock.qty(BID, PA.id), s0.a, 'T2 bulk stock restored');
+      eq(stock.qty(BID, PS.id), s0.s, 'T2 serialized stock restored');
+      eq(imeiCount(PS.id), s0.imeis, 'T2 serial registry restored');
+      near(bal(), s0.bal, 'T2 supplier ledger restored');
+      eq(recvOf(po1.id, PA.id)[0], 0, 'T2 order line back to 0');
+      eq(recvOf(po1.id, PS.id)[0], 0, 'T2 serialized order line back to 0');
+      eq(db.find('purchase_orders', po1.id).status, 'ordered', 'T2 order reopened as ordered');
+
+      /* ================= T3: two deliveries, cancel the first ================= */
+      log('=== T3 two deliveries on one order line, cancel the first');
+      const po3 = mkPo([{ pid: PA.id, qty: 10 }]);
+      const a3 = stock.qty(BID, PA.id);
+      let d1 = mk(purchaseCreatePage, '?po=' + po3.id); d1.lines[0].qty = 4; d1.recalc(); d1.form.pay_amount = 0;
+      noNav(() => d1.save());
+      const g31 = db.all('purchases').slice(-1)[0];
+      let d2 = mk(purchaseCreatePage, '?po=' + po3.id);
+      eq(d2.lines[0].poRemaining, 6, 'T3 second delivery pre-fills the balance');
+      d2.form.pay_amount = 0; noNav(() => d2.save());
+      eq(recvOf(po3.id, PA.id)[0], 10, 'T3 order line fully received');
+      eq(db.find('purchase_orders', po3.id).status, 'completed', 'T3 completed');
+      pv = mk(purchaseViewPage, '?id=' + g31.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(recvOf(po3.id, PA.id)[0], 6, 'T3 cancelling the first delivery leaves the second credited');
+      eq(db.find('purchase_orders', po3.id).status, 'partial', 'T3 back to partial');
+      eq(stock.qty(BID, PA.id), a3 + 6, 'T3 stock = only the surviving delivery');
+
+      /* ================= T4: hand edits (remove a line, add a foreign product) ================= */
+      log('=== T4 user removes a PO line and adds a product that is not on the order');
+      const po4 = mkPo([{ pid: PA.id, qty: 10 }, { pid: PB.id, qty: 5 }]);
+      const a4 = stock.qty(BID, PA.id), b4 = stock.qty(BID, PB.id), c4 = stock.qty(BID, PC.id);
+      let r4 = mk(purchaseCreatePage, '?po=' + po4.id);
+      const bIdx = r4.lines.findIndex((l) => String(l.product_id) === String(PB.id));
+      r4.removeLine(bIdx);
+      r4.addLine(PC.id, true); r4.lines.find((l) => String(l.product_id) === String(PC.id)).qty = 2; r4.recalc();
+      r4.form.pay_amount = 0;
+      noNav(() => r4.save());
+      const g4 = db.all('purchases').slice(-1)[0];
+      eq(recvOf(po4.id, PA.id)[0], 10, 'T4 delivered line credited');
+      eq(recvOf(po4.id, PB.id)[0], 0, 'T4 removed line stays uncredited');
+      eq(stock.qty(BID, PC.id), c4 + 2, 'T4 the foreign product still lands in stock');
+      eq(db.find('purchase_orders', po4.id).status, 'partial', 'T4 order partial');
+      pv = mk(purchaseViewPage, '?id=' + g4.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(recvOf(po4.id, PA.id)[0], 0, 'T4 cancel returns the delivered units');
+      eq(recvOf(po4.id, PB.id)[0], 0, 'T4 the untouched line stays at 0');
+      eq(stock.qty(BID, PC.id), c4, 'T4 foreign product removed again');
+      eq(stock.qty(BID, PA.id), a4, 'T4 stock restored');
+
+      /* ================= T5: over-delivery ================= */
+      log('=== T5 over-delivery on a line, then cancel');
+      const po5 = mkPo([{ pid: PA.id, qty: 5 }]);
+      const a5 = stock.qty(BID, PA.id);
+      let r5 = mk(purchaseCreatePage, '?po=' + po5.id);
+      r5.lines[0].qty = 8; r5.recalc(); r5.form.pay_amount = 0;
+      noNav(() => r5.save());
+      const g5 = db.all('purchases').slice(-1)[0];
+      eq(recvOf(po5.id, PA.id)[0], 8, 'T5 order line records the over-delivery');
+      eq(db.find('purchase_orders', po5.id).status, 'completed', 'T5 order completed');
+      eq(stock.qty(BID, PA.id), a5 + 8, 'T5 all 8 units in stock');
+      pv = mk(purchaseViewPage, '?id=' + g5.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(recvOf(po5.id, PA.id)[0], 0, 'T5 cancel removes exactly 8');
+      eq(stock.qty(BID, PA.id), a5, 'T5 stock restored');
+
+      /* ================= T6: a second tab received part of the order meanwhile ================= */
+      log('=== T6 stale tab — another tab received some of the order first');
+      const po6 = mkPo([{ pid: PA.id, qty: 10 }, { pid: PB.id, qty: 5 }]);
+      const a6 = stock.qty(BID, PA.id), b6 = stock.qty(BID, PB.id);
+      const tabOne = mk(purchaseCreatePage, '?po=' + po6.id);      // open, not saved
+      const tabTwo = mk(purchaseCreatePage, '?po=' + po6.id);      // second tab receives only line B
+      const bi = tabTwo.lines.findIndex((l) => String(l.product_id) === String(PA.id));
+      tabTwo.removeLine(bi); tabTwo.form.pay_amount = 0;
+      noNav(() => tabTwo.save());
+      eq(recvOf(po6.id, PB.id)[0], 5, 'T6 tab 2 credited line B');
+      eq(db.find('purchase_orders', po6.id).status, 'partial', 'T6 order is partial');
+      // now tab one saves its stale pre-fill (A=10, B=5)
+      tabOne.form.pay_amount = 0;
+      noNav(() => tabOne.save());
+      log('   tab-1 saved? purchases=' + db.all('purchases').length);
+      eq(recvOf(po6.id, PB.id)[0], 5, 'T6 line B must NOT be credited twice (ordered 5)');
+      eq(stock.qty(BID, PB.id), b6 + 5, 'T6 line B stock must not double');
+      eq(db.find('purchase_orders', po6.id).status, 'completed', 'T6 order status after the stale save');
+
+      /* ================= T7: order completed in another tab ================= */
+      log('=== T7 stale tab — the order was completed elsewhere');
+      const po7 = mkPo([{ pid: PA.id, qty: 4 }]);
+      const a7 = stock.qty(BID, PA.id), n7 = db.all('purchases').length;
+      const t7a = mk(purchaseCreatePage, '?po=' + po7.id);
+      const t7b = mk(purchaseCreatePage, '?po=' + po7.id); t7b.form.pay_amount = 0; noNav(() => t7b.save());
+      t7a.form.pay_amount = 0; noNav(() => t7a.save());
+      eq(db.all('purchases').length, n7 + 1, 'T7 the stale tab was refused (only one receipt)');
+      eq(stock.qty(BID, PA.id), a7 + 4, 'T7 stock moved once');
+
+      /* ================= T8: product deactivated after the order ================= */
+      log('=== T8 a line whose product was deactivated after the order');
+      const po8 = mkPo([{ pid: PA.id, qty: 5 }, { pid: PC.id, qty: 5 }]);
+      db.update('products', PC.id, { is_active: 0 });
+      let r8 = mk(purchaseCreatePage, '?po=' + po8.id);
+      eq(r8.lines.length, 1, 'T8 only the live product is pre-filled');
+      eq(r8.poRemainingUnits, 10, 'T8 the banner still counts the dead line');
+      r8.form.pay_amount = 0; noNav(() => r8.save());
+      eq(db.find('purchase_orders', po8.id).status, 'partial', 'T8 order stuck at partial');
+      db.update('products', PC.id, { is_active: 1 });
+
+      /* ================= T9: product flipped serialized after the order ================= */
+      log('=== T9 a bulk product turned serialized after the order');
+      const po9 = mkPo([{ pid: PB.id, qty: 3 }]);
+      db.update('products', PB.id, { is_serialized: 1, is_imei_tracked: 1 });
+      let r9 = mk(purchaseCreatePage, '?po=' + po9.id);
+      eq(r9.lines[0].serialized, true, 'T9 the line now demands serials');
+      eq(Number(r9.lines[0].expected), 3, 'T9 expected = the outstanding balance');
+      fill(r9); r9.form.pay_amount = 0;
+      noNav(() => r9.save());
+      eq(recvOf(po9.id, PB.id)[0], 3, 'T9 3 credited');
+      db.update('products', PB.id, { is_serialized: 0, is_imei_tracked: 0 });
+      // ... and now cancelling it, with the product back to bulk
+      const g9 = db.all('purchases').slice(-1)[0];
+      const b9 = stock.qty(BID, PB.id);
+      pv = mk(purchaseViewPage, '?id=' + g9.id);
+      log('   T9 cancelCheck=' + JSON.stringify(pv.cancelCheck));
+      await noNavAsync(() => pv.cancelPurchase());
+      eq(db.find('purchases', g9.id).status, 'cancelled', 'T9 cancel went through');
+      eq(stock.qty(BID, PB.id), b9 - 3, 'T9 the 3 units left stock again');
+      eq(recvOf(po9.id, PB.id)[0], 0, 'T9 order line back to 0');
+      eq(imeiCount(PB.id), 0, 'T9 the serial rows were removed');
+      db.update('products', PB.id, { is_serialized: 0, is_imei_tracked: 0 });
+
+      /* ================= T10: cost update ================= */
+      log('=== T10 "update product cost price" against the order cost');
+      const base = db.find('products', PA.id);
+      db.update('products', PA.id, { cost_price: 100, min_sale_price: 110, retail_price: 130, wholesale_price: 115 });
+      const po10 = mkPo([{ pid: PA.id, qty: 2, cost: 140 }]);
+      let r10 = mk(purchaseCreatePage, '?po=' + po10.id);
+      eq(r10.opts.updateCost, true, 'T10 "update cost" is on by default');
+      near(r10.lines[0].unit_cost, 140, 'T10 line is at the agreed order cost');
+      r10.form.pay_amount = 0; noNav(() => r10.save());
+      const p10 = db.find('products', PA.id);
+      log('   after: cost=' + p10.cost_price + ' min_sale=' + p10.min_sale_price + ' retail=' + p10.retail_price + ' wholesale=' + p10.wholesale_price);
+      near(p10.cost_price, 140, 'T10 catalog cost follows the order cost');
+      ok(Number(p10.min_sale_price) >= Number(p10.cost_price), 'T10 minimum sale price is never left below cost (min ' + p10.min_sale_price + ' vs cost ' + p10.cost_price + ')');
+      // cancel: does the catalog cost roll back?
+      const g10 = db.all('purchases').slice(-1)[0];
+      pv = mk(purchaseViewPage, '?id=' + g10.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      log('   after cancel: cost=' + db.find('products', PA.id).cost_price);
+      db.update('products', PA.id, { cost_price: base.cost_price, min_sale_price: base.min_sale_price, retail_price: base.retail_price, wholesale_price: base.wholesale_price });
+
+      /* ================= T11: pay now ================= */
+      log('=== T11 payment at receipt');
+      const po11 = mkPo([{ pid: PA.id, qty: 4 }]);
+      const bal11 = bal();
+      let r11 = mk(purchaseCreatePage, '?po=' + po11.id);
+      r11.form.pay_amount = r11.totals.total; r11.form.pay_method = 'bank_transfer'; r11.form.pay_reference = 'TRX-1';
+      noNav(() => r11.save());
+      const g11 = db.all('purchases').slice(-1)[0];
+      near(g11.paid_amount, g11.total, 'T11 purchase marked paid');
+      near(bal(), bal11, 'T11 supplier balance net zero after a full payment');
+      const tx11 = db.all('supplier_transactions').filter((t) => t.reference_type === 'purchase' && String(t.reference_id) === String(g11.id));
+      eq(tx11.length, 2, 'T11 one purchase + one payment row');
+      near(tx11[tx11.length - 1].balance_after, bal(), 'T11 balance_after matches the supplier row');
+      pv = mk(purchaseViewPage, '?id=' + g11.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      near(bal(), utils.round2(bal11 - g11.total), 'T11 after cancel the supplier holds our payment as credit');
+
+      /* ================= T12: the same product on two order lines ================= */
+      log('=== T12 the same product on two order lines');
+      const po12 = mkPo([{ pid: PA.id, qty: 4 }, { pid: PA.id, qty: 6 }]);
+      const a12 = stock.qty(BID, PA.id);
+      let r12 = mk(purchaseCreatePage, '?po=' + po12.id);
+      log('   lines=' + r12.lines.length + ' remaining=' + r12.poRemainingUnits);
+      fill(r12); r12.form.pay_amount = 0;
+      noNav(() => r12.save());
+      log('   received per line = ' + JSON.stringify(recvOf(po12.id, PA.id)) + ' status=' + db.find('purchase_orders', po12.id).status);
+      eq(recvOf(po12.id, PA.id).join(','), '4,6', 'T12 each order line credited its own quantity');
+      const g12 = db.all('purchases').slice(-1)[0];
+      pv = mk(purchaseViewPage, '?id=' + g12.id);
+      await noNavAsync(() => pv.cancelPurchase());
+      log('   after cancel = ' + JSON.stringify(recvOf(po12.id, PA.id)) + ' status=' + db.find('purchase_orders', po12.id).status + ' stock=' + (stock.qty(BID, PA.id) - a12));
+      eq(recvOf(po12.id, PA.id).join(','), '0,0', 'T12 cancelling returns the units to the lines they came from');
+      eq(db.find('purchase_orders', po12.id).status, 'ordered', 'T12 order reopened');
+
+      /* ================= T13: super admin receiving into another branch ================= */
+      log('=== T13 super admin receives an order raised for another branch');
+      const admin = db.all('users').find((u) => u.username === 'admin');
+      session.logout(); session.login(admin);
+      const OTHER = db.all('branches').find((b) => b.is_active && b.id != session.branchId()).id;
+      const po13 = mkPo([{ pid: PA.id, qty: 3 }], { branch: OTHER });
+      const home13 = stock.qty(session.branchId(), PA.id), other13 = stock.qty(OTHER, PA.id);
+      let r13 = mk(purchaseCreatePage, '?po=' + po13.id);
+      eq(String(r13.form.branch_id), String(OTHER), 'T13 receiving branch locked to the order branch');
+      r13.form.pay_amount = 0; noNav(() => r13.save());
+      eq(stock.qty(OTHER, PA.id), other13 + 3, 'T13 stock landed at the order branch');
+      eq(stock.qty(session.branchId(), PA.id), home13, 'T13 nothing landed at the active branch');
+      session.logout(); session.login(mgr);
+
+      /* ================= T14: invariants over the whole run ================= */
+      log('=== T14 global invariants');
+      let mism = 0;
+      db.all('purchases').filter((p) => p.status === 'received' && p.purchase_order_id).forEach((p) => {
+        db.where('purchase_items', { purchase_id: p.id }).forEach((i) => {
+          const prod = db.find('products', i.product_id);
+          if (prod && db.isSerialized(prod) && (i.imeis || []).length !== i.quantity) { mism++; log('   MISMATCH ' + p.purchase_no + ' item ' + i.id + ' qty=' + i.quantity + ' serials=' + (i.imeis || []).length); }
+        });
+      });
+      eq(mism, 0, 'T14 every live serialized receipt line has one serial per unit');
+      let neg = db.all('purchase_order_items').filter((i) => Number(i.received_quantity) < 0);
+      eq(neg.length, 0, 'T14 no order line has a negative received quantity');
+      let overs = db.all('purchase_order_items').filter((i) => Number(i.received_quantity) > Number(i.quantity));
+      log('   order lines received beyond what was ordered: ' + overs.length + ' -> ' + JSON.stringify(overs.map((i) => ({ po: i.po_id, item: i.id, ordered: i.quantity, received: i.received_quantity }))));
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

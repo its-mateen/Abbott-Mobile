@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Purchase Orders · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="purchase-orders" data-title="Purchase Orders" data-perm="purchase_orders.view">
+  <main x-data="purchaseOrdersPage()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Purchase orders</h2>
+        <p class="page-subtitle">What we ordered from suppliers and what is still to arrive · <span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="purchases.html" class="btn btn-secondary"><span x-html="ABM.icon('truck')"></span>Receipts</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canAdd">
+          <a href="purchase-order-create.html" class="btn btn-primary"><span x-html="ABM.icon('plus')"></span>New Purchase Order</a>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'purchase-orders.html?' + range.query + branchQuery" class="stat stat-accent" title="All purchase orders in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Ordered · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.value, {decimals:0})"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('document')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.count"></span> order<span x-text="k.count === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(k.units)"></span> units<span x-show="k.cancelled"> · <span x-text="k.cancelled"></span> cancelled</span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchase-orders.html?range=all&status=open' + branchQuery" class="stat stat-warning" title="Show every order still awaiting delivery (all time)">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Awaiting delivery</div><div class="stat-value" x-text="$money(k.pendingValue, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.openCount"></span> open order<span x-text="k.openCount === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(k.pendingUnits)"></span> units to come</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchase-orders.html?range=all&overdue=1' + branchQuery" class="stat" :class="k.overdue ? 'stat-danger' : 'stat-money'" title="Show orders past their expected date (all time)">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Overdue</div><div class="stat-value" :class="k.overdue ? 'text-rose-600' : 'text-emerald-700'" x-text="ABM.utils.num(k.overdue)"></div></div>
+          <span class="chip" :class="k.overdue ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.overdue ? $money(k.overdueValue, {decimals:0}) + ' past the promised date' : 'Every open order is on time'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'purchase-orders.html?range=all&status=draft' + branchQuery" class="stat" title="Show drafts not yet sent to a supplier (all time)">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Drafts</div><div class="stat-value" x-text="ABM.utils.num(k.drafts)"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('edit')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.drafts ? $money(k.draftValue, {decimals:0}) + ' not sent to a supplier yet' : 'Nothing waiting to be sent'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2">
+          <div class="relative sm:col-span-2" :class="isSuperAdmin ? 'xl:col-span-2' : 'xl:col-span-3'">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search PO number, supplier, notes…" x-model.debounce.200ms="q" aria-label="Search purchase orders">
+          </div>
+          <select class="select" x-model="f.supplier" aria-label="Supplier">
+            <option value="">All suppliers</option>
+            <template x-for="s in suppliers" :key="s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+          </select>
+          <select class="select" x-model="f.status" aria-label="Status">
+            <option value="">Any status</option>
+            <option value="open">Open (ordered + partial)</option>
+            <option value="draft">Draft</option>
+            <option value="ordered">Ordered</option>
+            <option value="partial">Partially received</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <label class="input flex items-center gap-2 cursor-pointer select-none" :class="f.overdue && '!border-rose-300 !bg-rose-50'">
+            <input type="checkbox" class="checkbox" x-model="f.overdue">
+            <span class="text-sm truncate" :class="f.overdue ? 'text-rose-700 font-semibold' : 'text-slate-600'">Overdue only</span>
+          </label>
+          <template x-if="isSuperAdmin">
+            <select class="select" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> orders in period</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Orders</div><div class="card-subtitle">Newest first · click a PO number to track delivery</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th class="hidden sm:table-cell">Ordered</th>
+              <th class="hidden lg:table-cell">Expected</th>
+              <th>Supplier</th>
+              <th class="hidden md:table-cell" x-show="showBranch">Branch</th>
+              <th class="num hidden xl:table-cell">Lines</th>
+              <th>Delivered</th>
+              <th class="num">Total</th>
+              <th class="num hidden lg:table-cell">Pending</th>
+              <th class="hidden sm:table-cell">Status</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="r.status === 'cancelled' && 'opacity-60'">
+                <td>
+                  <a :href="'purchase-order-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.po_no"></a>
+                  <div class="text-[11px] text-slate-400 sm:hidden whitespace-nowrap" x-text="$date(r.order_date)"></div>
+                  <div class="sm:hidden mt-0.5"><span x-html="$badge(r.status, r.statusLabel)"></span></div>
+                  <div class="text-[11px] whitespace-nowrap lg:hidden" :class="r.overdue ? 'text-rose-600 font-semibold' : 'text-slate-400'" x-show="r.expected_date && r.isOpen">Due <span x-text="$date(r.expected_date)"></span></div>
+                </td>
+                <td class="hidden sm:table-cell whitespace-nowrap text-slate-600" x-text="$date(r.order_date)"></td>
+                <td class="hidden lg:table-cell whitespace-nowrap" :class="r.overdue ? 'text-rose-600 font-semibold' : 'text-slate-600'">
+                  <span x-text="r.expected_date ? $date(r.expected_date) : '—'"></span>
+                  <span class="badge badge-red ml-1" x-show="r.overdue" x-text="r.daysLate + 'd late'"></span>
+                </td>
+                <td>
+                  <a :href="'supplier-view.html?id=' + r.supplier_id" class="font-medium text-slate-800 hover:text-navy-700 block truncate max-w-[9rem] sm:max-w-[11rem] xl:max-w-[13rem]" x-text="r.supplierName"></a>
+                  <div class="text-[11px] text-slate-400 md:hidden" x-show="showBranch" x-text="r.branchCode"></div>
+                </td>
+                <td class="hidden md:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                <td class="num hidden xl:table-cell text-slate-600" x-text="r.lines"></td>
+                <td>
+                  <div class="min-w-[5rem] max-w-[7rem]">
+                    <div class="flex items-center justify-between gap-2 text-[11px] text-slate-500 mb-1">
+                      <span class="tabular"><b class="text-slate-700" x-text="ABM.utils.num(r.received)"></b> / <span x-text="ABM.utils.num(r.ordered)"></span></span>
+                      <span class="tabular" x-text="r.pct + '%'"></span>
+                    </div>
+                    <div class="progress" :class="r.pct >= 100 && 'progress-money'"><div :style="'width:' + r.pct + '%'"></div></div>
+                  </div>
+                </td>
+                <td class="num font-semibold whitespace-nowrap" x-text="$money(r.total, {decimals:0})"></td>
+                <td class="num hidden lg:table-cell whitespace-nowrap" :class="r.pendingValue > 0 ? 'text-amber-700 font-semibold' : 'text-slate-400'" x-text="r.pendingValue > 0 ? $money(r.pendingValue, {decimals:0}) : '—'"></td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.status, r.statusLabel)"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'purchase-order-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="Track order" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canReceive && r.isOpen">
+                      <a :href="'purchase-create.html?po=' + r.id" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Receive stock against this order" x-html="ABM.icon('truck','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canManage && r.status === 'draft'">
+                      <a :href="'purchase-order-create.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="Edit draft" x-html="ABM.icon('edit','w-4 h-4')"></a>
+                    </template>
+                    <a :href="'purchase-order-view.html?id=' + r.id + '&print=1'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print purchase order" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="11">
+                <div class="empty">
+                  <span x-html="ABM.icon('document')"></span>
+                  <div class="empty-title">No purchase orders found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No orders were placed in this period.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <template x-if="canAdd"><a href="purchase-order-create.html" class="btn btn-primary btn-sm">New purchase order</a></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td colspan="2" class="hidden sm:table-cell">Totals</td>
+              <td class="sm:hidden">Totals</td>
+              <td class="hidden lg:table-cell"></td>
+              <td></td>
+              <td class="hidden md:table-cell" x-show="showBranch"></td>
+              <td class="num hidden xl:table-cell" x-text="filteredTotals.lines"></td>
+              <td class="num text-slate-600 whitespace-nowrap"><span x-text="ABM.utils.num(filteredTotals.received)"></span> / <span x-text="ABM.utils.num(filteredTotals.ordered)"></span></td>
+              <td class="num whitespace-nowrap" x-text="$money(filteredTotals.total, {decimals:0})"></td>
+              <td class="num hidden lg:table-cell text-amber-700 whitespace-nowrap" x-text="$money(filteredTotals.pendingValue, {decimals:0})"></td>
+              <td class="hidden sm:table-cell text-xs font-normal text-slate-500">excl. cancelled</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function purchaseOrdersPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('purchase_orders.add'),
+        canManage: session.can('purchase_orders.edit'),
+        canReceive: session.can('purchases.add'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        suppliers: utils.sortBy(db.all('suppliers'), 'name'),
+        range: null, rows: [], page: 1, q: '',
+        f: { supplier: '', status: '', overdue: false, branch: String(session.branchId() || '') },
+        k: { count: 0, cancelled: 0, value: 0, units: 0, openCount: 0, pendingUnits: 0, pendingValue: 0, overdue: 0, overdueValue: 0, drafts: 0, draftValue: 0 },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.isSuperAdmin && this.f.branch === 'all'; },
+        get branchQuery() { return this.isSuperAdmin ? '&branch=' + this.f.branch : ''; },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const sup = utils.qs('supplier', ''); if (sup && db.find('suppliers', sup)) this.f.supplier = String(sup);
+          const st = utils.qs('status', ''); if (['open', 'draft', 'ordered', 'partial', 'completed', 'cancelled'].includes(st)) this.f.status = st;
+          if (utils.qs('overdue') === '1') this.f.overdue = true;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'purchase-orders');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          ['supplier', 'status', 'overdue'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(p) { return this.f.branch === 'all' ? true : String(p.branch_id) === String(this.f.branch); },
+        statusLabel(status) { return status === 'partial' ? 'Partially Received' : ui.statusLabel(status); },
+        /** One row per order with delivery progress; `all` ignores the period so the tiles can count every open order. */
+        buildRows(all) {
+          const today = utils.today();
+          const byOrder = {};
+          db.all('purchase_order_items').forEach((i) => { (byOrder[i.po_id] = byOrder[i.po_id] || []).push(i); });
+          return all.map((p) => {
+            const its = byOrder[p.id] || [];
+            const ordered = its.reduce((a, i) => a + (Number(i.quantity) || 0), 0);
+            const received = its.reduce((a, i) => a + Math.max(0, Number(i.received_quantity) || 0), 0);   // an over-delivery shows as 15/10, not 10/10
+            const isOpen = p.status === 'ordered' || p.status === 'partial';
+            const pendingUnits = isOpen ? its.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0)), 0) : 0;
+            // only a live order is still owed goods; a draft was never placed, a closed or cancelled one never will be
+            const lineValue = its.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0)) * (Number(i.unit_cost) || 0), 0);
+            const sub = Number(p.subtotal) || 0;
+            const pendingValue = isOpen ? utils.round2(sub > 0 ? lineValue * ((Number(p.total) || 0) / sub) : lineValue) : 0;
+            const overdue = isOpen && !!p.expected_date && p.expected_date < today;
+            return {
+              ...p, supplierName: db.supplierName(p.supplier_id), branchCode: db.branchCode(p.branch_id),
+              lines: its.length, ordered, received, pendingUnits, pendingValue, isOpen, overdue,
+              shortUnits: p.status === 'completed' ? its.reduce((a, i) => a + Math.max(0, (Number(i.quantity) || 0) - (Number(i.received_quantity) || 0)), 0) : 0,
+              daysLate: overdue ? Math.max(1, Math.round((utils.parseDate(today) - utils.parseDate(p.expected_date)) / 86400000)) : 0,
+              pct: ordered > 0 ? Math.min(100, Math.round(received / ordered * 100)) : (p.status === 'completed' ? 100 : 0),
+              statusLabel: this.statusLabel(p.status),
+            };
+          });
+        },
+        compute() {
+          const scoped = db.all('purchase_orders').filter((p) => this.inScope(p));
+          this.rows = utils.sortBy(this.buildRows(scoped.filter((p) => this.range.contains(p.order_date))),
+            (r) => String(r.order_date || '').slice(0, 10) + '|' + String(r.id).padStart(8, '0'), 'desc');
+          const live = this.rows.filter((r) => r.status !== 'cancelled');
+          const allRows = this.buildRows(scoped);                       // tiles below cover every open order, not just this period
+          const open = allRows.filter((r) => r.isOpen);
+          const drafts = allRows.filter((r) => r.status === 'draft');
+          const late = open.filter((r) => r.overdue);
+          this.k = {
+            count: live.length, cancelled: this.rows.length - live.length,
+            value: utils.sum(live, 'total'), units: live.reduce((a, r) => a + r.ordered, 0),
+            openCount: open.length, pendingUnits: open.reduce((a, r) => a + r.pendingUnits, 0), pendingValue: utils.sum(open, 'pendingValue'),
+            overdue: late.length, overdueValue: utils.sum(late, 'pendingValue'),
+            drafts: drafts.length, draftValue: utils.sum(drafts, 'total'),
+          };
+        },
+        get hasFilters() { return !!(this.q || this.f.supplier || this.f.status || this.f.overdue); },
+        clearFilters() { this.q = ''; this.f.supplier = ''; this.f.status = ''; this.f.overdue = false; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((r) => {
+            if (this.f.supplier && String(r.supplier_id) !== String(this.f.supplier)) return false;
+            if (this.f.status === 'open') { if (!r.isOpen) return false; }
+            else if (this.f.status && r.status !== this.f.status) return false;
+            if (this.f.overdue && !r.overdue) return false;
+            if (q && ![r.po_no, r.supplierName, r.notes, r.terms].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotals() {
+          const live = this.filtered.filter((r) => r.status !== 'cancelled');
+          return {
+            lines: live.reduce((a, r) => a + r.lines, 0), ordered: live.reduce((a, r) => a + r.ordered, 0),
+            received: live.reduce((a, r) => a + r.received, 0), total: utils.sum(live, 'total'), pendingValue: utils.sum(live, 'pendingValue'),
+          };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'PO No', key: 'po_no' }, { label: 'Order Date', key: 'order_date' }, { label: 'Expected', key: 'expected_date' },
+            { label: 'Supplier', key: 'supplierName' }, { label: 'Branch', key: 'branchCode' }, { label: 'Lines', key: 'lines' },
+            { label: 'Units Ordered', key: 'ordered' }, { label: 'Units Received', key: 'received' }, { label: 'Units Pending', key: 'pendingUnits' },
+            { label: 'Total', key: 'total' }, { label: 'Pending Value', key: 'pendingValue' },
+            { label: 'Status', value: (r) => r.statusLabel }, { label: 'Overdue', value: (r) => (r.overdue ? r.daysLate + ' days' : '') },
+            { label: 'Terms', key: 'terms' }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('purchase-orders-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' order' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+      };
+    }
+  </script>
+</body>
+</html>

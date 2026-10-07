@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>tmp check</title>
+<script defer src="../assets/js/data.js"></script>
+<script defer src="../assets/js/app.js"></script>
+</head><body data-public><pre id="out">…</pre>
+<script>
+setTimeout(function () {
+  var db = ABM.db, utils = ABM.utils;
+  db.reset();
+  var hits = db.all('sales').filter(function (s) {
+    var items = db.where('sale_items', { sale_id: s.id });
+    var line = utils.sum(items, 'discount_amount');
+    return s.status !== 'void' && line > 0 && Number(s.discount_amount) > line;
+  });
+  var b1 = hits.filter(function (s) { return s.branch_id == 1; });
+  console.log('DRIVE pristine sales with both discount kinds: total=' + hits.length + ' branch1=' + b1.length + ' -> ' + b1.slice(0, 4).map(function (s) { return s.invoice_no; }).join(','));
+  document.getElementById('out').textContent = 'total=' + hits.length + ' branch1=' + b1.length;
+}, 800);
+</script></body></html>

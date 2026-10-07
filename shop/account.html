@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="../assets/img/logo.png">
+  <link rel="alternate icon" href="../assets/img/logo.svg">
+  <title>My account · Abbott Mobiles</title>
+  <meta name="description" content="Your Abbott Mobile account: orders, tracking, invoices, repairs and profile.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="../assets/js/tailwind-config.js?v=1.8.0"></script>
+  <link rel="stylesheet" href="../assets/css/app.css?v=1.8.0">
+  <link rel="stylesheet" href="../assets/css/shop.css?v=1.8.0">
+  <script defer src="../assets/js/data.js?v=1.8.0"></script>
+  <script defer src="../assets/js/app.js?v=1.8.0"></script>
+  <script defer src="../assets/js/shop.js?v=1.8.0"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="min-h-full flex flex-col" data-public data-page="shop-account">
+
+  <div data-shop-header></div>
+
+  <main class="flex-1" x-data="shopAccount()">
+    <template x-if="user">
+      <div class="shop-container py-8 sm:py-10">
+
+        <!-- heading -->
+        <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
+          <div class="min-w-0">
+            <div class="shop-eyebrow">My account</div>
+            <h1 class="shop-h2" x-text="'Hello, ' + user.name.split(' ')[0]"></h1>
+            <p class="shop-muted text-sm" x-text="user.email + ' · ' + user.phone"></p>
+          </div>
+          <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" data-shop-logout>
+            <span x-html="SHOP.icon('logout','')"></span>Sign out
+          </button>
+        </div>
+
+        <div class="shop-acct-grid">
+          <!-- nav -->
+          <nav class="shop-acct-nav" aria-label="Account sections">
+            <template x-for="t in tabs" :key="t.key">
+              <button type="button" class="shop-acct-tab" :class="tab === t.key && 'is-on'" @click="go(t.key)">
+                <span x-html="SHOP.icon(t.icon,'')"></span>
+                <span x-text="t.label"></span>
+                <span class="ml-auto text-xs opacity-70" x-show="t.count" x-cloak x-text="t.count"></span>
+              </button>
+            </template>
+          </nav>
+
+          <div class="min-w-0">
+
+            <!-- ============================================== OVERVIEW -->
+            <div x-show="tab === 'overview'" x-cloak class="space-y-4">
+              <div class="shop-kv">
+                <div class="shop-kv-item"><div class="shop-kv-l">Orders</div><div class="shop-kv-v" x-text="orders.length"></div></div>
+                <div class="shop-kv-item"><div class="shop-kv-l">In progress</div><div class="shop-kv-v" x-text="openOrders.length"></div></div>
+                <div class="shop-kv-item"><div class="shop-kv-l">Total spent</div><div class="shop-kv-v" x-text="$money(spent,{decimals:0})"></div></div>
+                <div class="shop-kv-item"><div class="shop-kv-l">Repairs</div><div class="shop-kv-v" x-text="repairs.jobs.length + repairs.requests.length"></div></div>
+              </div>
+
+              <div class="shop-card shop-card-pad" x-show="openOrders.length" x-cloak>
+                <div class="flex items-center justify-between gap-3 mb-3">
+                  <h2 class="shop-h3">Latest order</h2>
+                  <a href="#orders" class="shop-link text-sm" @click.prevent="go('orders')">All orders</a>
+                </div>
+                <template x-if="openOrders[0]">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                      <span class="font-bold" x-text="openOrders[0].order_no"></span>
+                      <span class="shop-badge shop-badge-primary" x-text="SHOP.orderStatusLabel(openOrders[0])"></span>
+                      <span class="text-sm text-slate-500" x-text="$date(openOrders[0].created_at)"></span>
+                      <span class="ml-auto font-bold" x-text="$money(openOrders[0].total,{decimals:0})"></span>
+                    </div>
+                    <div class="shop-track">
+                      <template x-for="s in SHOP.orderSteps(openOrders[0])" :key="s.key">
+                        <div class="shop-track-step" :class="[s.done && 'is-done', s.current && 'is-current', s.failed && 'is-failed']">
+                          <span class="shop-track-dot" x-html="SHOP.icon(s.failed ? 'x' : (s.done ? 'check' : 'clock'),'')"></span>
+                          <div class="min-w-0">
+                            <div class="shop-track-title" x-text="s.label"></div>
+                            <div class="shop-track-meta" x-text="s.at ? ABM.utils.datetime(s.at) : s.text"></div>
+                          </div>
+                        </div>
+                      </template>
+                    </div>
+                    <div class="flex flex-wrap gap-2 mt-4">
+                      <button type="button" class="shop-btn shop-btn-sm" @click="open(openOrders[0])">View order</button>
+                      <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" @click="downloadInvoice(openOrders[0])">
+                        <span x-html="SHOP.icon('download','')"></span>Invoice
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+
+              <div class="shop-card shop-card-pad" x-show="!orders.length" x-cloak>
+                <div class="shop-empty">
+                  <span x-html="SHOP.icon('bag','')"></span>
+                  <div class="shop-empty-title">No orders yet</div>
+                  <p class="text-sm mt-1">When you place an order it will appear here with live tracking.</p>
+                  <a href="products.html" class="shop-btn mt-4">Start shopping</a>
+                </div>
+              </div>
+            </div>
+
+            <!-- ================================================ ORDERS -->
+            <div x-show="tab === 'orders'" x-cloak class="space-y-3">
+              <template x-if="!orders.length">
+                <div class="shop-card shop-card-pad">
+                  <div class="shop-empty">
+                    <span x-html="SHOP.icon('bag','')"></span>
+                    <div class="shop-empty-title">No orders yet</div>
+                    <a href="products.html" class="shop-btn mt-4">Browse the shop</a>
+                  </div>
+                </div>
+              </template>
+
+              <template x-for="o in orders" :key="o.id">
+                <div class="shop-card">
+                  <button type="button" class="w-full text-left p-4 sm:p-5" @click="toggle(o.id)">
+                    <div class="flex flex-wrap items-center gap-2 sm:gap-3 min-w-0">
+                      <span class="font-bold" x-text="o.order_no"></span>
+                      <span class="shop-badge" :class="badgeClass(o)" x-text="SHOP.orderStatusLabel(o)"></span>
+                      <span class="text-sm text-slate-500 hidden sm:inline" x-text="$date(o.created_at)"></span>
+                      <span class="text-sm text-slate-500" x-text="o.items.length + (o.items.length === 1 ? ' item' : ' items')"></span>
+                      <span class="ml-auto font-bold" x-text="$money(o.total,{decimals:0})"></span>
+                      <span class="text-slate-400" x-html="SHOP.icon(expanded === o.id ? 'chevron-up' : 'chevron-down','')"></span>
+                    </div>
+                  </button>
+
+                  <div x-show="expanded === o.id" x-cloak class="border-t border-slate-200/70 p-4 sm:p-5 space-y-5">
+                    <!-- tracking -->
+                    <div>
+                      <div class="shop-label">Tracking</div>
+                      <div class="shop-track mt-2">
+                        <template x-for="s in SHOP.orderSteps(o)" :key="s.key">
+                          <div class="shop-track-step" :class="[s.done && 'is-done', s.current && 'is-current', s.failed && 'is-failed']">
+                            <span class="shop-track-dot" x-html="SHOP.icon(s.failed ? 'x' : (s.done ? 'check' : 'clock'),'')"></span>
+                            <div class="min-w-0">
+                              <div class="shop-track-title" x-text="s.label"></div>
+                              <div class="shop-track-meta" x-text="s.at ? ABM.utils.datetime(s.at) : s.text"></div>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </div>
+
+                    <!-- items -->
+                    <div>
+                      <div class="shop-label">Items</div>
+                      <div class="mt-2 divide-y divide-slate-200/70">
+                        <template x-for="l in o.items" :key="l.product_id + '-' + l.name">
+                          <div class="flex items-center gap-3 py-2 min-w-0">
+                            <div class="min-w-0 flex-1">
+                              <div class="text-sm font-semibold truncate" x-text="l.name"></div>
+                              <div class="text-xs text-slate-500" x-text="l.quantity + ' × ' + $money(l.unit_price,{decimals:0})"></div>
+                            </div>
+                            <div class="text-sm font-bold" x-text="$money(l.total,{decimals:0})"></div>
+                          </div>
+                        </template>
+                      </div>
+                      <div class="mt-3 space-y-1 text-sm">
+                        <div class="flex justify-between"><span class="text-slate-500">Subtotal</span><span x-text="$money(o.subtotal,{decimals:0})"></span></div>
+                        <div class="flex justify-between"><span class="text-slate-500">Delivery</span><span x-text="o.delivery_fee ? $money(o.delivery_fee,{decimals:0}) : 'Free'"></span></div>
+                        <div class="flex justify-between font-bold text-base pt-1 border-t border-slate-200/70"><span>Total</span><span x-text="$money(o.total,{decimals:0})"></span></div>
+                      </div>
+                    </div>
+
+                    <!-- delivery + payment -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <div class="shop-label">Delivering to</div>
+                        <div class="text-slate-600" x-text="o.customer.name"></div>
+                        <div class="text-slate-500" x-text="o.customer.address"></div>
+                        <div class="text-slate-500" x-text="o.customer.city"></div>
+                      </div>
+                      <div>
+                        <div class="shop-label">Payment</div>
+                        <div class="text-slate-600" x-text="SHOP.paymentLabel(o.payment_method)"></div>
+                        <span class="shop-badge mt-1" :class="o.payment_status === 'paid' ? 'shop-badge-accent' : 'shop-badge-warn'"
+                              x-text="o.payment_status === 'paid' ? 'Paid' : (o.payment_method === 'cod' ? 'Pay on delivery' : 'Awaiting payment')"></span>
+                      </div>
+                    </div>
+
+                    <!-- invoice actions -->
+                    <div class="flex flex-wrap gap-2 pt-1">
+                      <button type="button" class="shop-btn shop-btn-sm" @click="viewInvoice(o)">
+                        <span x-html="SHOP.icon('document','')"></span>View invoice
+                      </button>
+                      <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" @click="downloadInvoice(o)">
+                        <span x-html="SHOP.icon('download','')"></span>Download
+                      </button>
+                      <button type="button" class="shop-btn shop-btn-outline shop-btn-sm" @click="emailInvoice(o)">
+                        <span x-html="SHOP.icon('mail','')"></span>Email it to me
+                      </button>
+                      <a :href="SHOP.trackUrl(o)" class="shop-btn shop-btn-ghost shop-btn-sm">Public tracking link</a>
+                    </div>
+                    <p class="text-xs text-slate-500" x-show="emailNote[o.id]" x-cloak x-text="emailNote[o.id]"></p>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- =============================================== REPAIRS -->
+            <div x-show="tab === 'repairs'" x-cloak class="space-y-3">
+              <template x-if="!repairs.jobs.length && !repairs.requests.length">
+                <div class="shop-card shop-card-pad">
+                  <div class="shop-empty">
+                    <span x-html="SHOP.icon('wrench','')"></span>
+                    <div class="shop-empty-title">No repairs yet</div>
+                    <p class="text-sm mt-1">Book a repair and follow it here from diagnosis to collection.</p>
+                    <a href="repair.html" class="shop-btn mt-4">Book a repair</a>
+                  </div>
+                </div>
+              </template>
+              <template x-for="j in repairs.jobs" :key="'j'+j.id">
+                <div class="shop-card shop-card-pad">
+                  <div class="flex flex-wrap items-center gap-2 min-w-0">
+                    <span class="font-bold" x-text="j.job_no"></span>
+                    <span class="shop-badge shop-badge-primary" x-text="ABM.ui.statusLabel(j.status)"></span>
+                    <span class="ml-auto text-sm font-bold" x-text="$money(j.total,{decimals:0})"></span>
+                  </div>
+                  <div class="text-sm text-slate-600 mt-1" x-text="j.brand + ' ' + j.model"></div>
+                  <div class="text-xs text-slate-500" x-text="j.problem_description"></div>
+                  <div class="text-xs text-slate-500 mt-2" x-text="'Received ' + $date(j.received_at) + (j.promised_at ? ' · promised ' + $date(j.promised_at) : '')"></div>
+                </div>
+              </template>
+              <template x-for="r in repairs.requests" :key="'r'+r.id">
+                <div class="shop-card shop-card-pad">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-bold" x-text="r.request_no || ('Request #' + r.id)"></span>
+                    <span class="shop-badge shop-badge-warn" x-text="ABM.utils.titleCase(r.status)"></span>
+                  </div>
+                  <div class="text-sm text-slate-600 mt-1" x-text="(r.brand || '') + ' ' + (r.model || '')"></div>
+                  <div class="text-xs text-slate-500" x-text="r.problem"></div>
+                </div>
+              </template>
+            </div>
+
+            <!-- ============================================== PROFILE -->
+            <div x-show="tab === 'profile'" x-cloak class="space-y-4">
+              <div class="shop-card shop-card-pad">
+                <h2 class="shop-h3">Your details</h2>
+                <div class="shop-error mt-3" x-show="profileError" x-cloak>
+                  <span x-html="SHOP.icon('x-circle','')"></span><span x-text="profileError"></span>
+                </div>
+                <form class="mt-4 space-y-4" @submit.prevent="saveProfile()" novalidate>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><label class="shop-label">Full name</label><input type="text" class="shop-input" x-model.trim="profile.name"></div>
+                    <div><label class="shop-label">Mobile number</label><input type="tel" class="shop-input" x-model.trim="profile.phone"></div>
+                  </div>
+                  <div><label class="shop-label">Email address</label><input type="email" class="shop-input" x-model.trim="profile.email"></div>
+                  <div><label class="shop-label">Delivery address</label><input type="text" class="shop-input" x-model.trim="profile.address"></div>
+                  <div><label class="shop-label">City</label><input type="text" class="shop-input" x-model.trim="profile.city"></div>
+                  <button type="submit" class="shop-btn" :disabled="savingProfile">Save changes</button>
+                </form>
+              </div>
+
+              <div class="shop-card shop-card-pad">
+                <h2 class="shop-h3">Change password</h2>
+                <div class="shop-error mt-3" x-show="pwError" x-cloak>
+                  <span x-html="SHOP.icon('x-circle','')"></span><span x-text="pwError"></span>
+                </div>
+                <form class="mt-4 space-y-4" @submit.prevent="savePassword()" novalidate>
+                  <div><label class="shop-label">Current password</label><input type="password" class="shop-input" x-model="pw.current" autocomplete="current-password"></div>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><label class="shop-label">New password</label><input type="password" class="shop-input" x-model="pw.next" autocomplete="new-password"></div>
+                    <div><label class="shop-label">Confirm new password</label><input type="password" class="shop-input" x-model="pw.confirm" autocomplete="new-password"></div>
+                  </div>
+                  <button type="submit" class="shop-btn shop-btn-outline">Update password</button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+
+  <div data-shop-footer class="mt-auto"></div>
+
+  <script>
+    function shopAccount() {
+      const { utils } = ABM;
+      return {
+        user: null, orders: [], repairs: { jobs: [], requests: [] }, spent: 0,
+        tab: 'overview', expanded: null, emailNote: {},
+        profile: { name: '', email: '', phone: '', address: '', city: '' }, profileError: '', savingProfile: false,
+        pw: { current: '', next: '', confirm: '' }, pwError: '',
+
+        init() {
+          if (!SHOP.auth.require()) return;
+          this.load();
+          const hash = (location.hash || '').replace('#', '');
+          if (['overview', 'orders', 'repairs', 'profile'].includes(hash)) this.tab = hash;
+          const focus = utils.qs('order');
+          if (focus) { this.tab = 'orders'; const o = this.orders.find((x) => x.order_no === focus || String(x.id) === focus); if (o) this.expanded = o.id; }
+        },
+        load() {
+          this.user = SHOP.auth.user();
+          this.orders = SHOP.auth.orders();
+          this.repairs = SHOP.auth.repairs();
+          this.spent = utils.sum(this.orders.filter((o) => o.status !== 'cancelled'), 'total');
+          this.profile = {
+            name: this.user.name || '', email: this.user.email || '', phone: this.user.phone || '',
+            address: this.user.address || '', city: this.user.city || '',
+          };
+        },
+        /** Orders still on the way; if everything has arrived, show the most recent one. */
+        get openOrders() {
+          const live = this.orders.filter((o) => !['delivered', 'cancelled'].includes(o.status));
+          return live.length ? live : this.orders.slice(0, 1);
+        },
+        get tabs() {
+          return [
+            { key: 'overview', label: 'Overview', icon: 'home', count: 0 },
+            { key: 'orders', label: 'My orders', icon: 'bag', count: this.orders.length },
+            { key: 'repairs', label: 'Repairs', icon: 'wrench', count: this.repairs.jobs.length + this.repairs.requests.length },
+            { key: 'profile', label: 'Profile', icon: 'user', count: 0 },
+          ];
+        },
+        go(key) { this.tab = key; try { history.replaceState(null, '', '#' + key); } catch (e) { /* ignore */ } },
+        toggle(id) { this.expanded = this.expanded === id ? null : id; },
+        open(o) { this.tab = 'orders'; this.expanded = o.id; this.go('orders'); },
+        badgeClass(o) {
+          if (o.status === 'cancelled') return 'shop-badge-danger';
+          if (o.status === 'delivered') return 'shop-badge-accent';
+          return 'shop-badge-primary';
+        },
+        viewInvoice(o) { window.open('invoice.html?no=' + encodeURIComponent(o.order_no) + '&phone=' + encodeURIComponent(o.customer.phone || ''), '_blank'); },
+        downloadInvoice(o) { SHOP.downloadInvoice(o); SHOP.toast('Invoice downloaded.'); },
+        emailInvoice(o) {
+          try {
+            const row = SHOP.emailInvoice(o, o.customer.email || this.user.email);
+            this.emailNote[o.id] = 'Invoice sent to ' + row.to + ' at ' + utils.time(row.created_at) + '.';
+            SHOP.toast('Invoice emailed to ' + row.to);
+          } catch (e) { SHOP.toast(e.message, 'error'); }
+        },
+        saveProfile() {
+          this.profileError = ''; this.savingProfile = true;
+          try { SHOP.auth.updateProfile(this.profile); this.load(); SHOP.toast('Your details were saved.'); }
+          catch (e) { this.profileError = e.message; }
+          finally { this.savingProfile = false; }
+        },
+        savePassword() {
+          this.pwError = '';
+          try {
+            SHOP.auth.changePassword(this.pw.current, this.pw.next, this.pw.confirm);
+            this.pw = { current: '', next: '', confirm: '' };
+            SHOP.toast('Password updated.');
+          } catch (e) { this.pwError = e.message; }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

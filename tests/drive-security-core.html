@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: security core</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Proves the sign-in core: demo password, wrong-password counting and lockout, unlock, stored passwords,
+    // deactivated users / branches signed out, "keep me signed in", document prefixes, demo mode.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m, x) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m + (x !== undefined ? '  [' + x + ']' : '')); };
+
+    function main() {
+      const { db, session, shell } = ABM;
+      db.reset();
+      session.logout();
+
+      log('=== 1. passwords');
+      ok(session.authenticate('manager', 'demo1234').ok, '1: a seeded account opens with the demo password');
+      session.logout();
+      const bad = session.authenticate('manager', 'nope');
+      ok(!bad.ok && /not correct/.test(bad.error), '1: a wrong password is refused', bad.error);
+      ok(!session.check(), '1: and nobody is signed in');
+      ok(!session.authenticate('ghost', 'x').ok, '1: an unknown username is refused');
+      ok(db.all('audit_logs').some((a) => a.action === 'login.failed'), '1: failures are audited');
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.setPassword(mgr.id, 'NewPass#2026');
+      ok(!session.authenticate('manager', 'demo1234').ok, '1: after a password is set the demo password stops working');
+      ok(session.authenticate('manager', 'NewPass#2026').ok, '1: and the new one works');
+      session.logout();
+      let err = ''; try { session.setPassword(mgr.id, 'short'); } catch (e) { err = e.message; }
+      ok(/8 characters/.test(err), '1: short passwords are refused', err);
+
+      log('=== 2. lockout');
+      for (let i = 0; i < 5; i++) session.authenticate('cashier', 'wrong' + i);
+      const locked = session.authenticate('cashier', 'demo1234');
+      ok(!locked.ok && /locked/.test(locked.error), '2: five wrong passwords lock the account, even for the right password', locked.error);
+      ok(db.all('audit_logs').some((a) => a.action === 'login.locked'), '2: the lock is audited');
+      const cashier = db.all('users').find((u) => u.username === 'cashier');
+      session.unlock(cashier.id);
+      ok(session.authenticate('cashier', 'demo1234').ok, '2: after unlock the account opens again');
+
+      log('=== 3. deactivated users and branches');
+      ok(session.check(), '3: the cashier is signed in');
+      db.update('users', cashier.id, { is_active: 0 });
+      ok(!session.check(), '3: deactivating the user signs them out on the next check');
+      db.update('users', cashier.id, { is_active: 1 });
+      session.authenticate('cashier', 'demo1234');
+      db.update('branches', cashier.branch_id, { is_active: 0 });
+      ok(!session.check(), '3: deactivating their branch signs its staff out');
+      ok(/deactivated/.test(session.authenticate('cashier', 'demo1234').error || ''), '3: and they cannot sign back in');
+      db.update('branches', cashier.branch_id, { is_active: 1 });
+
+      log('=== 4. keep me signed in');
+      session.authenticate('cashier', 'demo1234', { remember: false });
+      ok(!localStorage.getItem('abm.session.v1') && !!sessionStorage.getItem('abm.session.v1'), '4: without "keep me signed in" the session is not stored on the device');
+      session.logout();
+      session.authenticate('cashier', 'demo1234');
+      ok(!!localStorage.getItem('abm.session.v1'), '4: with it, it is');
+
+      log('=== 5. document prefixes and demo mode');
+      const before = db.nextNumber('PUR', 'MB');
+      db.setSetting('doc_prefixes', { PUR: 'GRN' });
+      const after = db.nextNumber('PUR', 'MB');
+      ok(/^PUR-MB-/.test(before) && /^GRN-MB-\d+$/.test(after), '5: a renamed prefix is used for new numbers', before + ' → ' + after);
+      ok(shell.demoMode(), '5: demo mode is on in the demo');
+      db.setSetting('demo_mode', 0);
+      ok(!shell.demoMode(), '5: and can be switched off');
+    }
+
+    setTimeout(() => {
+      try { main(); } catch (e) { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }
+      L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+      document.getElementById('out').textContent = L.join('\n');
+      L.forEach((l) => console.log('DRIVE ' + l));
+    }, 500);
+  </script>
+</body>
+</html>

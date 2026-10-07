@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Job Card · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <style>
+    .kv { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .25rem .75rem; font-size: .875rem; }
+    .kv dt { color: rgb(var(--slate-500)); }
+    .kv dd { color: rgb(var(--slate-800)); min-width: 0; overflow-wrap: anywhere; }
+    @media (max-width: 480px) { .kv { grid-template-columns: 5.5rem minmax(0, 1fr); } }
+    /* printable documents */
+    .doc { background: #fff; color: #0f172a; margin: 0 auto; }
+    .doc-thermal { width: 80mm; max-width: 100%; padding: 4mm; font-size: 11.5px; line-height: 1.35; font-family: 'Inter', ui-sans-serif, system-ui, sans-serif; }
+    .doc-a4 { width: 100%; max-width: 190mm; padding: 10mm; font-size: 13px; line-height: 1.45; }
+    .doc .hr { border-top: 1px dashed #94a3b8; margin: .45rem 0; }
+    .doc-a4 .hr { border-top: 1px solid #cbd5e1; margin: .75rem 0; }
+    /* Printed paper is always white — never use slate utilities inside .doc (they invert in dark mode). */
+    .doc .muted { color: #475569; }
+    .doc .dim { color: #64748b; }
+    .doc .sig { border-top: 1px solid #94a3b8; }
+    .doc table { width: 100%; border-collapse: collapse; }
+    .doc th, .doc td { padding: .15rem 0; vertical-align: top; }
+    .doc-thermal th + th, .doc-thermal td + td { padding-left: .5rem; }
+    .doc-a4 th, .doc-a4 td { padding: .35rem .5rem; border-bottom: 1px solid #e2e8f0; }
+    .doc-a4 thead th { background: #f1f5f9; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: #475569; text-align: left; }
+    .doc .r { text-align: right; white-space: nowrap; }
+    .doc .qr { width: 22mm; height: 22mm; border: 2px dashed #94a3b8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; padding: 2px; font-size: 9px; line-height: 1.25; color: #64748b; margin: .5rem auto; text-align: center; overflow-wrap: anywhere; }
+    .doc-a4 .qr { margin: 0; }
+    @media print {
+      .page-content, .no-print { display: none !important; }
+      .print-modal { display: block !important; position: static !important; background: none !important; backdrop-filter: none !important; padding: 0 !important; }
+      .print-modal .modal-panel { max-width: none !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; border: 0 !important; border-radius: 0 !important; width: auto !important; animation: none !important; background: #fff !important; }
+      .print-modal .modal-header, .print-modal .modal-footer { display: none !important; }
+      .print-modal .modal-body { padding: 0 !important; background: #fff !important; }
+      .doc { box-shadow: none !important; }
+      .doc-a4 { max-width: none; padding: 0; }
+    }
+  </style>
+</head>
+<body class="h-full bg-slate-100" data-page="repair-view" data-title="Job Card" data-perm="repairs.view">
+  <main x-data="repairViewPage()" @keydown.escape.window="closeModals()">
+    <!-- Not found -->
+    <template x-if="!job">
+      <div class="max-w-lg mx-auto mt-10 card">
+        <div class="card-body text-center py-12">
+          <div class="mx-auto w-14 h-14 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mb-4" x-html="ABM.icon('wrench','w-7 h-7')"></div>
+          <h2 class="text-xl font-bold text-slate-900">Job card not found</h2>
+          <p class="text-sm text-slate-600 mt-2">No repair job matches id <span class="mono" x-text="requestedId || '(none)'"></span><span x-show="scopeBlocked"> at your branch</span>. It may have been deleted.</p>
+          <div class="mt-6 flex justify-center gap-2"><a href="repairs.html" class="btn btn-primary">Back to repair jobs</a><a href="repair-create.html" class="btn btn-secondary" x-show="ABM.session.can('repairs.add')">New job card</a></div>
+        </div>
+      </div>
+    </template>
+
+    <template x-if="job">
+      <div class="page-content">
+        <!-- Header -->
+        <div class="page-header">
+          <div class="min-w-0">
+            <div class="text-xs font-semibold text-slate-500 flex items-center gap-1.5 mb-1"><a href="repairs.html" class="hover:text-navy-700">Repair Jobs</a><span x-html="ABM.icon('chevron-right','w-3 h-3')"></span><span x-text="ABM.db.branchName(job.branch_id)"></span></div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="page-title mono" x-text="job.job_no"></h2>
+              <span x-html="$badge(job.status)"></span>
+              <span x-show="job.priority === 'urgent'" x-html="$badge('urgent')"></span>
+              <span class="badge badge-red badge-dot" x-show="overdue">Overdue</span>
+            </div>
+            <p class="page-subtitle"><span x-text="deviceLabel"></span> · <span x-text="customer.name"></span> · received <span x-text="ABM.utils.datetime(job.received_at)"></span> by <span x-text="ABM.db.userName(job.created_by)"></span></p>
+          </div>
+          <div class="page-actions">
+            <button type="button" class="btn btn-secondary" @click="openPrint('receipt')"><span x-html="ABM.icon('printer')"></span>Job receipt</button>
+            <button type="button" class="btn btn-secondary" x-show="items.length || ['ready','delivered'].includes(job.status)" @click="openPrint('invoice')"><span x-html="ABM.icon('receipt')"></span>Invoice</button>
+            <button type="button" class="btn btn-secondary" x-show="['ready','delivered'].includes(job.status)" @click="openSms()"><span x-html="ABM.icon('chat')"></span>SMS</button>
+            <button type="button" class="btn btn-primary" x-show="canEdit && isOpen" @click="openEdit()"><span x-html="ABM.icon('edit')"></span>Edit details</button>
+          </div>
+        </div>
+
+        <!-- Banners -->
+        <div class="alert alert-danger mb-4" x-show="overdue"><span x-html="ABM.icon('warning')"></span><div><b>Overdue.</b> Promised for <span x-text="ABM.utils.datetime(job.promised_at)"></span> — <span x-text="overdueText"></span>. Update the customer or move the promised date.</div></div>
+        <div class="alert alert-danger mb-4" x-show="job.status === 'cancelled'"><span x-html="ABM.icon('x-circle')"></span><div><b>Cancelled.</b> <span x-text="job.cancel_reason || 'No reason recorded.'"></span></div></div>
+        <div class="alert alert-success mb-4" x-show="job.status === 'delivered'"><span x-html="ABM.icon('check-circle')"></span><div><b>Delivered</b> on <span x-text="ABM.utils.datetime(job.delivered_at)"></span> · warranty <span x-text="job.warranty_days"></span> days<span x-show="warrantyEnd"> until <b x-text="$date(warrantyEnd)"></b></span><span x-show="job.due_amount > 0" class="text-rose-700"> · balance due <b x-text="$money(job.due_amount)"></b></span><span x-show="money.credit > 0" class="text-amber-700"> · <b x-text="$money(money.credit)"></b> moved to khata</span></div></div>
+        <div class="alert alert-warning mb-4" x-show="money.refundable > 0"><span x-html="ABM.icon('banknotes')"></span><div class="flex-1 min-w-0"><b>Refund due to the customer: <span x-text="$money(money.refundable)"></span>.</b> <span x-text="job.status === 'cancelled' ? 'The job was cancelled while money was still held on it.' : 'More has been received than the job costs.'"></span> <button type="button" class="underline font-semibold" x-show="canRefundPerm" @click="openRefund()">Refund now</button></div></div>
+        <div class="alert alert-success mb-4" x-show="job.status === 'ready'"><span x-html="ABM.icon('check-circle')"></span><div><b>Ready for pickup</b> since <span x-text="ABM.utils.datetime(job.completed_at)"></span>. Balance due <b x-text="$money(job.due_amount)"></b>. <button type="button" class="underline font-semibold" @click="openSms()">Preview SMS</button></div></div>
+
+        <!-- Pipeline -->
+        <div class="card mb-4">
+          <div class="card-body !py-3">
+            <div class="pipeline">
+              <template x-for="(s, i) in pipeline" :key="s.key">
+                <div class="contents">
+                  <div class="pipeline-step" :class="s.state"><span class="dot" x-html="s.state === 'done' ? ABM.icon('check','w-3.5 h-3.5') : s.state === 'failed' ? ABM.icon('x','w-3.5 h-3.5') : (i + 1)"></span><span class="hidden sm:inline" x-text="s.label"></span></div>
+                  <div class="pipeline-sep" :class="s.state === 'done' && 'done'" x-show="i < pipeline.length - 1"></div>
+                </div>
+              </template>
+            </div>
+            <div class="sm:hidden mt-2 text-xs text-slate-500">Current: <b x-text="ABM.ui.statusLabel(job.status)"></b></div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <!-- ============================ LEFT ============================ -->
+          <div class="lg:col-span-2 space-y-4 min-w-0">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <!-- Customer -->
+              <div class="card">
+                <div class="card-header !py-3"><div class="card-title">Customer</div><a :href="'customer-view.html?id=' + customer.id" class="text-xs font-semibold text-navy-700 hover:underline" x-show="customer.id">Open profile</a></div>
+                <div class="card-body">
+                  <div class="flex items-start gap-3">
+                    <span class="avatar w-11 h-11 text-sm" x-text="ABM.utils.initials(customer.name)"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-semibold text-slate-900 truncate" x-text="customer.name"></div>
+                      <a :href="'tel:' + customer.phone" class="text-sm text-navy-700 mono hover:underline" x-show="customer.phone" x-text="customer.phone"></a>
+                      <div class="text-xs text-slate-500 mt-0.5" x-show="customer.address" x-text="customer.address"></div>
+                      <div class="text-xs mt-1 flex flex-wrap gap-2">
+                        <span class="badge" :class="customer.balance > 0 ? 'badge-amber' : customer.balance < 0 ? 'badge-purple' : 'badge-slate'" x-text="customer.balance > 0 ? 'Khata ' + $money(customer.balance,{decimals:0}) : customer.balance < 0 ? 'Credit ' + $money(-customer.balance,{decimals:0}) : 'No balance'"></span>
+                        <a :href="'repairs.html?q=' + encodeURIComponent(customer.phone || customer.name) + '&range=all'" class="badge badge-navy hover:underline" x-show="otherJobs > 0" x-text="otherJobs + ' other job' + (otherJobs === 1 ? '' : 's')"></a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Device -->
+              <div class="card">
+                <div class="card-header !py-3"><div class="card-title">Device</div><span x-html="$badge(job.device_type, ABM.db.deviceTypeLabel(job.device_type))"></span></div>
+                <div class="card-body">
+                  <div class="flex items-start gap-3">
+                    <span class="chip chip-slate" x-html="ABM.icon(deviceIcon,'w-5 h-5')"></span>
+                    <div class="min-w-0 flex-1">
+                      <div class="font-semibold text-slate-900" x-text="deviceLabel"></div>
+                      <div class="text-xs text-slate-500" x-show="job.color" x-text="job.color"></div>
+                      <dl class="kv mt-2">
+                        <dt x-text="serialLabel"></dt><dd class="mono" x-text="job.serial || '—'"></dd>
+                        <dt>Password</dt><dd class="flex items-center gap-2"><span class="mono" x-text="job.password_pattern ? (showPass ? job.password_pattern : '••••••') : '— none —'"></span><button type="button" class="btn btn-ghost btn-sm btn-icon" x-show="job.password_pattern" @click="showPass = !showPass" :title="showPass ? 'Hide' : 'Show'" x-html="ABM.icon(showPass ? 'lock' : 'eye','w-4 h-4')"></button></dd>
+                        <dt>Accessories</dt><dd><div class="flex flex-wrap gap-1"><template x-for="a in accessories" :key="a"><span class="badge badge-slate" x-text="a"></span></template></div></dd>
+                        <dt>Condition</dt><dd>
+                          <div class="flex flex-wrap gap-1 mb-1" x-show="job.condition_checklist">
+                            <template x-for="c in checklistBadges" :key="c.label"><span class="badge" :class="c.ok ? 'badge-green' : 'badge-red'" x-text="c.label"></span></template>
+                          </div>
+                          <span x-text="job.condition_notes || '—'"></span>
+                        </dd>
+                      </dl>
+                      <div class="mt-2 text-xs rounded-lg bg-navy-50 border border-navy-200 p-2" x-show="unitInfo">
+                        <span class="font-semibold text-navy-800">Sold by us:</span> <span x-text="unitInfo && unitInfo.label"></span>
+                        <template x-if="unitInfo && unitInfo.sale"><span> · <a :href="'sale-view.html?id=' + unitInfo.sale.id" class="mono font-semibold text-navy-700 hover:underline" x-text="unitInfo.sale.invoice_no"></a> (<span x-text="$date(unitInfo.sale.sale_date)"></span>)</span></template>
+                        <template x-if="unitInfo && unitInfo.warrantyEnd"><span> · <span class="font-semibold" :class="unitInfo.inWarranty ? 'text-emerald-700' : 'text-rose-600'" x-text="(unitInfo.inWarranty ? 'in warranty until ' : 'warranty expired ') + ABM.utils.date(unitInfo.warrantyEnd)"></span></span></template>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Problem & diagnosis -->
+            <div class="card">
+              <div class="card-header !py-3"><div class="card-title">Problem &amp; diagnosis</div><span x-show="job.problem_category" x-html="$badge('slate', ABM.utils.titleCase(job.problem_category || ''))"></span></div>
+              <div class="card-body space-y-4">
+                <div>
+                  <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Reported problem</div>
+                  <p class="text-sm text-slate-800 whitespace-pre-line" x-text="job.problem_description"></p>
+                  <p class="text-xs text-slate-500 mt-1" x-show="job.notes"><b>Internal note:</b> <span x-text="job.notes"></span></p>
+                </div>
+                <div>
+                  <label class="label" for="diag">Technician diagnosis</label>
+                  <template x-if="canEdit && isOpen">
+                    <div>
+                      <textarea id="diag" class="textarea" rows="3" x-model="diagnosis" placeholder="Findings after inspection, root cause, recommended fix…" maxlength="1000"></textarea>
+                      <div class="mt-2 flex items-center justify-between gap-2 flex-wrap"><span class="text-xs text-slate-500" x-text="diagnosis !== (job.diagnosis || '') ? 'Unsaved changes' : (job.diagnosis ? 'Saved' : 'Not recorded yet')"></span><button type="button" class="btn btn-secondary btn-sm" :disabled="diagBusy || diagnosis === (job.diagnosis || '')" @click="saveDiagnosis()"><span x-html="ABM.icon('check','w-4 h-4')"></span>Save diagnosis</button></div>
+                    </div>
+                  </template>
+                  <template x-if="!(canEdit && isOpen)"><p class="text-sm whitespace-pre-line" :class="job.diagnosis ? 'text-slate-800' : 'text-slate-400'" x-text="job.diagnosis || 'No diagnosis recorded yet.'"></p></template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Quote -->
+            <div class="card">
+              <div class="card-header !py-3">
+                <div><div class="card-title">Quote &amp; approval</div><div class="card-subtitle" x-text="job.quoted_at ? 'Quoted ' + ABM.utils.datetime(job.quoted_at) : 'Not sent to the customer yet'"></div></div>
+                <button type="button" class="btn btn-soft btn-sm" x-show="canEdit && isOpen && !['ready'].includes(job.status)" @click="openQuote()"><span x-html="ABM.icon('document','w-4 h-4')"></span><span x-text="job.quoted_at ? 'Re-quote' : 'Send quote'"></span></button>
+              </div>
+              <div class="card-body">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div><div class="text-xs font-bold uppercase tracking-wider text-slate-500">Estimated cost</div><div class="text-xl font-extrabold text-slate-900 mt-0.5 tabular" x-text="job.estimated_cost > 0 ? $money(job.estimated_cost) : '—'"></div></div>
+                  <div><div class="text-xs font-bold uppercase tracking-wider text-slate-500">Customer approval</div>
+                    <div class="mt-1 flex items-center gap-2">
+                      <button type="button" class="switch" :class="job.approved_by_customer && 'on'" role="switch" :aria-checked="job.approved_by_customer ? 'true' : 'false'" :disabled="!(canEdit && isOpen)" @click="toggleApproval()"></button>
+                      <span class="text-sm font-medium" :class="job.approved_by_customer ? 'text-emerald-700' : 'text-slate-500'" x-text="job.approved_by_customer ? 'Approved' : 'Pending'"></span>
+                    </div>
+                  </div>
+                  <div><div class="text-xs font-bold uppercase tracking-wider text-slate-500">Approval note</div><p class="text-sm text-slate-700 mt-1" x-text="job.approval_note || '—'"></p></div>
+                </div>
+                <p class="help mt-3" x-show="job.total > 0 && job.estimated_cost > 0 && Math.abs(job.total - job.estimated_cost) > 0.5">Actual total <b x-text="$money(job.total)"></b> differs from the estimate by <b :class="job.total > job.estimated_cost ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(job.total - job.estimated_cost)"></b> — inform the customer before delivery.</p>
+              </div>
+            </div>
+
+            <!-- Parts & labor -->
+            <div class="card">
+              <div class="card-header !py-3">
+                <div><div class="card-title">Parts &amp; labor</div><div class="card-subtitle"><span x-text="items.length"></span> line<span x-text="items.length === 1 ? '' : 's'"></span> · parts consume stock at <span x-text="ABM.db.branchName(job.branch_id)"></span> when work starts</div></div>
+                <div class="flex items-center gap-1" x-show="canEdit && isOpen">
+                  <button type="button" class="btn btn-secondary btn-sm" data-add-part @click="openPart()"><span x-html="ABM.icon('cube','w-4 h-4')"></span>Add part</button>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="openLabor()"><span x-html="ABM.icon('wrench','w-4 h-4')"></span>Add labor</button>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Item</th><th class="hidden sm:table-cell">Type</th><th class="num">Qty</th><th class="num hidden md:table-cell">Price</th><th class="num">Total</th><th class="actions" x-show="canEdit && isOpen"></th></tr></thead>
+                  <tbody>
+                    <template x-for="l in items" :key="l.id">
+                      <tr>
+                        <td>
+                          <div class="font-medium text-slate-800" x-text="l.description"></div>
+                          <div class="text-[11px] text-slate-500 flex flex-wrap gap-x-2">
+                            <span x-show="l.product_id" x-text="l.product_id ? (ABM.db.product(l.product_id) || {}).sku : ''" class="mono"></span>
+                            <span x-show="l.type === 'part'" :class="l.consumed ? 'text-emerald-700' : 'text-amber-700'" x-text="l.consumed ? 'Consumed from stock' : 'Not yet consumed · in stock ' + stockOf(l.product_id)"></span>
+                          </div>
+                        </td>
+                        <td class="hidden sm:table-cell"><span x-html="$badge(l.type === 'part' ? 'part' : 'service', l.type === 'part' ? 'Part' : 'Labor')"></span></td>
+                        <td class="num" x-text="l.quantity"></td>
+                        <td class="num hidden md:table-cell" x-text="$money(l.unit_price)"></td>
+                        <td class="num font-semibold" x-text="$money(l.total)"></td>
+                        <td class="actions" x-show="canEdit && isOpen">
+                          <div class="inline-flex items-center gap-0.5">
+                            <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit line" @click="openEditLine(l)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                            <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove line" @click="removeLine(l)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
+                    <template x-if="!items.length">
+                      <tr><td colspan="6"><div class="empty py-8"><span x-html="ABM.icon('cube')"></span><div class="empty-title">No parts or labor yet</div><div class="text-sm mt-1" x-text="canEdit && isOpen ? 'Add the spare parts and labor charges once the diagnosis is done.' : 'Lines appear here once the technician adds them.'"></div></div></td></tr>
+                    </template>
+                  </tbody>
+                  <tfoot x-show="items.length">
+                    <tr><td colspan="4" class="hidden md:table-cell text-right text-slate-500 font-medium">Parts</td><td colspan="3" class="md:hidden text-right text-slate-500 font-medium">Parts</td><td class="num" x-text="$money(job.total_parts)"></td><td x-show="canEdit && isOpen"></td></tr>
+                    <tr><td colspan="4" class="hidden md:table-cell text-right text-slate-500 font-medium">Labor</td><td colspan="3" class="md:hidden text-right text-slate-500 font-medium">Labor</td><td class="num" x-text="$money(job.total_labor)"></td><td x-show="canEdit && isOpen"></td></tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            <!-- Payments -->
+            <div class="card">
+              <div class="card-header !py-3">
+                <div class="min-w-0"><div class="card-title">Payments</div><div class="card-subtitle">Paid <b class="text-emerald-700" x-text="$money(job.paid_amount)"></b><span x-show="money.refunded > 0"> net of <span x-text="$money(money.refunded)"></span> refunded</span> · due <b :class="job.due_amount > 0 ? 'text-rose-600' : 'text-slate-700'" x-text="$money(job.due_amount)"></b><span x-show="money.credit > 0"> · <b class="text-amber-700" x-text="$money(money.credit)"></b> on khata</span></div></div>
+                <div class="flex flex-wrap items-center justify-end gap-1">
+                  <button type="button" class="btn btn-danger-soft btn-sm" x-show="canRefund" @click="openRefund()"><span x-html="ABM.icon('return','w-4 h-4')"></span>Refund</button>
+                  <button type="button" class="btn btn-money btn-sm" x-show="canAddPayment" @click="openPayment()"><span x-html="ABM.icon('banknotes','w-4 h-4')"></span>Add payment</button>
+                </div>
+              </div>
+              <div class="card-body !pb-0" x-show="money.credit > 0">
+                <div class="alert alert-warning"><span x-html="ABM.icon('users')"></span><div><b x-text="$money(money.credit)"></b> moved to <span x-text="customer.name"></span>'s khata<span x-show="job.credit_at"> on <span x-text="$date(job.credit_at)"></span></span>. Collect it from the customer's account, not here. <a :href="'customer-view.html?id=' + customer.id" class="underline font-semibold" x-show="customer.id">Open khata</a></div></div>
+              </div>
+              <div class="table-wrap">
+                <table class="table">
+                  <thead><tr><th>Date</th><th>Kind</th><th>Method</th><th class="hidden md:table-cell">Reference</th><th class="hidden sm:table-cell">By</th><th class="num">Amount</th><th class="actions" x-show="canVoid"><span class="sr-only">Void</span></th></tr></thead>
+                  <tbody>
+                    <template x-for="p in payments" :key="p.id">
+                      <tr :class="p.voided_by_id && 'opacity-70'">
+                        <td class="whitespace-nowrap"><div x-text="$date(p.created_at)"></div><div class="text-xs text-slate-400" x-text="ABM.utils.time(p.created_at)"></div></td>
+                        <td>
+                          <span x-html="kindBadge(p)"></span>
+                          <div class="text-[11px] text-slate-500 max-w-[12rem] truncate" x-show="p.kind === 'refund' && p.notes" :title="p.notes" x-text="p.notes"></div>
+                          <div class="text-[11px] text-slate-500 max-w-[12rem] truncate" x-show="p.voided_by_id" :title="p.void_reason" x-text="'Voided' + (p.void_reason ? ': ' + p.void_reason : '')"></div>
+                        </td>
+                        <td><span x-html="$badge(p.method)"></span><div class="text-[11px] text-slate-500 max-w-[9rem] truncate" x-show="p.account_id" x-text="accountName(p.account_id)"></div></td>
+                        <td class="hidden md:table-cell mono text-xs" x-text="p.reference || '—'"></td>
+                        <td class="hidden sm:table-cell text-slate-600" x-text="ABM.db.userName(p.created_by)"></td>
+                        <td class="num font-semibold whitespace-nowrap" :class="p.kind === 'refund' ? 'text-rose-600' : (p.voided_by_id ? 'line-through text-slate-400' : '')" x-text="(p.kind === 'refund' ? '− ' : '') + $money(p.amount)"></td>
+                        <td class="actions" x-show="canVoid"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Void this payment (records a reversal)" x-show="voidable(p)" @click="openVoid(p)" x-html="ABM.icon('x-circle','w-4 h-4')"></button></td>
+                      </tr>
+                    </template>
+                    <template x-if="!payments.length"><tr><td colspan="7" class="empty py-6 text-sm">No payments recorded.</td></tr></template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- ============================ RIGHT ============================ -->
+          <div class="space-y-4 min-w-0">
+            <!-- Actions -->
+            <div class="card">
+              <div class="card-header !py-3"><div class="card-title">Actions</div><span x-html="$badge(job.status)"></span></div>
+              <div class="card-body space-y-2">
+                <template x-for="a in actions" :key="a.key">
+                  <button type="button" class="btn btn-block justify-start" :class="a.cls" @click="runAction(a)"><span x-html="ABM.icon(a.icon)"></span><span class="flex-1 text-left" x-text="a.label"></span><span class="text-xs opacity-70" x-show="a.hint" x-text="a.hint"></span></button>
+                </template>
+                <template x-if="!actions.length && isOpen"><p class="text-sm text-slate-500" x-text="bench ? 'This job is assigned to another technician.' : 'No actions available for your role at this stage.'"></p></template>
+                <template x-if="!isOpen"><p class="text-sm text-slate-500" x-text="job.status === 'delivered' ? 'This job is complete. Print the invoice or add a payment for any balance.' : 'This job was cancelled.'"></p></template>
+                <button type="button" class="btn btn-block btn-secondary justify-start" x-show="canRefund" @click="openRefund()"><span x-html="ABM.icon('return')"></span><span class="flex-1 text-left">Refund customer</span><span class="text-xs opacity-70" x-text="$money(money.refundable,{decimals:0})"></span></button>
+                <button type="button" class="btn btn-block btn-danger-soft justify-start mt-2" x-show="canCancel && isOpen" @click="openCancel()"><span x-html="ABM.icon('x-circle')"></span><span class="flex-1 text-left">Cancel job</span></button>
+              </div>
+            </div>
+
+            <!-- Totals -->
+            <div class="card">
+              <div class="card-header !py-3"><div class="card-title">Totals</div><span class="text-xs text-slate-500" x-show="job.estimated_cost > 0">Estimate <b x-text="$money(job.estimated_cost,{decimals:0})"></b></span></div>
+              <div class="card-body">
+                <dl class="space-y-2 text-sm">
+                  <div class="flex justify-between gap-3"><dt class="text-slate-500">Parts</dt><dd class="tabular font-medium" x-text="$money(job.total_parts)"></dd></div>
+                  <div class="flex justify-between gap-3"><dt class="text-slate-500">Labor</dt><dd class="tabular font-medium" x-text="$money(job.total_labor)"></dd></div>
+                  <div class="flex justify-between gap-3 items-center"><dt class="text-slate-500">Discount</dt>
+                    <dd class="tabular font-medium">
+                      <template x-if="canEdit && isOpen"><div class="flex items-center gap-1"><input type="number" min="0" step="1" class="input input-sm input-money w-24" x-model.number="discountInput" aria-label="Discount"><button type="button" class="btn btn-secondary btn-sm btn-icon" title="Save discount" x-show="Number(discountInput) !== Number(job.discount)" @click="saveDiscount()" x-html="ABM.icon('check','w-4 h-4')"></button></div></template>
+                      <template x-if="!(canEdit && isOpen)"><span x-text="job.discount ? '- ' + $money(job.discount) : '—'"></span></template>
+                    </dd>
+                  </div>
+                  <div class="divider"></div>
+                  <div class="flex justify-between gap-3"><dt class="font-bold text-slate-900">Total</dt><dd class="tabular font-extrabold text-lg text-slate-900" x-text="$money(job.total)"></dd></div>
+                  <div class="flex justify-between gap-3" x-show="money.refunded > 0"><dt class="text-slate-500">Received</dt><dd class="tabular font-medium" x-text="$money(money.received)"></dd></div>
+                  <div class="flex justify-between gap-3" x-show="money.refunded > 0"><dt class="text-slate-500">Refunded / voided</dt><dd class="tabular font-medium text-rose-600" x-text="'− ' + $money(money.refunded)"></dd></div>
+                  <div class="flex justify-between gap-3"><dt class="text-slate-500" x-text="money.refunded > 0 ? 'Paid (net)' : 'Paid'"></dt><dd class="tabular font-medium text-emerald-700" x-text="$money(job.paid_amount)"></dd></div>
+                  <div class="flex justify-between gap-3" x-show="money.credit > 0"><dt class="text-slate-500">Moved to khata</dt><dd class="tabular font-medium text-amber-700" x-text="$money(money.credit)"></dd></div>
+                  <div class="flex justify-between gap-3"><dt class="text-slate-500">Due</dt><dd class="tabular font-bold" :class="job.due_amount > 0 ? 'text-rose-600' : 'text-slate-800'" x-text="$money(job.due_amount)"></dd></div>
+                  <p class="text-xs text-amber-700 font-medium" x-show="money.refundable > 0"><span x-text="job.status === 'cancelled' ? 'Held on a cancelled job: ' : 'Customer overpaid by '"></span><span x-text="$money(money.refundable)"></span><span x-show="canRefundPerm"> — <button type="button" class="underline font-semibold" @click="openRefund()">refund it</button></span>.</p>
+                  <p class="text-xs text-slate-500" x-show="!items.length">Total is calculated from parts &amp; labor lines; the advance is held against it.</p>
+                </dl>
+              </div>
+            </div>
+
+            <!-- Technician -->
+            <div class="card">
+              <div class="card-header !py-3"><div class="card-title">Technician</div><button type="button" class="btn btn-ghost btn-sm" x-show="canAssign && isOpen" @click="openAssign()"><span x-html="ABM.icon('user','w-4 h-4')"></span><span x-text="job.technician_id ? 'Reassign' : 'Assign'"></span></button></div>
+              <div class="card-body">
+                <template x-if="job.technician_id"><div class="flex items-center gap-3"><span class="avatar w-10 h-10 text-sm" x-text="ABM.utils.initials(ABM.db.userName(job.technician_id))"></span><div class="min-w-0"><div class="font-semibold text-slate-900 truncate" x-text="ABM.db.userName(job.technician_id)"></div><div class="text-xs text-slate-500 truncate" x-text="(ABM.db.find('users', job.technician_id) || {}).specialties || 'Technician'"></div></div></div></template>
+                <template x-if="!job.technician_id"><div class="flex items-center gap-3 text-sm text-slate-500"><span class="w-10 h-10 rounded-full border border-dashed border-slate-300 flex items-center justify-center text-slate-400" x-html="ABM.icon('user')"></span><div>Unassigned<span x-show="role === 'technician' && isOpen"> — <button type="button" class="font-semibold text-navy-700 hover:underline" @click="assignSelf()">take this job</button></span></div></div></template>
+                <dl class="kv mt-3">
+                  <dt>Promised</dt><dd :class="overdue && 'text-rose-600 font-semibold'" x-text="ABM.utils.datetime(job.promised_at)"></dd>
+                  <dt>Warranty</dt><dd x-text="job.warranty_days + ' days' + (warrantyEnd ? ' · until ' + ABM.utils.date(warrantyEnd) : '')"></dd>
+                  <dt>Completed</dt><dd x-text="job.completed_at ? ABM.utils.datetime(job.completed_at) : '—'"></dd>
+                </dl>
+              </div>
+            </div>
+
+            <!-- Timeline -->
+            <div class="card">
+              <div class="card-header !py-3"><div class="card-title">Timeline</div><span class="text-xs text-slate-500" x-text="log.length + ' entries'"></span></div>
+              <div class="card-body">
+                <div class="timeline">
+                  <template x-for="(e, i) in log" :key="e.id">
+                    <div class="timeline-item" :class="i > 0 && 'done'">
+                      <div class="flex flex-wrap items-center gap-2"><span x-html="$badge(e.status)"></span><span class="text-xs text-slate-500" x-text="ABM.utils.datetime(e.created_at)"></span></div>
+                      <div class="text-sm text-slate-700 mt-1" x-show="e.notes" x-text="e.notes"></div>
+                      <div class="text-xs text-slate-400 mt-0.5" x-text="'by ' + ABM.db.userName(e.user_id)"></div>
+                    </div>
+                  </template>
+                  <template x-if="!log.length"><div class="text-sm text-slate-500">No history yet.</div></template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ============================ MODALS ============================ -->
+        <!-- Generic status modal (also used for approval) -->
+        <div x-show="st.open" x-cloak class="modal-backdrop" @click.self="st.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveStatus()" novalidate>
+              <div class="modal-header"><div><div class="modal-title" x-text="st.title"></div><div class="text-xs text-slate-500 mono" x-text="job.job_no"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="st.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="flex items-center gap-2 text-sm flex-wrap"><span x-html="$badge(job.status)"></span><span x-html="ABM.icon('arrow-right','w-4 h-4 text-slate-400')"></span><span x-html="$badge(st.target)"></span></div>
+                <div class="alert alert-warning" x-show="st.consume > 0"><span x-html="ABM.icon('cube')"></span><div><b x-text="st.consume"></b> part line<span x-text="st.consume === 1 ? '' : 's'"></span> will be consumed from stock now.</div></div>
+                <div class="alert alert-danger" x-show="st.stockError"><span x-html="ABM.icon('warning')"></span><div x-text="st.stockError"></div></div>
+                <div x-show="st.kind === 'approve'">
+                  <label class="label">After approval</label>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button type="button" class="btn btn-sm" :class="st.next === 'in_progress' ? 'btn-primary' : 'btn-secondary'" @click="st.next = 'in_progress'; st.target = 'in_progress'; st.consume = unconsumedCount(); st.stockError = stockCheck()">Start work</button>
+                    <button type="button" class="btn btn-sm" :class="st.next === 'awaiting_parts' ? 'btn-primary' : 'btn-secondary'" @click="st.next = 'awaiting_parts'; st.target = 'awaiting_parts'; st.consume = 0; st.stockError = ''">Wait for parts</button>
+                    <button type="button" class="btn btn-sm" :class="st.next === '' ? 'btn-primary' : 'btn-secondary'" @click="st.next = ''; st.target = 'awaiting_approval'; st.consume = 0; st.stockError = ''">Just record it</button>
+                  </div>
+                </div>
+                <div><label class="label" for="st-notes">Notes <span class="text-slate-400 font-normal">(shown on the timeline)</span></label><textarea id="st-notes" class="textarea" rows="2" x-model="st.notes" x-ref="stNotes" :placeholder="st.placeholder" maxlength="300"></textarea></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="st.open = false">Cancel</button><button type="submit" class="btn" :class="st.cls || 'btn-primary'" :disabled="st.busy || !!st.stockError"><span x-html="ABM.icon('check')"></span><span x-text="st.confirm || 'Confirm'"></span></button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Quote modal -->
+        <div x-show="qm.open" x-cloak class="modal-backdrop" @click.self="qm.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveQuote()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Send quote to customer</div><div class="text-xs text-slate-500">Moves the job to Awaiting Approval</div></div><button type="button" class="btn btn-ghost btn-icon" @click="qm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div>
+                  <label class="label" for="qm-est">Quoted amount <span class="req">*</span></label>
+                  <div class="input-group"><input id="qm-est" type="number" min="1" step="1" class="input input-money" x-ref="qmEst" x-model.number="qm.estimate" :class="qm.error && 'is-invalid'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="qm.error" x-text="qm.error"></p>
+                  <p class="help" x-show="items.length">Current parts + labor total is <b x-text="$money(job.total_parts + job.total_labor)"></b>. <button type="button" class="font-semibold text-navy-700 hover:underline" @click="qm.estimate = ABM.utils.round2(job.total_parts + job.total_labor - (job.discount || 0))">Use it</button></p>
+                </div>
+                <div><label class="label" for="qm-notes">Message / notes</label><textarea id="qm-notes" class="textarea" rows="2" x-model="qm.notes" placeholder="e.g. Quoted by phone, customer will confirm tomorrow" maxlength="300"></textarea></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="qm.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="qm.busy"><span x-html="ABM.icon('document')"></span>Send quote</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Deliver modal -->
+        <div x-show="dm.open" x-cloak class="modal-backdrop" @click.self="dm.open = false">
+          <div class="modal-panel modal-lg" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveDeliver()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Deliver to customer</div><div class="text-xs text-slate-500">Collect the balance and hand over the device</div></div><button type="button" class="btn btn-ghost btn-icon" @click="dm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total</div><div class="font-bold text-slate-900 tabular truncate" x-text="$money(job.total,{decimals:0})"></div></div>
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Paid</div><div class="font-bold text-emerald-700 tabular truncate" x-text="$money(job.paid_amount,{decimals:0})"></div></div>
+                  <div class="rounded-xl bg-rose-50 border border-rose-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Due</div><div class="font-bold text-rose-600 tabular truncate" x-text="$money(job.due_amount,{decimals:0})"></div></div>
+                </div>
+                <div class="alert alert-warning" x-show="!items.length"><span x-html="ABM.icon('warning')"></span><div>No parts or labor lines — the total is <b x-text="$money(job.total)"></b>. Add lines first if this was a paid repair.</div></div>
+                <div class="alert alert-info" x-show="money.refundable > 0"><span x-html="ABM.icon('info')"></span><div>The customer has paid <b x-text="$money(money.refundable)"></b> more than the total. Deliver, then use <b>Refund</b> on the job card to give it back.</div></div>
+                <div x-show="job.due_amount > 0">
+                  <label class="label">Payment <span class="text-slate-400 font-normal">(split across methods if needed)</span></label>
+                  <div class="space-y-2">
+                    <template x-for="(r, i) in dm.rows" :key="i">
+                      <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 items-start">
+                        <select class="select sm:col-span-4" x-model="r.method" @change="r.account_id = ''" :aria-label="'Method ' + (i+1)"><template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template></select>
+                        <div class="input-group sm:col-span-3"><input type="number" min="0" step="1" class="input input-money" x-model.number="r.amount" :aria-label="'Amount ' + (i+1)"><span class="addon">Rs.</span></div>
+                        <input type="text" class="input mono sm:col-span-4" x-model="r.reference" placeholder="Reference" :disabled="r.method === 'cash'" maxlength="40" :aria-label="'Reference ' + (i+1)">
+                        <button type="button" class="btn btn-ghost btn-icon sm:col-span-1 text-rose-600 justify-self-end" :disabled="dm.rows.length === 1" @click="dm.rows.splice(i, 1)" aria-label="Remove" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                        <select class="select sm:col-span-11" x-show="isNonCash(r.method)" x-model="r.account_id" :aria-label="'Account for ' + ABM.ui.statusLabel(r.method)">
+                          <option value="" x-text="'Lands in: ' + defaultAccountLabel(r.method)"></option>
+                          <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="'Lands in: ' + accountName(a.id)"></option></template>
+                        </select>
+                      </div>
+                    </template>
+                  </div>
+                  <div class="mt-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <button type="button" class="btn btn-ghost btn-sm" @click="dm.rows.push({ method: 'cash', amount: dmRemaining > 0 ? dmRemaining : 0, reference: '', account_id: '' })"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add split</button>
+                    <div>Collecting <b x-text="$money(dmSum)"></b> · remaining <b :class="dmRemaining > 0 ? 'text-rose-600' : dmRemaining < 0 ? 'text-amber-700' : 'text-emerald-700'" x-text="$money(dmRemaining)"></b></div>
+                  </div>
+                  <p class="field-error" x-show="dm.error" x-text="dm.error"></p>
+                  <!-- an unpaid balance can only leave with the device on a registered customer's khata -->
+                  <div class="mt-3 rounded-xl border border-slate-200 p-3 space-y-2 text-sm" x-show="dmRemaining > 0">
+                    <template x-if="dmCredit.reason === 'walkin'">
+                      <div class="text-amber-700 font-medium">Walk-in customer — collect the full balance. Attach the job to a registered customer to give credit.</div>
+                    </template>
+                    <template x-if="dmCredit.reason !== 'walkin'">
+                      <div class="space-y-1.5">
+                        <label class="inline-flex items-start gap-2 cursor-pointer select-none"><input type="checkbox" class="checkbox mt-0.5" x-model="dm.allowPartial"><span>Put <b x-text="$money(dmRemaining)"></b> on <b x-text="dmCredit.name"></b>'s khata (credit)</span></label>
+                        <div class="text-xs text-slate-500">Khata <span x-text="$money(dmCredit.balance)"></span> → <b x-text="$money(dmCredit.newBalance)"></b> · limit <span x-text="dmCredit.limit > 0 ? $money(dmCredit.limit) : 'none'"></span></div>
+                        <div class="text-xs font-medium" :class="canOverride ? 'text-amber-700' : 'text-rose-600'" x-show="!dmCredit.ok" x-text="(dmCredit.reason === 'nolimit' ? 'No credit limit is set for this customer' : 'This goes over the credit limit') + (canOverride ? ' — you will be asked to approve it.' : ' — a manager must approve it.')"></div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <p class="field-error" x-show="dm.error && !(job.due_amount > 0)" x-text="dm.error"></p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="dm-warranty">Warranty on repair</label><div class="input-group"><input id="dm-warranty" type="number" min="0" max="365" step="1" class="input" x-model.number="dm.warranty_days"><span class="addon">days</span></div></div>
+                  <div><label class="label" for="dm-notes">Handover notes</label><input id="dm-notes" type="text" class="input" x-model="dm.notes" placeholder="e.g. Customer checked the device" maxlength="200"></div>
+                </div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="dm.open = false">Cancel</button><button type="submit" class="btn btn-money" :disabled="dm.busy"><span x-html="ABM.icon('check-circle')"></span>Deliver &amp; print invoice</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Cancel modal -->
+        <div x-show="cm.open" x-cloak class="modal-backdrop" @click.self="cm.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveCancel()" novalidate>
+              <div class="modal-header"><div><div class="modal-title text-rose-600">Cancel job card</div><div class="text-xs text-slate-500 mono" x-text="job.job_no"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="cm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="alert alert-warning" x-show="consumedCount > 0"><span x-html="ABM.icon('cube')"></span><div><b x-text="consumedCount"></b> consumed part line<span x-text="consumedCount === 1 ? '' : 's'"></span> will be returned to stock.</div></div>
+                <div class="alert alert-info" x-show="job.paid_amount > 0"><span x-html="ABM.icon('info')"></span><div>The customer has paid <b x-text="$money(job.paid_amount)"></b>. After cancelling, record the refund on this job card (all of it, or less if a diagnostic fee applies) so the drawer and the bank stay right.</div></div>
+                <div><label class="label" for="cm-reason">Reason <span class="req">*</span></label><textarea id="cm-reason" class="textarea" rows="3" x-ref="cmReason" x-model="cm.reason" :class="cm.error && 'is-invalid'" placeholder="e.g. Customer declined the quote / device not repairable" maxlength="300"></textarea><p class="field-error" x-show="cm.error" x-text="cm.error"></p></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="cm.open = false">Keep job</button><button type="submit" class="btn btn-danger" :disabled="cm.busy"><span x-html="ABM.icon('x-circle')"></span>Cancel job</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Add part modal -->
+        <div x-show="pt.open" x-cloak class="modal-backdrop" @click.self="pt.open = false">
+          <div class="modal-panel modal-lg" role="dialog" aria-modal="true">
+            <form @submit.prevent="savePart()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Add spare part</div><div class="text-xs text-slate-500">Stock shown for <span x-text="ABM.db.branchName(job.branch_id)"></span></div></div><button type="button" class="btn btn-ghost btn-icon" @click="pt.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <template x-if="!pt.product">
+                  <div>
+                    <div class="input-icon"><span x-html="ABM.icon('search')"></span><input type="search" class="input" x-ref="ptQ" x-model.debounce.150ms="pt.q" placeholder="Search parts & accessories by name, SKU, model…" autocomplete="off"></div>
+                    <div class="mt-2 rounded-xl border border-slate-200 divide-y divide-slate-200 max-h-72 overflow-y-auto">
+                      <template x-for="p in partResults" :key="p.id">
+                        <button type="button" class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-slate-50" @click="pickPart(p)">
+                          <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-600" x-html="ABM.icon('cube','w-4 h-4')"></span>
+                          <span class="min-w-0 flex-1"><span class="block text-sm font-medium text-slate-800 truncate" x-text="p.label"></span><span class="block text-xs text-slate-500 mono truncate" x-text="p.sku + ' · ' + ABM.db.categoryName(p.category_id)"></span></span>
+                          <span class="text-right flex-none"><span class="block text-sm font-semibold" x-text="$money(p.retail_price,{decimals:0})"></span><span class="badge" :class="p.qty === 0 ? 'badge-red' : p.qty <= p.min_stock ? 'badge-amber' : 'badge-green'" x-text="p.qty + ' in stock'"></span></span>
+                        </button>
+                      </template>
+                      <template x-if="!partResults.length"><div class="px-3 py-6 text-center text-sm text-slate-500">No matching parts. <a href="products.html?new=1" class="font-semibold text-navy-700 hover:underline" x-show="ABM.session.can('products.edit')">Add a product</a></div></template>
+                    </div>
+                  </div>
+                </template>
+                <template x-if="pt.product">
+                  <div class="space-y-4">
+                    <div class="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <span class="chip chip-navy" x-html="ABM.icon('cube')"></span>
+                      <div class="min-w-0 flex-1"><div class="font-semibold text-slate-900 truncate" x-text="pt.product.label"></div><div class="text-xs text-slate-500">In stock: <b :class="pt.product.qty === 0 ? 'text-rose-600' : ''" x-text="pt.product.qty"></b> · cost <span x-text="$money(pt.product.cost)"></span> · retail <span x-text="$money(pt.product.retail_price)"></span></div></div>
+                      <button type="button" class="btn btn-secondary btn-sm" @click="pt.product = null; $nextTick(() => $refs.ptQ && $refs.ptQ.focus())">Change</button>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div><label class="label" for="pt-qty">Quantity <span class="req">*</span></label><input id="pt-qty" type="number" min="1" step="1" class="input" x-ref="ptQty" x-model.number="pt.qty" :class="pt.errors.qty && 'is-invalid'"><p class="field-error" x-show="pt.errors.qty" x-text="pt.errors.qty"></p></div>
+                      <div><label class="label" for="pt-price">Unit price <span class="req">*</span></label><div class="input-group"><input id="pt-price" type="number" min="0" step="1" class="input input-money" x-model.number="pt.price" :class="pt.errors.price && 'is-invalid'"><span class="addon">Rs.</span></div><p class="field-error" x-show="pt.errors.price" x-text="pt.errors.price"></p><p class="help text-amber-700 font-medium" x-show="!pt.errors.price && Number(pt.price) < pt.product.cost">Below cost price.</p></div>
+                    </div>
+                    <div class="alert" :class="consumeNow ? 'alert-warning' : 'alert-info'"><span x-html="ABM.icon('info')"></span><div x-text="consumeNow ? 'Work is in progress — this part will be deducted from stock immediately.' : 'Stock is deducted when the job moves to In Progress.'"></div></div>
+                    <p class="field-error" x-show="pt.errors.stock" x-text="pt.errors.stock"></p>
+                  </div>
+                </template>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="pt.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="pt.busy || !pt.product"><span x-html="ABM.icon('plus')"></span>Add part</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Add labor modal -->
+        <div x-show="lm.open" x-cloak class="modal-backdrop" @click.self="lm.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveLabor()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Add labor / service</div><div class="text-xs text-slate-500">Services have no stock movement</div></div><button type="button" class="btn btn-ghost btn-icon" @click="lm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="inline-flex rounded-xl border border-slate-300 bg-white p-0.5 text-sm font-semibold w-full">
+                  <button type="button" class="flex-1 px-3 py-1.5 rounded-lg" :class="lm.mode === 'service' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="lm.mode = 'service'">Service product</button>
+                  <button type="button" class="flex-1 px-3 py-1.5 rounded-lg" :class="lm.mode === 'custom' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="lm.mode = 'custom'">Custom charge</button>
+                </div>
+                <div x-show="lm.mode === 'service'">
+                  <label class="label" for="lm-service">Service <span class="req">*</span></label>
+                  <select id="lm-service" class="select" x-ref="lmService" x-model="lm.product_id" :class="lm.errors.product_id && 'is-invalid'" @change="onServiceChange()">
+                    <option value="">Select a service…</option>
+                    <template x-for="s in services" :key="s.id"><option :value="String(s.id)" x-text="s.name + ' — ' + ABM.utils.money(s.retail_price, {decimals:0})"></option></template>
+                  </select>
+                  <p class="field-error" x-show="lm.errors.product_id" x-text="lm.errors.product_id"></p>
+                </div>
+                <div x-show="lm.mode === 'custom'">
+                  <label class="label" for="lm-desc">Description <span class="req">*</span></label>
+                  <input id="lm-desc" type="text" class="input" x-model="lm.description" :class="lm.errors.description && 'is-invalid'" placeholder="e.g. Cleaning & thermal paste" maxlength="120">
+                  <p class="field-error" x-show="lm.errors.description" x-text="lm.errors.description"></p>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="lm-qty">Quantity</label><input id="lm-qty" type="number" min="1" step="1" class="input" x-model.number="lm.qty" :class="lm.errors.qty && 'is-invalid'"><p class="field-error" x-show="lm.errors.qty" x-text="lm.errors.qty"></p></div>
+                  <div><label class="label" for="lm-price">Price <span class="req">*</span></label><div class="input-group"><input id="lm-price" type="number" min="0" step="1" class="input input-money" x-model.number="lm.price" :class="lm.errors.price && 'is-invalid'"><span class="addon">Rs.</span></div><p class="field-error" x-show="lm.errors.price" x-text="lm.errors.price"></p></div>
+                </div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="lm.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="lm.busy"><span x-html="ABM.icon('plus')"></span>Add labor</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Edit line modal -->
+        <div x-show="em.open" x-cloak class="modal-backdrop" @click.self="em.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveEditLine()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Edit line</div><div class="text-xs text-slate-500 truncate" x-text="em.line && em.line.description"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="em.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div x-show="em.line && em.line.type === 'labor' && !em.line.product_id"><label class="label" for="em-desc">Description</label><input id="em-desc" type="text" class="input" x-model="em.description" maxlength="120"></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="em-qty">Quantity</label><input id="em-qty" type="number" min="1" step="1" class="input" x-ref="emQty" x-model.number="em.qty" :disabled="em.line && em.line.consumed" :class="em.errors.qty && 'is-invalid'"><p class="field-error" x-show="em.errors.qty" x-text="em.errors.qty"></p><p class="help" x-show="em.line && em.line.consumed">Quantity is locked because stock was already consumed — remove the line and add it again to change it.</p></div>
+                  <div><label class="label" for="em-price">Unit price</label><div class="input-group"><input id="em-price" type="number" min="0" step="1" class="input input-money" x-model.number="em.price" :class="em.errors.price && 'is-invalid'"><span class="addon">Rs.</span></div><p class="field-error" x-show="em.errors.price" x-text="em.errors.price"></p></div>
+                </div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="em.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="em.busy"><span x-html="ABM.icon('check')"></span>Save line</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Add payment modal -->
+        <div x-show="pay.open" x-cloak class="modal-backdrop" @click.self="pay.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="savePayment()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Add payment</div><div class="text-xs text-slate-500">Due <b x-text="$money(job.due_amount)"></b> · paid so far <span x-text="$money(job.paid_amount)"></span></div></div><button type="button" class="btn btn-ghost btn-icon" @click="pay.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div><label class="label" for="pay-amount">Amount <span class="req">*</span></label><div class="input-group"><input id="pay-amount" type="number" min="1" step="1" class="input input-money" x-ref="payAmount" x-model.number="pay.amount" :class="pay.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div><p class="field-error" x-show="pay.errors.amount" x-text="pay.errors.amount"></p></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="pay-method">Method</label><select id="pay-method" class="select" x-model="pay.method" @change="pay.account_id = ''; pay.errors.account = ''"><template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template></select></div>
+                  <div x-show="pay.method !== 'cash'"><label class="label" for="pay-ref">Reference</label><input id="pay-ref" type="text" class="input mono" x-model="pay.reference" placeholder="TID / auth code" maxlength="40"></div>
+                  <div class="sm:col-span-2" x-show="isNonCash(pay.method)">
+                    <label class="label" for="pay-account">Lands in account</label>
+                    <select id="pay-account" class="select" x-model="pay.account_id" :class="pay.errors.account && 'is-invalid'">
+                      <option value="" x-text="defaultAccountLabel(pay.method) + ' (default)'"></option>
+                      <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="accountName(a.id)"></option></template>
+                    </select>
+                    <p class="field-error" x-show="pay.errors.account" x-text="pay.errors.account"></p>
+                  </div>
+                </div>
+                <div><label class="label" for="pay-notes">Notes</label><input id="pay-notes" type="text" class="input" x-model="pay.notes" placeholder="Optional" maxlength="200"></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="pay.open = false">Cancel</button><button type="submit" class="btn btn-money" :disabled="pay.busy"><span x-html="ABM.icon('banknotes')"></span>Record payment</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Refund modal -->
+        <div x-show="rf.open" x-cloak class="modal-backdrop" @click.self="rf.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveRefund()" novalidate>
+              <div class="modal-header"><div class="min-w-0"><div class="modal-title">Refund to customer</div><div class="text-xs text-slate-500"><span class="mono" x-text="job.job_no"></span> · refundable <b x-text="$money(money.refundable)"></b></div></div><button type="button" class="btn btn-ghost btn-icon" @click="rf.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-xl bg-slate-50 border border-slate-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500" x-text="job.status === 'cancelled' ? 'Owed' : 'Total'"></div><div class="font-bold text-slate-900 tabular truncate" x-text="$money(job.status === 'cancelled' ? 0 : job.total,{decimals:0})"></div></div>
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Paid (net)</div><div class="font-bold text-emerald-700 tabular truncate" x-text="$money(job.paid_amount,{decimals:0})"></div></div>
+                  <div class="rounded-xl bg-amber-50 border border-amber-200 p-2 min-w-0"><div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Refundable</div><div class="font-bold text-amber-700 tabular truncate" x-text="$money(money.refundable,{decimals:0})"></div></div>
+                </div>
+                <div><label class="label" for="rf-amount">Amount <span class="req">*</span></label><div class="input-group"><input id="rf-amount" type="number" min="1" step="1" class="input input-money" x-ref="rfAmount" x-model.number="rf.amount" :class="rf.errors.amount && 'is-invalid'"><span class="addon">Rs.</span></div><p class="field-error" x-show="rf.errors.amount" x-text="rf.errors.amount"></p><p class="help" x-show="job.status === 'cancelled'">Refund less than the full amount if a diagnostic fee applies.</p></div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="rf-method">Paid back by</label><select id="rf-method" class="select" x-model="rf.method" @change="rf.account_id = ''; rf.errors.account = ''"><template x-for="m in methods" :key="m"><option :value="m" x-text="ABM.ui.statusLabel(m)"></option></template></select></div>
+                  <div x-show="rf.method !== 'cash'"><label class="label" for="rf-ref">Reference</label><input id="rf-ref" type="text" class="input mono" x-model="rf.reference" placeholder="TID / transfer ref" maxlength="40"></div>
+                  <div class="sm:col-span-2" x-show="isNonCash(rf.method)">
+                    <label class="label" for="rf-account">Paid from account</label>
+                    <select id="rf-account" class="select" x-model="rf.account_id" :class="rf.errors.account && 'is-invalid'">
+                      <option value="" x-text="defaultAccountLabel(rf.method) + ' (default)'"></option>
+                      <template x-for="a in bankAccounts" :key="a.id"><option :value="String(a.id)" x-text="accountName(a.id)"></option></template>
+                    </select>
+                    <p class="field-error" x-show="rf.errors.account" x-text="rf.errors.account"></p>
+                  </div>
+                </div>
+                <div><label class="label" for="rf-notes">Reason <span class="req">*</span></label><input id="rf-notes" type="text" class="input" x-model="rf.notes" :class="rf.errors.notes && 'is-invalid'" placeholder="e.g. Job cancelled — advance returned" maxlength="200"><p class="field-error" x-show="rf.errors.notes" x-text="rf.errors.notes"></p></div>
+                <p class="help" x-text="rf.method === 'cash' ? 'Paid out of your cash drawer — it shows as a repair refund on your shift and the day-end.' : 'Leaves the bank or wallet account above.'"></p>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="rf.open = false">Cancel</button><button type="submit" class="btn btn-danger" :disabled="rf.busy"><span x-html="ABM.icon('return')"></span><span x-text="'Refund ' + $money(Number(rf.amount) || 0, {decimals:0})"></span></button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Void payment modal -->
+        <div x-show="vd.open" x-cloak class="modal-backdrop" @click.self="vd.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveVoid()" novalidate>
+              <div class="modal-header"><div class="min-w-0"><div class="modal-title text-rose-600">Void payment</div><div class="text-xs text-slate-500" x-show="vd.payment"><span x-text="vd.payment && $money(vd.payment.amount)"></span> · <span x-text="vd.payment && ABM.ui.statusLabel(vd.payment.method)"></span> · <span x-text="vd.payment && ABM.utils.datetime(vd.payment.created_at)"></span></div></div><button type="button" class="btn btn-ghost btn-icon" @click="vd.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div class="alert alert-warning"><span x-html="ABM.icon('warning')"></span><div>The payment stays on record, struck through, and a reversal is added. <span x-text="vd.payment && vd.payment.method === 'cash' ? 'The cash comes out of your drawer total now.' : 'The ' + (vd.payment ? ABM.ui.statusLabel(vd.payment.method) : '') + ' receipt is taken back out of its bank account.'"></span> Use this for a payment keyed by mistake — record the right one afterwards.</div></div>
+                <div><label class="label" for="vd-reason">Reason <span class="req">*</span></label><input id="vd-reason" type="text" class="input" x-ref="vdReason" x-model="vd.reason" :class="vd.error && 'is-invalid'" placeholder="e.g. Keyed as cash, customer paid by card" maxlength="200"><p class="field-error" x-show="vd.error" x-text="vd.error"></p></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="vd.open = false">Keep payment</button><button type="submit" class="btn btn-danger" :disabled="vd.busy"><span x-html="ABM.icon('x-circle')"></span>Void payment</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Assign modal -->
+        <div x-show="am.open" x-cloak class="modal-backdrop" @click.self="am.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveAssign()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Assign technician</div><div class="text-xs text-slate-500" x-text="ABM.db.branchName(job.branch_id)"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="am.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body space-y-4">
+                <div><label class="label" for="am-tech">Technician</label><select id="am-tech" class="select" x-ref="amTech" x-model="am.technician_id"><option value="">Unassigned</option><template x-for="t in technicians" :key="t.id"><option :value="String(t.id)" x-text="t.name + (t.role === 'technician' ? '' : ' (manager)') + ' · ' + openJobsOf(t.id) + ' open'"></option></template></select></div>
+                <div><label class="label" for="am-notes">Notes</label><input id="am-notes" type="text" class="input" x-model="am.notes" placeholder="Optional" maxlength="200"></div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="am.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="am.busy"><span x-html="ABM.icon('check')"></span>Save</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Edit details modal -->
+        <div x-show="ed.open" x-cloak class="modal-backdrop" @click.self="ed.open = false">
+          <div class="modal-panel modal-lg" role="dialog" aria-modal="true">
+            <form @submit.prevent="saveEdit()" novalidate>
+              <div class="modal-header"><div><div class="modal-title">Edit job details</div><div class="text-xs text-slate-500 mono" x-text="job.job_no"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="ed.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+              <div class="modal-body">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div><label class="label" for="ed-type">Device type</label><select id="ed-type" class="select" x-ref="edType" x-model="ed.form.device_type"><template x-for="d in ['mobile','tablet','smartwatch','laptop','desktop']" :key="d"><option :value="d" x-text="ABM.db.deviceTypeLabel(d)"></option></template></select></div>
+                  <div><label class="label" for="ed-brand">Brand <span class="req">*</span></label><input id="ed-brand" type="text" class="input" x-model="ed.form.brand" :class="ed.errors.brand && 'is-invalid'" maxlength="40" list="brand-list"><datalist id="brand-list"><template x-for="b in brands" :key="b.id"><option :value="b.name"></option></template></datalist><p class="field-error" x-show="ed.errors.brand" x-text="ed.errors.brand"></p></div>
+                  <div><label class="label" for="ed-model">Model <span class="req">*</span></label><input id="ed-model" type="text" class="input" x-model="ed.form.model" :class="ed.errors.model && 'is-invalid'" maxlength="80"><p class="field-error" x-show="ed.errors.model" x-text="ed.errors.model"></p></div>
+                  <div><label class="label" for="ed-serial"><span x-text="ABM.db.serialLabel({ device_type: ed.form.device_type, serial_type: ['laptop','desktop'].includes(ed.form.device_type) ? 'serial' : 'imei' })"></span></label><input id="ed-serial" type="text" class="input mono" x-model="ed.form.serial" :class="ed.errors.serial && 'is-invalid'" maxlength="40"><p class="field-error" x-show="ed.errors.serial" x-text="ed.errors.serial"></p></div>
+                  <div><label class="label" for="ed-color">Color</label><input id="ed-color" type="text" class="input" x-model="ed.form.color" maxlength="40"></div>
+                  <div><label class="label" for="ed-pass">Password / pattern</label><input id="ed-pass" type="text" class="input mono" x-model="ed.form.password_pattern" maxlength="60" autocomplete="off"></div>
+                  <div class="sm:col-span-2"><label class="label" for="ed-acc">Accessories received</label><input id="ed-acc" type="text" class="input" x-model="ed.form.accessories_received" placeholder="Comma separated" maxlength="200"></div>
+                  <div class="sm:col-span-2"><label class="label" for="ed-cond">Condition notes</label><textarea id="ed-cond" class="textarea" rows="2" x-model="ed.form.condition_notes" maxlength="500"></textarea></div>
+                  <div class="sm:col-span-2"><label class="label" for="ed-problem">Problem description <span class="req">*</span></label><textarea id="ed-problem" class="textarea" rows="3" x-model="ed.form.problem_description" :class="ed.errors.problem_description && 'is-invalid'" maxlength="1000"></textarea><p class="field-error" x-show="ed.errors.problem_description" x-text="ed.errors.problem_description"></p></div>
+                  <div><label class="label" for="ed-priority">Priority</label><select id="ed-priority" class="select" x-model="ed.form.priority"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></div>
+                  <div><label class="label" for="ed-promised">Promised date &amp; time</label><input id="ed-promised" type="datetime-local" class="input" x-model="ed.form.promised_at" :class="ed.errors.promised_at && 'is-invalid'"><p class="field-error" x-show="ed.errors.promised_at" x-text="ed.errors.promised_at"></p></div>
+                  <div><label class="label" for="ed-warranty">Warranty (days)</label><input id="ed-warranty" type="number" min="0" max="365" class="input" x-model.number="ed.form.warranty_days" :class="ed.errors.warranty_days && 'is-invalid'"><p class="field-error" x-show="ed.errors.warranty_days" x-text="ed.errors.warranty_days"></p></div>
+                  <div><label class="label" for="ed-est">Estimated cost</label><div class="input-group"><input id="ed-est" type="number" min="0" step="1" class="input input-money" x-model.number="ed.form.estimated_cost"><span class="addon">Rs.</span></div></div>
+                  <div class="sm:col-span-2"><label class="label" for="ed-notes">Internal notes</label><input id="ed-notes" type="text" class="input" x-model="ed.form.notes" maxlength="300"></div>
+                </div>
+              </div>
+              <div class="modal-footer"><button type="button" class="btn btn-secondary" @click="ed.open = false">Cancel</button><button type="submit" class="btn btn-primary" :disabled="ed.busy"><span x-html="ABM.icon('check')"></span>Save changes</button></div>
+            </form>
+          </div>
+        </div>
+
+        <!-- SMS preview modal -->
+        <div x-show="sms.open" x-cloak class="modal-backdrop" @click.self="sms.open = false">
+          <div class="modal-panel" role="dialog" aria-modal="true">
+            <div class="modal-header"><div><div class="modal-title">SMS to customer</div><div class="text-xs text-slate-500" x-text="customer.phone || 'No phone on file'"></div></div><button type="button" class="btn btn-ghost btn-icon" @click="sms.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+            <div class="modal-body space-y-3">
+              <textarea class="textarea" rows="4" x-model="sms.text" x-ref="smsText" maxlength="320"></textarea>
+              <div class="flex items-center justify-between text-xs text-slate-500"><span x-text="sms.text.length + ' characters'"></span><span>Template from Settings → repair SMS</span></div>
+            </div>
+            <div class="modal-footer">
+              <a :href="'https://wa.me/' + waNumber + '?text=' + encodeURIComponent(sms.text)" target="_blank" rel="noopener" class="btn btn-secondary" x-show="waNumber"><span x-html="ABM.icon('chat')"></span>WhatsApp</a>
+              <button type="button" class="btn btn-primary" @click="copySms()"><span x-html="ABM.icon('clipboard')"></span><span x-text="sms.copied ? 'Copied!' : 'Copy text'"></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Print modal (outside the page content so it is the only thing printed) -->
+    <style x-text="pm.layout === 'thermal' ? '@page { size: 80mm auto; margin: 3mm; }' : '@page { size: A4; margin: 12mm; }'"></style>
+    <div x-show="pm.open" x-cloak class="modal-backdrop print-modal" @click.self="pm.open = false">
+      <div class="modal-panel" :class="pm.layout === 'a4' ? 'modal-xl' : 'modal-lg'" role="dialog" aria-modal="true">
+        <div class="modal-header no-print">
+          <div class="flex flex-wrap items-center gap-2 min-w-0">
+            <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+              <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.doc === 'receipt' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.doc = 'receipt'">Job receipt</button>
+              <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.doc === 'invoice' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.doc = 'invoice'">Repair invoice</button>
+            </div>
+            <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+              <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.layout === 'thermal' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.layout = 'thermal'">80 mm</button>
+              <button type="button" class="px-2.5 py-1 rounded-md" :class="pm.layout === 'a4' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="pm.layout = 'a4'">A4</button>
+            </div>
+          </div>
+          <div class="flex items-center gap-1"><button type="button" class="btn btn-primary btn-sm" @click="window.print()"><span x-html="ABM.icon('printer','w-4 h-4')"></span>Print</button><button type="button" class="btn btn-ghost btn-icon" @click="pm.open = false" aria-label="Close" x-html="ABM.icon('x')"></button></div>
+        </div>
+        <div class="modal-body bg-slate-200">
+          <template x-if="job && pm.open">
+            <div class="print-area doc shadow-lg" :class="pm.layout === 'thermal' ? 'doc-thermal' : 'doc-a4'">
+              <!-- Header -->
+              <div :class="pm.layout === 'a4' ? 'flex justify-between items-start gap-6' : 'text-center'">
+                <div>
+                  <img :src="ABM.brand.logo()" alt="" class="mb-2 max-h-[18mm] w-auto" :class="pm.layout === 'a4' ? '' : 'mx-auto'" onerror="ABM.brand.onError(this)">
+                <div class="font-extrabold" :class="pm.layout === 'a4' ? 'text-2xl' : 'text-base'" x-text="settings.company_name || 'Abbott Mobiles'"></div>
+                  <div class="text-[.9em]" x-text="branch.name"></div>
+                  <div class="text-[.85em] muted" x-text="branch.address"></div>
+                  <div class="text-[.85em] muted">Tel <span x-text="branch.phone"></span><span x-show="branch.tax_id"> · <span x-text="branch.tax_id"></span></span></div>
+                </div>
+                <div :class="pm.layout === 'a4' ? 'text-right' : 'mt-2'">
+                  <div class="font-extrabold uppercase tracking-wider" :class="pm.layout === 'a4' ? 'text-xl' : 'text-sm'" x-text="pm.doc === 'receipt' ? 'Job Receipt' : 'Repair Invoice'"></div>
+                  <div class="font-bold mono" :class="pm.layout === 'a4' ? 'text-base' : ''" x-text="job.job_no"></div>
+                  <div class="text-[.85em]" x-text="(pm.doc === 'receipt' ? 'Received ' : 'Date ') + ABM.utils.datetime(pm.doc === 'receipt' ? job.received_at : (job.delivered_at || job.completed_at || new Date()))"></div>
+                  <div class="text-[.85em]" x-text="'Status: ' + ABM.ui.statusLabel(job.status)"></div>
+                </div>
+              </div>
+              <div class="hr"></div>
+              <!-- Customer + device -->
+              <div :class="pm.layout === 'a4' ? 'grid grid-cols-2 gap-6' : 'space-y-1'">
+                <div>
+                  <div class="font-bold uppercase text-[.8em] tracking-wider muted">Customer</div>
+                  <div class="font-semibold" x-text="customer.name"></div>
+                  <div class="text-[.9em]" x-text="customer.phone"></div>
+                  <div class="text-[.9em] muted" x-show="customer.address" x-text="customer.address"></div>
+                </div>
+                <div>
+                  <div class="font-bold uppercase text-[.8em] tracking-wider muted">Device</div>
+                  <div class="font-semibold" x-text="deviceLabel + (job.color ? ' · ' + job.color : '')"></div>
+                  <div class="text-[.9em]"><span x-text="serialLabel"></span>: <span class="mono" x-text="job.serial || '—'"></span></div>
+                  <div class="text-[.9em]">Accessories: <span x-text="job.accessories_received || 'Device only'"></span></div>
+                  <div class="text-[.9em]" x-show="job.condition_notes">Condition: <span x-text="job.condition_notes"></span></div>
+                </div>
+              </div>
+              <div class="hr"></div>
+              <!-- RECEIPT body -->
+              <template x-if="pm.doc === 'receipt'">
+                <div>
+                  <div class="font-bold uppercase text-[.8em] tracking-wider muted">Reported problem</div>
+                  <div x-text="job.problem_description"></div>
+                  <div class="hr"></div>
+                  <table>
+                    <tbody>
+                      <tr><td>Estimated cost</td><td class="r font-semibold" x-text="job.estimated_cost > 0 ? ABM.utils.money(job.estimated_cost) : 'To be quoted'"></td></tr>
+                      <tr><td>Advance paid</td><td class="r font-semibold" x-text="ABM.utils.money(advanceTotal)"></td></tr>
+                      <tr x-show="job.estimated_cost > 0"><td>Estimated balance</td><td class="r font-semibold" x-text="ABM.utils.money(Math.max(0, job.estimated_cost - advanceTotal))"></td></tr>
+                      <tr><td>Promised by</td><td class="r" x-text="ABM.utils.datetime(job.promised_at)"></td></tr>
+                      <tr><td>Priority</td><td class="r" x-text="ABM.utils.titleCase(job.priority)"></td></tr>
+                      <tr><td>Technician</td><td class="r" x-text="job.technician_id ? ABM.db.userName(job.technician_id) : 'To be assigned'"></td></tr>
+                      <tr><td>Warranty on repair</td><td class="r" x-text="job.warranty_days + ' days'"></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </template>
+              <!-- INVOICE body -->
+              <template x-if="pm.doc === 'invoice'">
+                <div>
+                  <table>
+                    <thead><tr><th class="text-left">Description</th><th class="r">Qty</th><th class="r" x-show="pm.layout === 'a4'">Price</th><th class="r">Total</th></tr></thead>
+                    <tbody>
+                      <template x-for="l in items" :key="l.id">
+                        <tr><td><span x-text="l.description"></span> <span class="text-[.8em] dim" x-text="l.type === 'part' ? '(part)' : '(labor)'"></span></td><td class="r" x-text="l.quantity"></td><td class="r" x-show="pm.layout === 'a4'" x-text="ABM.utils.money(l.unit_price)"></td><td class="r" x-text="ABM.utils.money(l.total)"></td></tr>
+                      </template>
+                      <template x-if="!items.length"><tr><td colspan="4" class="dim">No chargeable lines</td></tr></template>
+                    </tbody>
+                  </table>
+                  <div class="hr"></div>
+                  <table>
+                    <tbody>
+                      <tr><td>Parts</td><td class="r" x-text="ABM.utils.money(job.total_parts)"></td></tr>
+                      <tr><td>Labor</td><td class="r" x-text="ABM.utils.money(job.total_labor)"></td></tr>
+                      <tr x-show="job.discount > 0"><td>Discount</td><td class="r" x-text="'- ' + ABM.utils.money(job.discount)"></td></tr>
+                      <tr class="font-extrabold" :class="pm.layout === 'a4' ? 'text-lg' : 'text-[1.1em]'"><td>TOTAL</td><td class="r" x-text="ABM.utils.money(job.total)"></td></tr>
+                      <template x-for="p in payments" :key="'p' + p.id"><tr><td class="muted"><span x-text="payLabel(p)"></span> <span class="text-[.8em]" x-text="ABM.utils.date(p.created_at)"></span></td><td class="r muted" :style="p.voided_by_id ? 'text-decoration:line-through' : ''" x-text="ABM.utils.money(p.kind === 'refund' ? -p.amount : p.amount)"></td></tr></template>
+                      <tr><td x-text="money.refunded > 0 ? 'Paid (net of refunds)' : 'Paid'"></td><td class="r" x-text="ABM.utils.money(job.paid_amount)"></td></tr>
+                      <tr x-show="money.credit > 0"><td>Put on khata (account)</td><td class="r" x-text="ABM.utils.money(money.credit)"></td></tr>
+                      <tr class="font-bold"><td>Balance due</td><td class="r" x-text="ABM.utils.money(job.due_amount + money.credit)"></td></tr>
+                      <tr x-show="money.refundable > 0"><td>Refund due to customer</td><td class="r" x-text="ABM.utils.money(money.refundable)"></td></tr>
+                    </tbody>
+                  </table>
+                  <div class="hr"></div>
+                  <div class="text-[.9em]">Warranty: <b x-text="job.warranty_days + ' days'"></b> on the repaired fault<span x-show="warrantyEnd"> · valid until <b x-text="ABM.utils.date(warrantyEnd)"></b></span>. Keep this invoice; the <span x-text="serialLabel"></span> must match for any claim.</div>
+                </div>
+              </template>
+              <div class="hr"></div>
+              <!-- Terms + QR -->
+              <div :class="pm.layout === 'a4' ? 'flex items-start justify-between gap-6' : ''">
+                <div class="text-[.8em] muted min-w-0"><div class="font-bold uppercase tracking-wider">Terms</div><div x-text="settings.repair_terms || settings.invoice_terms || ''"></div></div>
+                <div class="flex-none text-center"><div class="qr"><span>QR</span><span class="mono" x-text="job.job_no"></span></div></div>
+              </div>
+              <div class="mt-4 grid grid-cols-2 gap-6 text-[.8em]">
+                <div class="sig pt-1">Customer signature</div>
+                <div class="sig pt-1" x-text="pm.doc === 'receipt' ? 'Received by ' + ABM.db.userName(job.created_by) : 'Delivered by ' + ABM.db.userName((ABM.session.user() || {}).id)"></div>
+              </div>
+              <div class="mt-3 text-center text-[.8em] muted" x-text="settings.receipt_footer || ''"></div>
+            </div>
+          </template>
+        </div>
+        <div class="modal-footer no-print"><button type="button" class="btn btn-secondary" @click="pm.open = false">Close</button><button type="button" class="btn btn-primary" @click="window.print()"><span x-html="ABM.icon('printer')"></span>Print</button></div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function repairViewPage() {
+      const { db, utils, ui, session } = ABM;
+      const FLOW = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'ready', 'delivered'];
+      const OPEN = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_progress', 'ready'];
+      const user = session.user() || {};
+      const role = session.role();
+      const bench = ABM.roles.isBench(role);
+      const isSuper = session.isSuperAdmin();
+      const bank = ABM.bank;
+      // the same manager override the POS uses for credit beyond a customer's limit
+      const canOverride = session.isSuperAdmin() || session.isManager();
+      const r2 = utils.round2;
+      const pad2 = (n) => String(n).padStart(2, '0');
+      const toLocalInput = (v) => { const d = utils.parseDate(v); if (!d) return ''; return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+      const idx = (s) => FLOW.indexOf(s);
+      const isRefundRow = (p) => p.kind === 'refund';
+      /**
+       * Money on a job, always rebuilt from its repair_payments rows (never from a value captured when the
+       * page opened): net paid = payments − refunds, where a voided payment is cancelled by its own refund
+       * row. `credit` is what left with the device on the customer's khata; `refundable` is money held
+       * beyond what the customer owes (all of it on a cancelled job, the overpayment otherwise).
+       */
+      const moneyOf = (j) => {
+        const rows = db.all('repair_payments').filter((p) => String(p.job_id) === String(j.id));
+        const received = r2(utils.sum(rows.filter((p) => !isRefundRow(p)), 'amount'));
+        const refunded = r2(utils.sum(rows.filter(isRefundRow), 'amount'));
+        const paid = r2(received - refunded);
+        const credit = r2(Number(j.credit_amount) || 0);
+        const total = r2(Number(j.total) || 0);
+        const cancelled = j.status === 'cancelled';
+        const due = cancelled ? 0 : Math.max(0, r2(total - paid - credit));
+        const refundable = cancelled ? Math.max(0, paid) : ((j.status === 'delivered' || total > 0) ? Math.max(0, r2(paid + credit - total)) : 0);
+        return { received, refunded, paid, credit, total, due, refundable };
+      };
+      const accountName = (id) => { const a = id ? bank.account(id) : null; return a ? a.name + (a.bank_name && !String(a.name).toLowerCase().includes(String(a.bank_name).toLowerCase()) ? ' · ' + a.bank_name : '') : '—'; };
+      /** The open account a card / wallet / transfer amount settles into: the one picked, else the Banking mapping. */
+      const resolveAccount = (method, picked, branchId) => {
+        if (!bank.isNonCash(method)) return null;
+        const id = picked || bank.accountFor(method, branchId);
+        const acc = id ? bank.account(id) : null;
+        if (!acc || !acc.is_active) throw new Error('No open bank or wallet account is set up for ' + ui.statusLabel(method) + ' — add one under Bank Accounts, or take the money another way.');
+        return acc;
+      };
+      const shiftIdFor = (branchId) => (ABM.shift.current(user.id, branchId) || {}).id || null;
+      return {
+        role, bench, isSuper, FLOW, canOverride,
+        requestedId: utils.qs('id'), scopeBlocked: false,
+        job: null, customer: { name: '', phone: '', address: '', balance: 0 }, items: [], payments: [], log: [], unitInfo: null, otherJobs: 0,
+        money: { received: 0, refunded: 0, paid: 0, credit: 0, total: 0, due: 0, refundable: 0 },
+        branch: {}, settings: db.settings(), brands: utils.sortBy(db.all('brands').filter((b) => b.is_active), 'name'),
+        services: utils.sortBy(db.all('products').filter((p) => p.is_active && p.product_type === 'service'), 'name'),
+        methods: ['cash', 'card', 'jazzcash', 'easypaisa', 'bank_transfer'],
+        showPass: false, diagnosis: '', diagBusy: false, discountInput: 0,
+        st: { open: false, kind: 'status', target: '', title: '', notes: '', placeholder: '', confirm: '', cls: '', next: '', consume: 0, stockError: '', busy: false },
+        qm: { open: false, estimate: '', notes: '', error: '', busy: false },
+        dm: { open: false, rows: [{ method: 'cash', amount: 0, reference: '', account_id: '' }], warranty_days: 7, notes: '', allowPartial: false, error: '', busy: false },
+        cm: { open: false, reason: '', error: '', busy: false },
+        pt: { open: false, q: '', product: null, qty: 1, price: '', errors: {}, busy: false },
+        lm: { open: false, mode: 'service', product_id: '', description: '', qty: 1, price: '', errors: {}, busy: false },
+        em: { open: false, line: null, qty: 1, price: '', description: '', errors: {}, busy: false },
+        pay: { open: false, amount: '', method: 'cash', account_id: '', reference: '', notes: '', errors: {}, busy: false },
+        rf: { open: false, amount: '', method: 'cash', account_id: '', reference: '', notes: '', errors: {}, busy: false },
+        vd: { open: false, payment: null, reason: '', error: '', busy: false },
+        am: { open: false, technician_id: '', notes: '', busy: false },
+        ed: { open: false, form: { device_type: 'mobile', brand: '', model: '', serial: '', color: '', password_pattern: '', accessories_received: '', condition_notes: '', problem_description: '', priority: 'normal', promised_at: '', warranty_days: 7, estimated_cost: 0, notes: '' }, errors: {}, busy: false },
+        sms: { open: false, text: '', copied: false },
+        pm: { open: false, doc: 'receipt', layout: (db.setting('default_print_layout') || 'thermal') === 'a4' ? 'a4' : 'thermal' },
+
+        init() {
+          this.load();
+          if (!this.job) return;
+          const print = utils.qs('print');
+          if (print === 'receipt' || print === 'invoice') this.openPrint(print);
+          const action = utils.qs('action');
+          if (action === 'deliver') { if (this.job.status === 'ready' && this.canDeliver) this.openDeliver(); else ui.warn('Only jobs that are Ready can be delivered' + (this.canDeliver ? '.' : ' by your role.')); }
+          if (action === 'cancel') { if (this.canCancel && this.isOpen) this.openCancel(); }
+          if (action === 'refund') this.openRefund();
+        },
+        load() {
+          const j = db.find('repair_jobs', this.requestedId);
+          if (!j) { this.job = null; return; }
+          if (!isSuper && Number(j.branch_id) !== Number(session.branchId())) { this.job = null; this.scopeBlocked = true; return; }
+          this.normalizeConsumed(j);
+          // paid / due / khata come from the payment rows themselves, so a refund or a voided payment is never double counted
+          const m = moneyOf(j);
+          this.money = m;
+          this.job = { ...j, total: Number(j.total) || 0, total_parts: Number(j.total_parts) || 0, total_labor: Number(j.total_labor) || 0, discount: Number(j.discount) || 0, paid_amount: m.paid, due_amount: m.due, credit_amount: m.credit, estimated_cost: Number(j.estimated_cost) || 0, warranty_days: Number(j.warranty_days) || 0 };
+          this.customer = db.customer(j.customer_id) || { id: null, name: 'Walk-in Customer', phone: '', address: '', balance: 0 };
+          this.branch = db.branch(j.branch_id) || {};
+          this.items = db.all('repair_items').filter((i) => i.job_id == j.id).map((i) => ({ ...i, total: Number(i.total) || 0 }));
+          this.payments = utils.sortBy(db.all('repair_payments').filter((p) => p.job_id == j.id), (p) => String(p.created_at) + '|' + utils.pad(p.id, 8)).map((p) => ({ ...p, amount: Number(p.amount) || 0 }));
+          this.log = utils.sortBy(db.all('repair_status_log').filter((l) => l.job_id == j.id), (l) => l.created_at + '-' + utils.pad(l.id, 8), 'desc');
+          this.diagnosis = j.diagnosis || '';
+          this.discountInput = Number(j.discount) || 0;
+          this.otherJobs = db.all('repair_jobs').filter((x) => x.customer_id == j.customer_id && x.id != j.id).length;
+          this.settings = db.settings();
+          this.unitInfo = null;
+          if (j.serial) {
+            const unit = ABM.stock.findUnit(j.serial);
+            if (unit) {
+              const product = db.product(unit.product_id) || {};
+              const saleItem = unit.sale_item_id ? db.find('sale_items', unit.sale_item_id) : null;
+              const sale = saleItem ? db.find('sales', saleItem.sale_id) : null;
+              const wm = Number((saleItem && saleItem.warranty_months) || product.warranty_months || 0);
+              let warrantyEnd = null; if (sale && wm) { const d = utils.parseDate(sale.sale_date); d.setMonth(d.getMonth() + wm); warrantyEnd = d; }
+              this.unitInfo = { label: db.productLabel(product.id), sale, warrantyEnd, inWarranty: !!(warrantyEnd && warrantyEnd >= new Date()) };
+            }
+          }
+        },
+        /** Re-read just the money (another tab may have moved it) without discarding unsaved drafts on the card. */
+        refreshMoney() {
+          const j = this.job ? db.find('repair_jobs', this.job.id) : null;
+          if (!j) return;
+          const m = moneyOf(j);
+          this.money = m;
+          Object.assign(this.job, { status: j.status, total: Number(j.total) || 0, paid_amount: m.paid, due_amount: m.due, credit_amount: m.credit });
+          this.payments = utils.sortBy(db.all('repair_payments').filter((p) => p.job_id == j.id), (p) => String(p.created_at) + '|' + utils.pad(p.id, 8)).map((p) => ({ ...p, amount: Number(p.amount) || 0 }));
+        },
+        normalizeConsumed(j) {
+          if (idx(j.status) < idx('in_progress')) return;
+          let changed = false;
+          db.all('repair_items').forEach((i) => { if (i.job_id == j.id && i.type === 'part' && i.consumed === undefined) { i.consumed = 1; changed = true; } });
+          if (changed) db.save();
+        },
+
+        /* --------------------------------------------------------- derived */
+        get isOpen() { return !!this.job && OPEN.includes(this.job.status); },
+        get overdue() { return !!this.job && !!this.job.promised_at && !['ready', 'delivered', 'cancelled'].includes(this.job.status) && new Date(this.job.promised_at) < new Date(); },
+        get overdueText() { const ms = Date.now() - new Date(this.job.promised_at).getTime(); const h = Math.floor(ms / 3600000); return h < 24 ? h + ' hour' + (h === 1 ? '' : 's') + ' late' : Math.floor(h / 24) + ' day' + (Math.floor(h / 24) === 1 ? '' : 's') + ' late'; },
+        get deviceLabel() { return [this.job.brand, this.job.model].filter(Boolean).join(' ') || db.deviceTypeLabel(this.job.device_type); },
+        get deviceIcon() { return ({ mobile: 'phone', tablet: 'tablet', smartwatch: 'watch', laptop: 'laptop', desktop: 'desktop' })[this.job.device_type] || 'cube'; },
+        get serialLabel() { return db.serialLabel({ serial_type: this.job.serial_type, device_type: this.job.device_type }); },
+        get accessories() { return String(this.job.accessories_received || 'Device only').split(',').map((s) => s.trim()).filter(Boolean); },
+        get checklistBadges() { const c = this.job.condition_checklist; if (!c) return []; return [{ label: 'Screen', ok: !!c.screen_ok }, { label: 'Buttons', ok: !!c.buttons_ok }, { label: 'Ports', ok: !!c.ports_ok }, { label: c.water_damage ? 'Water damage' : 'No water damage', ok: !c.water_damage }]; },
+        get warrantyEnd() { if (!this.job.delivered_at || !this.job.warranty_days) return null; return utils.addDays(this.job.delivered_at, Number(this.job.warranty_days)); },
+        get advanceTotal() { return utils.sum(this.payments.filter((p) => p.kind === 'advance' && !p.voided_by_id), 'amount'); },
+        get technicians() { return db.technicians(this.job.branch_id); },
+        get canEdit() {
+          if (!this.job) return false;
+          if (!session.can('repairs.edit')) return false;
+          return this.inMyScope;
+        },
+        /** A bench technician may only touch their own and unassigned jobs at their branch. */
+        get inMyScope() {
+          if (!this.job) return false;
+          if (bench) return Number(this.job.branch_id) === Number(session.branchId()) && (!this.job.technician_id || Number(this.job.technician_id) === Number(user.id));
+          return true;
+        },
+        get canDeliver() { return session.can('repairs.deliver'); },
+        get canPay() { return session.can('repairs.deliver'); },
+        /** Payments are taken while the job is open, and afterwards only for a balance still due on it. */
+        get canAddPayment() { return this.canPay && !!this.job && this.job.status !== 'cancelled' && (this.isOpen || this.job.due_amount > 0); },
+        get canRefundPerm() { return session.can('repairs.deliver'); },
+        get canRefund() { return this.canRefundPerm && !!this.job && this.money.refundable > 0.005; },
+        /** Voiding a mistaken payment: job editors who run the desk (a bench technician never touches money). */
+        get canVoid() { return !!this.job && session.can('repairs.edit') && !bench && this.inMyScope; },
+        voidable(p) { return this.canVoid && p.kind !== 'refund' && !p.voided_by_id && Number(p.amount) <= this.money.paid + 0.005; },
+        kindBadge(p) {
+          if (p.kind === 'refund') return p.voids_payment_id ? '<span class="badge badge-slate badge-dot">Void</span>' : '<span class="badge badge-red badge-dot">Refund</span>';
+          const label = utils.escape(utils.titleCase(p.kind || 'payment'));
+          if (p.voided_by_id) return `<span class="badge badge-slate badge-dot">${label} · voided</span>`;
+          return ui.badge(p.kind === 'advance' ? 'pending' : p.kind === 'final' ? 'completed' : 'partial', utils.titleCase(p.kind || 'payment'));
+        },
+        payLabel(p) {
+          if (p.kind === 'refund') return (p.voids_payment_id ? 'Void' : 'Refund') + ' · ' + ui.statusLabel(p.method);
+          return utils.titleCase(p.kind || 'payment') + ' · ' + ui.statusLabel(p.method) + (p.voided_by_id ? ' (voided)' : '');
+        },
+        isNonCash(m) { return bank.isNonCash(m); },
+        accountName(id) { return accountName(id); },
+        get bankAccounts() { return this.job ? bank.accounts(this.job.branch_id).filter((a) => a.is_active) : []; },
+        defaultAccountLabel(method) { if (!this.job || !bank.isNonCash(method)) return ''; const id = bank.accountFor(method, this.job.branch_id); return id ? accountName(id) : 'no account set up'; },
+        /** Can the unpaid part go on this customer's khata? Same rule as a POS credit sale. */
+        creditCheck(amount) {
+          const c = this.job && this.job.customer_id ? db.find('customers', this.job.customer_id) : null;
+          if (!c || c.is_walkin) return { ok: false, reason: 'walkin', name: c ? c.name : 'Walk-in Customer', limit: 0, balance: 0, newBalance: 0 };
+          const limit = r2(Number(c.credit_limit) || 0), balance = r2(Number(c.balance) || 0), newBalance = r2(balance + (Number(amount) || 0));
+          if (limit <= 0) return { ok: false, reason: 'nolimit', name: c.name, limit, balance, newBalance };
+          if (newBalance > limit + 0.005) return { ok: false, reason: 'exceeds', name: c.name, limit, balance, newBalance };
+          return { ok: true, reason: '', name: c.name, limit, balance, newBalance };
+        },
+        get dmCredit() { return this.creditCheck(Math.max(0, this.dmRemaining)); },
+        get canAssign() { return session.can('repairs.assign'); },
+        get canCancel() { return !!this.job && session.can('repairs.delete') && this.inMyScope; },
+        get pipeline() {
+          const j = this.job; const cur = idx(j.status);
+          let failedAt = -1;
+          if (j.status === 'cancelled') { const last = [...this.log].reverse().filter((l) => l.status !== 'cancelled').pop(); failedAt = last ? Math.max(0, idx(last.status)) : 0; }
+          return FLOW.map((key, i) => ({ key, label: ui.statusLabel(key), state: j.status === 'cancelled' ? (i < failedAt ? 'done' : i === failedAt ? 'failed' : '') : (i < cur || j.status === 'delivered' ? 'done' : i === cur ? 'current' : '') }));
+        },
+        get actions() {
+          const j = this.job; if (!j) return [];
+          const out = [];
+          const st = (key, label, icon, cls, hint) => out.push({ key, type: 'status', label, icon, cls, hint });
+          if (this.canEdit) {
+            switch (j.status) {
+              case 'received': st('diagnosing', 'Start diagnosis', 'search', 'btn-primary'); out.push({ key: 'quote', type: 'quote', label: 'Send quote', icon: 'document', cls: 'btn-secondary' }); break;
+              case 'diagnosing': out.push({ key: 'quote', type: 'quote', label: 'Send quote', icon: 'document', cls: 'btn-primary' }); st('in_progress', 'Start work', 'wrench', 'btn-secondary', 'no quote'); st('awaiting_parts', 'Waiting for parts', 'truck', 'btn-secondary'); break;
+              case 'awaiting_approval':
+                if (!j.approved_by_customer) { out.push({ key: 'approve', type: 'approve', label: 'Customer approved', icon: 'check-circle', cls: 'btn-money' }); out.push({ key: 'decline', type: 'decline', label: 'Customer declined', icon: 'x-circle', cls: 'btn-secondary' }); }
+                else { st('in_progress', 'Start work', 'wrench', 'btn-primary'); st('awaiting_parts', 'Waiting for parts', 'truck', 'btn-secondary'); }
+                break;
+              case 'awaiting_parts': st('in_progress', 'Parts arrived — start work', 'wrench', 'btn-primary'); break;
+              case 'in_progress': st('ready', 'Mark ready for pickup', 'check-circle', 'btn-money'); st('awaiting_parts', 'Waiting for parts', 'truck', 'btn-secondary'); break;
+              case 'ready': break;
+            }
+          }
+          if (j.status === 'ready') { if (this.canDeliver) out.push({ key: 'deliver', type: 'deliver', label: 'Deliver to customer', icon: 'truck', cls: 'btn-money', hint: j.due_amount > 0 ? 'due ' + utils.money(j.due_amount, { decimals: 0 }) : 'paid' }); if (this.canEdit) st('in_progress', 'Reopen work', 'refresh', 'btn-secondary'); }
+          return out;
+        },
+        get consumedCount() { return this.items.filter((l) => l.type === 'part' && l.consumed).length; },
+        get consumeNow() { return idx(this.job.status) >= idx('in_progress'); },
+        unconsumedCount() { return this.items.filter((l) => l.type === 'part' && l.product_id && !l.consumed && db.isStockTracked(l.product_id)).length; },
+        stockCheck() {
+          if (db.setting('allow_negative_stock')) return '';
+          for (const l of this.items.filter((x) => x.type === 'part' && x.product_id && !x.consumed && db.isStockTracked(x.product_id))) {
+            const q = ABM.stock.qty(this.job.branch_id, l.product_id);
+            if (q < l.quantity) return `Insufficient stock for ${db.productLabel(l.product_id)} (available ${q}, needed ${l.quantity}). Receive the part or set the job to Awaiting Parts.`;
+          }
+          return '';
+        },
+        stockOf(pid) { return ABM.stock.qty(this.job.branch_id, pid); },
+        openJobsOf(techId) { return db.all('repair_jobs').filter((x) => x.technician_id == techId && OPEN.includes(x.status)).length; },
+        get waNumber() { const d = String(this.customer.phone || '').replace(/\D/g, ''); if (!d) return ''; return d.startsWith('0') ? '92' + d.slice(1) : d; },
+        get smsText() {
+          const t = this.settings.repair_sms_template || 'Dear {customer}, your {device} (Job {job_no}) is {status}. Total Rs {total}. - ' + (this.settings.company_name || 'Abbott Mobile');
+          const statusText = this.job.status === 'ready' ? 'ready for pickup' : this.job.status === 'delivered' ? 'delivered' : ui.statusLabel(this.job.status).toLowerCase();
+          const total = this.job.total > 0 ? this.job.total : this.job.estimated_cost;
+          return t.replace(/\{customer\}/g, this.customer.name).replace(/\{device\}/g, this.deviceLabel).replace(/\{job_no\}/g, this.job.job_no).replace(/\{status\}/g, statusText).replace(/\{total\}/g, utils.num(total)).replace(/\{due\}/g, utils.num(this.job.due_amount)).replace(/\{branch\}/g, this.branch.name || '');
+        },
+
+        /* --------------------------------------------------- core helpers */
+        logStatus(status, notes) { db.insert('repair_status_log', { job_id: this.job.id, status, notes: notes || '', user_id: user.id || null }); },
+        recalc() {
+          const items = db.all('repair_items').filter((i) => i.job_id == this.job.id);
+          const parts = utils.sum(items.filter((i) => i.type === 'part'), 'total');
+          const labor = utils.sum(items.filter((i) => i.type === 'labor'), 'total');
+          const j = db.find('repair_jobs', this.job.id);
+          const discount = utils.round2(j.discount || 0);
+          const total = Math.max(0, utils.round2(parts + labor - discount));
+          // paid_amount is NET (payments − refunds); what went to the khata is no longer due on the job
+          const m = moneyOf({ ...j, total });
+          db.update('repair_jobs', this.job.id, { total_parts: parts, total_labor: labor, total, paid_amount: m.paid, due_amount: m.due });
+          this.load();
+        },
+        /**
+         * Money IN on a job: one repair_payments row stamped with the cashier's open drawer. Card, wallet and
+         * transfer money also lands in its bank account (bank row first, so a refused posting records nothing),
+         * and the two rows point at each other.
+         */
+        recordPayment(job, o) {
+          const amount = r2(o.amount);
+          const acc = bank.isNonCash(o.method) ? (o.account || resolveAccount(o.method, o.account_id, job.branch_id)) : null;
+          const reference = o.method === 'cash' ? null : (String(o.reference || '').trim() || null);
+          const who = (db.customer(job.customer_id) || {}).name || 'Walk-in Customer';
+          const txn = acc ? bank.receive(o.method, amount, { accountId: acc.id, branchId: job.branch_id, reference: reference || job.job_no, party: who, notes: `Repair ${o.kind} · ${job.job_no}`, ref: { type: 'repair_payment', id: null } }) : null;
+          const row = db.insert('repair_payments', { job_id: job.id, method: o.method, amount, reference, kind: o.kind, notes: o.notes || '', shift_id: shiftIdFor(job.branch_id), bank_txn_id: txn ? txn.id : null, account_id: acc ? acc.id : null, created_by: user.id || null });
+          if (txn) db.update('bank_transactions', txn.id, { reference_id: row.id });
+          return { row, acc };
+        },
+        consumeParts() {
+          const err = this.stockCheck(); if (err) throw new Error(err);
+          const lines = db.all('repair_items').filter((i) => i.job_id == this.job.id && i.type === 'part' && i.product_id && !i.consumed && db.isStockTracked(i.product_id));
+          lines.forEach((l) => { const cost = ABM.stock.remove(this.job.branch_id, l.product_id, l.quantity, 'repair', { type: 'repair_job', id: this.job.id }, { notes: 'Used on ' + this.job.job_no }); db.update('repair_items', l.id, { consumed: 1, consumed_at: utils.now(), unit_cost: utils.round2(cost) }); });
+          return lines.length;
+        },
+        returnParts(note) {
+          const lines = db.all('repair_items').filter((i) => i.job_id == this.job.id && i.type === 'part' && i.consumed);
+          lines.forEach((l) => { ABM.stock.add(this.job.branch_id, l.product_id, l.quantity, l.unit_cost, 'adjustment', { type: 'repair_job', id: this.job.id }, null, note); db.update('repair_items', l.id, { consumed: 0, consumed_at: null }); });
+          return lines.length;
+        },
+        applyStatus(status, notes, extra = {}) {
+          const fresh = db.find('repair_jobs', this.job.id);
+          const patch = { status, ...extra };
+          let consumed = 0;
+          if (idx(status) >= idx('in_progress')) consumed = this.consumeParts();
+          if (status === 'awaiting_approval' && !fresh.quoted_at) patch.quoted_at = utils.now();
+          if (status === 'ready' && !fresh.completed_at) patch.completed_at = utils.now();
+          if (status === 'in_progress' && fresh.status === 'ready') patch.completed_at = null;
+          db.update('repair_jobs', fresh.id, patch);
+          const note = [notes, consumed ? `${consumed} part line${consumed === 1 ? '' : 's'} consumed from stock` : ''].filter(Boolean).join(' · ');
+          this.logStatus(status, note);
+          db.audit('repair.status', 'repair_job', fresh.id, `${fresh.job_no} ${fresh.status} -> ${status}${notes ? ' (' + notes + ')' : ''}`);
+          this.recalc();
+        },
+
+        /* ---------------------------------------------------------- actions */
+        runAction(a) {
+          if (a.type === 'status') this.openStatus(a.key, a.label);
+          else if (a.type === 'quote') this.openQuote();
+          else if (a.type === 'approve') this.openApprove();
+          else if (a.type === 'decline') { this.openCancel(); this.cm.reason = 'Customer declined the quote'; }
+          else if (a.type === 'deliver') this.openDeliver();
+        },
+        openStatus(target, label) {
+          const needs = idx(target) >= idx('in_progress');
+          this.st = { open: true, kind: 'status', target, title: label, notes: '', placeholder: target === 'ready' ? 'What was done, tests performed…' : target === 'awaiting_parts' ? 'Which part is needed / ordered' : 'Optional', confirm: label, cls: target === 'ready' ? 'btn-money' : 'btn-primary', next: '', consume: needs ? this.unconsumedCount() : 0, stockError: needs ? this.stockCheck() : '', busy: false };
+          this.$nextTick(() => this.$refs.stNotes && this.$refs.stNotes.focus());
+        },
+        openApprove() {
+          const stockOk = !this.stockCheck();
+          const next = stockOk ? 'in_progress' : 'awaiting_parts';
+          this.st = { open: true, kind: 'approve', target: next, title: 'Customer approved the quote', notes: '', placeholder: 'How the approval was given (phone, in person, WhatsApp)…', confirm: 'Record approval', cls: 'btn-money', next, consume: next === 'in_progress' ? this.unconsumedCount() : 0, stockError: next === 'in_progress' ? this.stockCheck() : '', busy: false };
+          this.$nextTick(() => this.$refs.stNotes && this.$refs.stNotes.focus());
+        },
+        saveStatus() {
+          this.st.busy = true;
+          try {
+            if (this.st.kind === 'approve') {
+              db.update('repair_jobs', this.job.id, { approved_by_customer: 1, approval_note: String(this.st.notes || '').trim(), approved_at: utils.now() });
+              db.audit('repair.approve', 'repair_job', this.job.id, `${this.job.job_no} quote ${utils.money(this.job.estimated_cost, { decimals: 0 })} approved by customer`);
+              if (this.st.next) this.applyStatus(this.st.next, 'Customer approved the quote' + (this.st.notes ? ' — ' + this.st.notes : ''));
+              else { this.logStatus('awaiting_approval', 'Customer approved the quote' + (this.st.notes ? ' — ' + this.st.notes : '')); this.load(); }
+              ui.success('Approval recorded.');
+            } else {
+              const target = this.st.target;
+              this.applyStatus(target, this.st.notes);
+              ui.success('Job moved to ' + ui.statusLabel(target) + '.');
+              if (target === 'ready') this.openSms();
+            }
+            this.st.open = false;
+          } catch (e) { ui.error(e.message || 'Could not update the job.'); }
+          finally { this.st.busy = false; }
+        },
+        toggleApproval() {
+          if (!(this.canEdit && this.isOpen)) return;
+          if (this.job.approved_by_customer) {
+            db.update('repair_jobs', this.job.id, { approved_by_customer: 0 });
+            this.logStatus(this.job.status, 'Customer approval withdrawn');
+            db.audit('repair.approve', 'repair_job', this.job.id, `${this.job.job_no} approval withdrawn`);
+            ui.toast('Approval cleared.', 'info'); this.load();
+          } else this.openApprove();
+        },
+        openQuote() { this.qm = { open: true, estimate: this.job.estimated_cost || (this.items.length ? utils.round2(this.job.total_parts + this.job.total_labor - this.job.discount) : ''), notes: '', error: '', busy: false }; this.$nextTick(() => this.$refs.qmEst && this.$refs.qmEst.focus()); },
+        saveQuote() {
+          const v = Number(this.qm.estimate);
+          if (!(v > 0)) { this.qm.error = 'Enter the quoted amount.'; return; }
+          this.qm.busy = true;
+          try {
+            db.update('repair_jobs', this.job.id, { estimated_cost: utils.round2(v), quoted_at: utils.now(), approved_by_customer: 0, approval_note: '' });
+            db.audit('repair.quote', 'repair_job', this.job.id, `${this.job.job_no} quoted ${utils.money(v, { decimals: 0 })}`);
+            if (this.job.status !== 'awaiting_approval') this.applyStatus('awaiting_approval', 'Quote ' + utils.money(v, { decimals: 0 }) + ' sent to customer' + (this.qm.notes ? ' — ' + this.qm.notes : ''));
+            else { this.logStatus('awaiting_approval', 'Re-quoted ' + utils.money(v, { decimals: 0 }) + (this.qm.notes ? ' — ' + this.qm.notes : '')); this.load(); }
+            ui.success('Quote sent — awaiting customer approval.');
+            this.qm.open = false; this.openSms();
+          } catch (e) { ui.error(e.message); }
+          finally { this.qm.busy = false; }
+        },
+        saveDiagnosis() {
+          this.diagBusy = true;
+          try {
+            db.update('repair_jobs', this.job.id, { diagnosis: String(this.diagnosis || '').trim() });
+            this.logStatus(this.job.status, 'Diagnosis updated: ' + String(this.diagnosis || '').trim().slice(0, 120));
+            db.audit('repair.diagnosis', 'repair_job', this.job.id, `${this.job.job_no} diagnosis updated`);
+            ui.success('Diagnosis saved.'); this.load();
+          } finally { this.diagBusy = false; }
+        },
+        saveDiscount() {
+          const d = Number(this.discountInput);
+          if (isNaN(d) || d < 0) { ui.error('Discount must be 0 or more.'); return; }
+          if (d > this.job.total_parts + this.job.total_labor) { ui.error('Discount cannot exceed the parts + labor total.'); return; }
+          db.update('repair_jobs', this.job.id, { discount: utils.round2(d) });
+          db.audit('repair.discount', 'repair_job', this.job.id, `${this.job.job_no} discount set to ${utils.money(d, { decimals: 0 })}`);
+          this.recalc(); ui.success('Discount saved.');
+        },
+
+        /* ------------------------------------------------------ deliver */
+        openDeliver() {
+          const due = this.job.due_amount;
+          this.dm = { open: true, rows: [{ method: 'cash', amount: due > 0 ? due : 0, reference: '', account_id: '' }], warranty_days: this.job.warranty_days || Number(db.setting('repair_default_warranty_days')) || 7, notes: '', allowPartial: false, error: '', busy: false };
+        },
+        get dmSum() { return utils.sum(this.dm.rows, (r) => Number(r.amount) || 0); },
+        get dmRemaining() { return utils.round2(this.job.due_amount - this.dmSum); },
+        /**
+         * Hand the device over. Whatever is collected is recorded (bank money lands in its account); an unpaid
+         * balance can only leave with the device on a registered customer's khata, within their credit limit
+         * unless a manager approves — it is then debited to their ledger and is no longer due on the job.
+         */
+        async saveDeliver() {
+          if (this.dm.busy) return;
+          // re-read: another tab may have taken a payment or delivered this job since the page opened
+          const fresh = db.find('repair_jobs', this.job.id);
+          if (!fresh || fresh.status !== 'ready') { this.dm.error = 'This job is ' + (fresh ? ui.statusLabel(fresh.status).toLowerCase() : 'no longer on file') + ' now — it was changed elsewhere. Close this window and check the job card.'; this.load(); return; }
+          const m = moneyOf(fresh);
+          const rows = this.dm.rows.filter((r) => Number(r.amount) > 0);
+          const collected = r2(utils.sum(rows, (r) => Number(r.amount) || 0));
+          const remaining = r2(m.due - collected);
+          if (m.due > 0) {
+            if (collected > m.due + 0.001) { this.dm.error = 'Collected amount exceeds the balance due (' + utils.money(m.due) + ').'; return; }
+            if (remaining > 0 && !this.dm.allowPartial) { this.dm.error = 'The full balance is not covered — collect the rest or put it on the customer’s khata.'; return; }
+            const missingRef = rows.find((r) => r.method !== 'cash' && !String(r.reference || '').trim());
+            if (missingRef) { this.dm.error = 'Enter the transaction reference for ' + ui.statusLabel(missingRef.method) + '.'; return; }
+          } else if (collected > 0) { this.dm.error = 'Nothing is due on this job — remove the payment lines.'; return; }
+          const accounts = [];
+          try { rows.forEach((r) => accounts.push(resolveAccount(r.method, r.account_id, fresh.branch_id))); } catch (e) { this.dm.error = e.message; return; }
+          const credit = remaining > 0.005 ? remaining : 0;
+          const cc = credit > 0 ? this.creditCheck(credit) : null;
+          if (cc && cc.reason === 'walkin') { this.dm.error = 'A walk-in customer must pay in full — collect the balance, or attach the job to a registered customer to give credit.'; return; }
+          if (cc && !cc.ok && !canOverride) { this.dm.error = cc.reason === 'nolimit' ? `${cc.name} has no credit limit — a manager must approve credit.` : `Credit limit ${utils.money(cc.limit)} would be exceeded (khata ${utils.money(cc.newBalance)}) — a manager must approve.`; return; }
+          const w = Number(this.dm.warranty_days); if (isNaN(w) || w < 0 || w > 365) { this.dm.error = 'Warranty days must be between 0 and 365.'; return; }
+          // Validate every write before applying any of them (no rollback in the prototype): delivery also
+          // consumes any part line that is still unconsumed, so check stock BEFORE recording the money.
+          const stockErr = this.stockCheck();
+          if (stockErr) { this.dm.error = stockErr; return; }
+          let override = false;
+          if (cc && !cc.ok) {
+            const ok = await ui.confirm({ title: 'Approve credit beyond limit?', message: `${cc.name}: khata ${utils.money(cc.balance)} → ${utils.money(cc.newBalance)} against a limit of ${cc.limit > 0 ? utils.money(cc.limit) : 'none'}. Put ${utils.money(credit)} for ${fresh.job_no} on khata as ${ABM.roles.label(role)}?`, confirmText: 'Approve credit', danger: true });
+            if (!ok) return;
+            override = true;
+            const again = db.find('repair_jobs', fresh.id);
+            if (!again || again.status !== 'ready' || Math.abs(moneyOf(again).due - m.due) > 0.005) { this.dm.error = 'The job changed while you were approving — check it and try again.'; this.load(); return; }
+          }
+          this.dm.error = ''; this.dm.busy = true;
+          try {
+            const kind = credit > 0 ? 'payment' : 'final';
+            rows.forEach((r, i) => this.recordPayment(fresh, { method: r.method, amount: r.amount, reference: r.reference, account: accounts[i], kind, notes: this.dm.notes || '' }));
+            if (credit > 0) {
+              const t = ABM.ledger.customer(fresh.customer_id, fresh.branch_id, 'repair', credit, 0, { referenceType: 'repair_job', referenceId: fresh.id, notes: `Repair ${fresh.job_no} delivered on credit${override ? ' (credit limit override by ' + (user.name || 'manager') + ')' : ''}` });
+              db.update('repair_jobs', fresh.id, { credit_amount: r2((Number(fresh.credit_amount) || 0) + credit), on_credit: 1, credit_txn_id: t.id, credit_at: utils.now() });
+              db.audit('repair.credit', 'repair_job', fresh.id, `${fresh.job_no}: ${utils.money(credit)} moved to ${cc.name}'s khata (balance ${utils.money(cc.newBalance)})`, fresh.branch_id);
+              if (override) db.audit('repair.credit_override', 'repair_job', fresh.id, `${user.name || 'Manager'} approved credit beyond limit for ${fresh.job_no}: khata ${utils.money(cc.balance)} → ${utils.money(cc.newBalance)} (limit ${cc.limit > 0 ? utils.money(cc.limit) : 'none'})`, fresh.branch_id);
+            }
+            const how = (collected > 0 ? ' · collected ' + utils.money(collected, { decimals: 0 }) + ' (' + rows.map((r) => ui.statusLabel(r.method)).join(', ') + ')' : '') + (credit > 0 ? ' · ' + utils.money(credit, { decimals: 0 }) + ' to khata' : '');
+            this.applyStatus('delivered', 'Device handed over' + how + (this.dm.notes ? ' — ' + this.dm.notes : ''), { delivered_at: utils.now(), warranty_days: w });
+            db.audit('repair.deliver', 'repair_job', fresh.id, `${fresh.job_no} delivered, collected ${utils.money(collected, { decimals: 0 })}${credit > 0 ? ', ' + utils.money(credit, { decimals: 0 }) + ' on khata' : ''}`, fresh.branch_id);
+            ui.success(credit > 0 ? `Delivered. ${utils.money(credit, { decimals: 0 })} moved to ${cc.name}'s khata.` : 'Delivered. Invoice ready to print.');
+            this.dm.open = false; this.openPrint('invoice');
+          } catch (e) { ui.error(e.message || 'Could not deliver.'); this.load(); }
+          finally { this.dm.busy = false; }
+        },
+
+        /* ------------------------------------------------------- cancel */
+        openCancel() { this.cm = { open: true, reason: '', error: '', busy: false }; this.$nextTick(() => this.$refs.cmReason && this.$refs.cmReason.focus()); },
+        saveCancel() {
+          const reason = String(this.cm.reason || '').trim();
+          if (reason.length < 3) { this.cm.error = 'Give a reason for cancelling.'; return; }
+          this.cm.busy = true;
+          try {
+            const returned = this.returnParts('repair cancelled · ' + this.job.job_no);
+            db.update('repair_jobs', this.job.id, { status: 'cancelled', cancel_reason: reason, approved_by_customer: 0 });
+            this.logStatus('cancelled', reason + (returned ? ` · ${returned} part line${returned === 1 ? '' : 's'} returned to stock` : ''));
+            db.audit('repair.cancel', 'repair_job', this.job.id, `${this.job.job_no} cancelled: ${reason}`, this.job.branch_id);
+            ui.success('Job cancelled.'); this.cm.open = false; this.recalc();
+            // money still held on a cancelled job goes back through the refund screen (drawer / bank stay right)
+            if (this.canRefund) this.openRefund();
+          } catch (e) { ui.error(e.message); }
+          finally { this.cm.busy = false; }
+        },
+
+        /* -------------------------------------------------------- parts */
+        openPart() { this.pt = { open: true, q: '', product: null, qty: 1, price: '', errors: {}, busy: false }; this.$nextTick(() => this.$refs.ptQ && this.$refs.ptQ.focus()); },
+        get partResults() {
+          const q = String(this.pt.q || '').trim().toLowerCase();
+          const rows = db.all('products').filter((p) => p.is_active && ['part', 'accessory'].includes(db.productType(p)) && db.isStockTracked(p) && !db.isSerialized(p));
+          const list = rows.filter((p) => !q || [p.name, p.sku, p.model, p.variant, db.brandName(p.brand_id), db.categoryName(p.category_id)].some((v) => String(v || '').toLowerCase().includes(q)));
+          return utils.sortBy(list.map((p) => ({ ...p, label: db.productLabel(p.id), qty: ABM.stock.qty(this.job.branch_id, p.id) })), (p) => (db.productType(p) === 'part' ? '0' : '1') + p.label.toLowerCase()).slice(0, 12);
+        },
+        pickPart(p) {
+          const row = db.first('branch_stock', (s) => s.branch_id == this.job.branch_id && s.product_id == p.id);
+          this.pt.product = { ...p, cost: row && row.avg_cost ? row.avg_cost : p.cost_price };
+          this.pt.price = p.retail_price; this.pt.qty = 1; this.pt.errors = {};
+          this.$nextTick(() => this.$refs.ptQty && this.$refs.ptQty.focus());
+        },
+        savePart() {
+          const e = {}; const qty = Number(this.pt.qty), price = Number(this.pt.price);
+          if (!Number.isInteger(qty) || qty < 1) e.qty = 'Enter a whole quantity of 1 or more.';
+          if (this.pt.price === '' || isNaN(price) || price < 0) e.price = 'Enter a price of 0 or more.';
+          if (this.consumeNow && !db.setting('allow_negative_stock') && qty > this.pt.product.qty) e.stock = `Only ${this.pt.product.qty} in stock at ${db.branchName(this.job.branch_id)}.`;
+          this.pt.errors = e; if (Object.keys(e).length) return;
+          this.pt.busy = true;
+          try {
+            const p = this.pt.product;
+            const line = db.insert('repair_items', { job_id: this.job.id, type: 'part', product_id: p.id, description: p.label, quantity: qty, unit_price: utils.round2(price), unit_cost: utils.round2(p.cost), total: utils.round2(qty * price), consumed: 0 });
+            if (this.consumeNow) {
+              const cost = ABM.stock.remove(this.job.branch_id, p.id, qty, 'repair', { type: 'repair_job', id: this.job.id }, { notes: 'Used on ' + this.job.job_no });
+              db.update('repair_items', line.id, { consumed: 1, consumed_at: utils.now(), unit_cost: utils.round2(cost) });
+            }
+            this.logStatus(this.job.status, `Part added: ${qty} × ${p.label}` + (this.consumeNow ? ' (consumed from stock)' : ''));
+            db.audit('repair.item.add', 'repair_job', this.job.id, `${this.job.job_no} part ${p.sku} × ${qty}`);
+            ui.success('Part added.'); this.pt.open = false; this.recalc();
+          } catch (err) { ui.error(err.message); }
+          finally { this.pt.busy = false; }
+        },
+        openLabor() { this.lm = { open: true, mode: 'service', product_id: '', description: '', qty: 1, price: '', errors: {}, busy: false }; this.$nextTick(() => this.$refs.lmService && this.$refs.lmService.focus()); },
+        onServiceChange() { const s = db.product(this.lm.product_id); if (s) { this.lm.description = s.name; this.lm.price = s.retail_price; } },
+        saveLabor() {
+          const e = {}; const qty = Number(this.lm.qty), price = Number(this.lm.price);
+          let desc = String(this.lm.description || '').trim(); let pid = null;
+          if (this.lm.mode === 'service') { const s = db.product(this.lm.product_id); if (!s) e.product_id = 'Select a service.'; else { pid = s.id; desc = s.name; } }
+          else if (!desc) e.description = 'Describe the charge.';
+          if (!Number.isInteger(qty) || qty < 1) e.qty = 'Enter a whole quantity of 1 or more.';
+          if (this.lm.price === '' || isNaN(price) || price < 0) e.price = 'Enter a price of 0 or more.';
+          this.lm.errors = e; if (Object.keys(e).length) return;
+          this.lm.busy = true;
+          try {
+            db.insert('repair_items', { job_id: this.job.id, type: 'labor', product_id: pid, description: desc, quantity: qty, unit_price: utils.round2(price), unit_cost: 0, total: utils.round2(qty * price), consumed: 0 });
+            this.logStatus(this.job.status, `Labor added: ${desc} ${utils.money(qty * price, { decimals: 0 })}`);
+            db.audit('repair.item.add', 'repair_job', this.job.id, `${this.job.job_no} labor "${desc}" ${utils.money(qty * price, { decimals: 0 })}`);
+            ui.success('Labor added.'); this.lm.open = false; this.recalc();
+          } finally { this.lm.busy = false; }
+        },
+        openEditLine(l) { this.em = { open: true, line: l, qty: l.quantity, price: l.unit_price, description: l.description, errors: {}, busy: false }; this.$nextTick(() => this.$refs.emQty && this.$refs.emQty.focus()); },
+        saveEditLine() {
+          const e = {}; const l = this.em.line; const qty = l.consumed ? l.quantity : Number(this.em.qty); const price = Number(this.em.price);
+          if (!Number.isInteger(qty) || qty < 1) e.qty = 'Enter a whole quantity of 1 or more.';
+          if (this.em.price === '' || isNaN(price) || price < 0) e.price = 'Enter a price of 0 or more.';
+          this.em.errors = e; if (Object.keys(e).length) return;
+          this.em.busy = true;
+          try {
+            const desc = l.type === 'labor' && !l.product_id ? (String(this.em.description || '').trim() || l.description) : l.description;
+            db.update('repair_items', l.id, { quantity: qty, unit_price: utils.round2(price), total: utils.round2(qty * price), description: desc });
+            db.audit('repair.item.update', 'repair_job', this.job.id, `${this.job.job_no} line "${desc}" -> ${qty} × ${utils.money(price, { decimals: 0 })}`);
+            ui.success('Line updated.'); this.em.open = false; this.recalc();
+          } finally { this.em.busy = false; }
+        },
+        async removeLine(l) {
+          const ok = await ui.confirm({ title: 'Remove line?', message: `${l.description} will be removed from the job${l.consumed ? ' and ' + l.quantity + ' unit' + (l.quantity === 1 ? '' : 's') + ' returned to stock' : ''}.`, confirmText: 'Remove', danger: true });
+          if (!ok) return;
+          try {
+            if (l.consumed) ABM.stock.add(this.job.branch_id, l.product_id, l.quantity, l.unit_cost, 'adjustment', { type: 'repair_job', id: this.job.id }, null, 'Part removed from ' + this.job.job_no);
+            db.remove('repair_items', l.id);
+            this.logStatus(this.job.status, `Line removed: ${l.description}` + (l.consumed ? ' (returned to stock)' : ''));
+            db.audit('repair.item.remove', 'repair_job', this.job.id, `${this.job.job_no} line "${l.description}" removed`);
+            ui.success('Line removed.'); this.recalc();
+          } catch (e) { ui.error(e.message); }
+        },
+
+        /* ----------------------------------------------------- payments */
+        openPayment() { this.pay = { open: true, amount: this.job.due_amount > 0 ? this.job.due_amount : '', method: 'cash', account_id: '', reference: '', notes: '', errors: {}, busy: false }; this.$nextTick(() => this.$refs.payAmount && this.$refs.payAmount.focus()); },
+        savePayment() {
+          if (this.pay.busy) return;
+          const fresh = db.find('repair_jobs', this.job.id);
+          const m = fresh ? moneyOf(fresh) : null;
+          const e = {}; const amt = Number(this.pay.amount);
+          if (!fresh || fresh.status === 'cancelled') e.amount = 'This job was cancelled — no payment can be taken on it.';
+          else if (!(amt > 0)) e.amount = 'Enter an amount greater than zero.';
+          else if (m.total > 0 && amt > m.due + 0.001) e.amount = m.due > 0 ? 'Amount exceeds the balance due (' + utils.money(m.due) + ').' : 'Nothing is due on this job.';
+          let acc = null;
+          if (!e.amount) { try { acc = resolveAccount(this.pay.method, this.pay.account_id, fresh.branch_id); } catch (err) { e.account = err.message; } }
+          this.pay.errors = e; if (Object.keys(e).length) { this.refreshMoney(); return; }
+          this.pay.busy = true;
+          try {
+            const kind = m.total <= 0 ? 'advance' : (amt >= m.due - 0.001 ? 'final' : 'payment');
+            this.recordPayment(fresh, { method: this.pay.method, amount: amt, reference: this.pay.reference, account: acc, kind, notes: this.pay.notes || '' });
+            this.logStatus(fresh.status, `Payment ${utils.money(amt, { decimals: 0 })} received (${ui.statusLabel(this.pay.method)}${acc ? ' → ' + acc.name : ''})`);
+            db.audit('repair.payment', 'repair_job', fresh.id, `${fresh.job_no} payment ${utils.money(amt, { decimals: 0 })} via ${this.pay.method}${acc ? ' into ' + acc.name : ''}`, fresh.branch_id);
+            ui.success('Payment of ' + utils.money(amt, { decimals: 0 }) + ' recorded' + (acc ? ' — ' + ui.statusLabel(this.pay.method) + ' into ' + accountName(acc.id) : '') + '.');
+            this.pay.open = false; this.recalc();
+          } catch (err) { ui.error(err.message || 'Could not record the payment.'); this.load(); }
+          finally { this.pay.busy = false; }
+        },
+
+        /* ------------------------------------------------------ refunds */
+        openRefund() {
+          this.refreshMoney();
+          if (!this.canRefund) { ui.warn('Nothing is refundable on this job.'); return; }
+          this.rf = { open: true, amount: this.money.refundable, method: 'cash', account_id: '', reference: '', notes: this.job.status === 'cancelled' ? 'Job cancelled — money returned' : 'Overpayment returned', errors: {}, busy: false };
+          this.$nextTick(() => this.$refs.rfAmount && this.$refs.rfAmount.focus());
+        },
+        /**
+         * Money OUT to the customer: a repair_payments row of kind 'refund' (positive amount) stamped with the
+         * drawer. Cash leaves the drawer (the shift and day-end count it); any other method leaves the bank or
+         * wallet account picked, and is refused if that would overdraw it.
+         */
+        saveRefund() {
+          if (this.rf.busy) return;
+          const fresh = db.find('repair_jobs', this.job.id);
+          const m = fresh ? moneyOf(fresh) : null;
+          const e = {}; const amt = r2(Number(this.rf.amount));
+          const notes = String(this.rf.notes || '').trim();
+          if (!fresh) e.amount = 'This job is no longer on file.';
+          else if (!(amt > 0)) e.amount = 'Enter an amount greater than zero.';
+          else if (amt > m.refundable + 0.005) e.amount = m.refundable > 0 ? 'Only ' + utils.money(m.refundable) + ' can be refunded on this job.' : 'Nothing is refundable on this job now.';
+          if (notes.length < 3) e.notes = 'Say why the money is going back.';
+          let acc = null;
+          if (!e.amount) {
+            if (bank.isNonCash(this.rf.method)) {
+              try {
+                acc = resolveAccount(this.rf.method, this.rf.account_id, fresh.branch_id);
+                if (!db.setting('allow_bank_overdraft') && bank.balance(acc.id) < amt - 0.005) e.account = `${acc.name} only holds ${utils.money(bank.balance(acc.id))} — pick another account or refund in cash.`;
+              } catch (err) { e.account = err.message; }
+            } else {
+              const sh = ABM.shift.current(user.id, fresh.branch_id);
+              if (sh) { const live = ABM.shift.tally(sh); if (amt > live.expected + 0.005) e.amount = `Only ${utils.money(live.expected)} is in your drawer.`; }
+            }
+          }
+          this.rf.errors = e; if (Object.keys(e).length) { this.refreshMoney(); return; }
+          this.rf.busy = true;
+          try {
+            const reference = this.rf.method === 'cash' ? null : (String(this.rf.reference || '').trim() || null);
+            const who = (db.customer(fresh.customer_id) || {}).name || 'Walk-in Customer';
+            const txn = acc ? bank.pay(this.rf.method, amt, { accountId: acc.id, branchId: fresh.branch_id, reference: reference || fresh.job_no, party: who, notes: `Repair refund · ${fresh.job_no} · ${notes}`, ref: { type: 'repair_payment', id: null } }) : null;
+            const row = db.insert('repair_payments', { job_id: fresh.id, kind: 'refund', method: this.rf.method, amount: amt, reference, notes, shift_id: shiftIdFor(fresh.branch_id), bank_txn_id: txn ? txn.id : null, account_id: acc ? acc.id : null, created_by: user.id || null });
+            if (txn) db.update('bank_transactions', txn.id, { reference_id: row.id });
+            this.logStatus(fresh.status, `Refund ${utils.money(amt, { decimals: 0 })} to customer (${ui.statusLabel(this.rf.method)}${acc ? ' from ' + acc.name : ''}) — ${notes}`);
+            db.audit('repair.refund', 'repair_job', fresh.id, `${fresh.job_no} refund ${utils.money(amt)} to ${who} via ${this.rf.method}${acc ? ' from ' + acc.name : ''}: ${notes}`, fresh.branch_id);
+            ui.success('Refund of ' + utils.money(amt, { decimals: 0 }) + ' recorded' + (acc ? ' — paid from ' + accountName(acc.id) : ' — paid from the cash drawer') + '.');
+            this.rf.open = false; this.recalc();
+          } catch (err) { ui.error(err.message || 'Could not record the refund.'); this.load(); }
+          finally { this.rf.busy = false; }
+        },
+
+        /* ------------------------------------------------ void a payment */
+        openVoid(p) {
+          if (!this.voidable(p)) { ui.warn('This payment cannot be voided.'); return; }
+          this.vd = { open: true, payment: p, reason: '', error: '', busy: false };
+          this.$nextTick(() => this.$refs.vdReason && this.$refs.vdReason.focus());
+        },
+        /**
+         * A payment keyed by mistake is never deleted: a kind 'refund' row with voids_payment_id reverses it
+         * (same method and amount) and the original is marked voided_by_id. Card / wallet / transfer money is
+         * taken back out of the account it landed in.
+         */
+        saveVoid() {
+          if (this.vd.busy || !this.vd.payment) return;
+          const reason = String(this.vd.reason || '').trim();
+          if (reason.length < 3) { this.vd.error = 'Say why this payment is being voided.'; return; }
+          const fresh = db.find('repair_jobs', this.job.id);
+          const orig = db.find('repair_payments', this.vd.payment.id);
+          if (!fresh || !orig || String(orig.job_id) !== String(fresh.id)) { this.vd.error = 'That payment is no longer on this job.'; this.refreshMoney(); return; }
+          if (orig.kind === 'refund') { this.vd.error = 'A refund cannot be voided here.'; return; }
+          if (orig.voided_by_id) { this.vd.error = 'This payment was already voided.'; this.refreshMoney(); return; }
+          const m = moneyOf(fresh);
+          if (Number(orig.amount) > m.paid + 0.005) { this.vd.error = `Only ${utils.money(m.paid)} is still held on this job — the rest was already refunded.`; return; }
+          this.vd.error = ''; this.vd.busy = true;
+          try {
+            const amount = r2(orig.amount);
+            let txnId = null, ownRow = false;
+            const t = bank.isNonCash(orig.method) && orig.bank_txn_id ? db.find('bank_transactions', orig.bank_txn_id) : null;
+            if (t) {
+              if (!t.reversed_by) {
+                if (Math.abs(Number(t.amount) - amount) < 0.005) {
+                  const rev = bank.undo(t.id, `Void ${fresh.job_no}: ${reason}`);
+                  txnId = rev ? rev.id : null;
+                } else {
+                  // an older day-settlement row carries several payments: take out only this one
+                  const rev = bank.post(t.account_id, { type: 'payment', amount, method: orig.method, reference: orig.reference || fresh.job_no, party: (db.customer(fresh.customer_id) || {}).name || '', notes: `Void of a repair payment in ${t.reference || 'a settlement'} · ${fresh.job_no}: ${reason}`, ref: { type: 'repair_payment', id: null }, allowOverdraft: true, branchId: fresh.branch_id });
+                  txnId = rev.id; ownRow = true;
+                }
+              }
+            }
+            const row = db.insert('repair_payments', { job_id: fresh.id, kind: 'refund', method: orig.method, amount, reference: orig.reference || null, voids_payment_id: orig.id, notes: 'Void: ' + reason, shift_id: shiftIdFor(fresh.branch_id), bank_txn_id: txnId, account_id: orig.account_id || (t ? t.account_id : null), created_by: user.id || null });
+            if (ownRow) db.update('bank_transactions', txnId, { reference_id: row.id });
+            db.update('repair_payments', orig.id, { voided_by_id: row.id, voided_at: utils.now(), void_reason: reason });
+            this.logStatus(fresh.status, `Payment ${utils.money(amount, { decimals: 0 })} (${ui.statusLabel(orig.method)}) voided — ${reason}`);
+            db.audit('repair.payment.void', 'repair_job', fresh.id, `${fresh.job_no} payment #${orig.id} ${utils.money(amount)} via ${orig.method} voided${txnId ? ' (bank entry reversed)' : ''}: ${reason}`, fresh.branch_id);
+            ui.success('Payment voided.' + (txnId ? ' The bank entry was reversed.' : ''));
+            this.vd.open = false; this.recalc();
+          } catch (err) { ui.error(err.message || 'Could not void the payment.'); this.load(); }
+          finally { this.vd.busy = false; }
+        },
+
+        /* ------------------------------------------------------- assign */
+        openAssign() { this.am = { open: true, technician_id: this.job.technician_id ? String(this.job.technician_id) : '', notes: '', busy: false }; this.$nextTick(() => this.$refs.amTech && this.$refs.amTech.focus()); },
+        saveAssign() {
+          this.am.busy = true;
+          try {
+            const tid = this.am.technician_id ? Number(this.am.technician_id) : null;
+            db.update('repair_jobs', this.job.id, { technician_id: tid });
+            this.logStatus(this.job.status, (tid ? 'Assigned to ' + db.userName(tid) : 'Technician unassigned') + (this.am.notes ? ' — ' + this.am.notes : ''));
+            db.audit('repair.assign', 'repair_job', this.job.id, `${this.job.job_no} ${tid ? 'assigned to ' + db.userName(tid) : 'unassigned'}`);
+            ui.success('Technician updated.'); this.am.open = false; this.load();
+          } finally { this.am.busy = false; }
+        },
+        assignSelf() {
+          db.update('repair_jobs', this.job.id, { technician_id: user.id });
+          this.logStatus(this.job.status, user.name + ' took this job');
+          db.audit('repair.assign', 'repair_job', this.job.id, `${this.job.job_no} taken by ${user.name}`);
+          ui.success('Job assigned to you.'); this.load();
+        },
+
+        /* --------------------------------------------------- edit details */
+        openEdit() {
+          const j = this.job;
+          this.ed = { open: true, busy: false, errors: {}, form: { device_type: j.device_type || 'mobile', brand: j.brand || '', model: j.model || '', serial: j.serial || '', color: j.color || '', password_pattern: j.password_pattern || '', accessories_received: j.accessories_received || '', condition_notes: j.condition_notes || '', problem_description: j.problem_description || '', priority: j.priority || 'normal', promised_at: toLocalInput(j.promised_at), warranty_days: Number(j.warranty_days) || 0, estimated_cost: Number(j.estimated_cost) || 0, notes: j.notes || '' } };
+          this.$nextTick(() => this.$refs.edType && this.$refs.edType.focus());
+        },
+        saveEdit() {
+          const f = this.ed.form; const e = {};
+          if (!String(f.brand || '').trim()) e.brand = 'Brand is required.';
+          if (!String(f.model || '').trim()) e.model = 'Model is required.';
+          if (!String(f.problem_description || '').trim()) e.problem_description = 'Describe the problem.';
+          const serialType = ['laptop', 'desktop'].includes(f.device_type) ? 'serial' : 'imei';
+          const s = String(f.serial || '').trim();
+          if (s && serialType === 'imei' && !/^\d{15}$/.test(s.replace(/\s+/g, ''))) e.serial = 'IMEI must be exactly 15 digits.';
+          if (!utils.parseDate(f.promised_at)) e.promised_at = 'Enter a valid date and time.';
+          const w = Number(f.warranty_days); if (isNaN(w) || w < 0 || w > 365) e.warranty_days = 'Between 0 and 365 days.';
+          this.ed.errors = e; if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          this.ed.busy = true;
+          try {
+            const before = db.find('repair_jobs', this.job.id);
+            const patch = { device_type: f.device_type, brand: f.brand.trim(), model: f.model.trim(), serial: serialType === 'imei' ? s.replace(/\s+/g, '') : s.toUpperCase(), serial_type: serialType, color: String(f.color || '').trim(), password_pattern: String(f.password_pattern || '').trim(), accessories_received: String(f.accessories_received || '').trim(), condition_notes: String(f.condition_notes || '').trim(), problem_description: f.problem_description.trim(), priority: f.priority, promised_at: utils.parseDate(f.promised_at).toISOString(), warranty_days: w, estimated_cost: utils.round2(f.estimated_cost || 0), notes: String(f.notes || '').trim() };
+            const changes = [];
+            if (before.promised_at !== patch.promised_at) changes.push('promised ' + utils.datetime(patch.promised_at));
+            if (before.priority !== patch.priority) changes.push('priority ' + patch.priority);
+            if (Number(before.estimated_cost) !== patch.estimated_cost) changes.push('estimate ' + utils.money(patch.estimated_cost, { decimals: 0 }));
+            db.update('repair_jobs', this.job.id, patch);
+            this.logStatus(this.job.status, 'Details updated' + (changes.length ? ': ' + changes.join(', ') : ''));
+            db.audit('repair.update', 'repair_job', this.job.id, `${this.job.job_no} details updated${changes.length ? ': ' + changes.join('; ') : ''}`);
+            ui.success('Job details saved.'); this.ed.open = false; this.load();
+          } finally { this.ed.busy = false; }
+        },
+
+        /* ---------------------------------------------------- sms / print */
+        openSms() { this.sms = { open: true, text: this.smsText, copied: false }; },
+        async copySms() {
+          try { await navigator.clipboard.writeText(this.sms.text); }
+          catch (e) { const ta = this.$refs.smsText; if (ta) { ta.select(); try { document.execCommand('copy'); } catch (e2) { /* ignore */ } } }
+          this.sms.copied = true; ui.success('SMS text copied.'); setTimeout(() => { this.sms.copied = false; }, 2000);
+        },
+        openPrint(doc) { this.pm.doc = doc === 'invoice' ? 'invoice' : 'receipt'; this.pm.open = true; },
+        closeModals() { ['st', 'qm', 'dm', 'cm', 'pt', 'lm', 'em', 'pay', 'rf', 'vd', 'am', 'ed', 'sms', 'pm'].forEach((k) => { this[k].open = false; }); },
+      };
+    }
+  </script>
+</body>
+</html>

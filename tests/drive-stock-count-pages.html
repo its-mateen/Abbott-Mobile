@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Drive: stock take pages</title>
+  <script defer src="../assets/js/data.js"></script>
+  <script defer src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+  <pre id="out">running…</pre>
+  <script>
+    // Drives the real Alpine components of stock-counts.html and stock-count-view.html.
+    const L = [];
+    let fails = 0;
+    const log = (m) => L.push(m);
+    const ok = (c, m) => { if (!c) fails++; L.push((c ? 'PASS  ' : 'FAIL  ') + m); };
+    const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+    const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+    async function main() {
+      const { db, utils, session, stock, ui } = ABM;
+      db.reset();
+      ui.confirm = async (o) => { log('CONFIRM: ' + (o && o.title)); return true; };
+      ui.toast = () => {};
+
+      const real = window.setTimeout;
+      const noNav = (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return fn(); } finally { window.setTimeout = real; } };
+      const noNavAsync = async (fn) => { window.setTimeout = (f, ms) => (ms > 500 ? real(f, ms) : 0); try { return await fn(); } finally { window.setTimeout = real; } };
+      const source = async (file, fnName) => {
+        const html = await (await fetch('../' + file)).text();
+        const body = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => new RegExp('function ' + fnName + '\\(').test(s));
+        ok(!!body, 'loaded ' + fnName + '() from ' + file);
+        (0, eval)(body);
+      };
+      const mk = (factory, q) => {
+        history.replaceState(null, '', location.pathname + (q || ''));
+        const o = factory();
+        o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {};
+        o.init();
+        return o;
+      };
+
+      await source('stock-counts.html', 'stockCountsPage');
+      await source('stock-count-view.html', 'stockCountViewPage');
+
+      const mgr = db.all('users').find((u) => u.username === 'manager');
+      session.logout(); session.login(mgr);
+      const BID = session.branchId();
+      log('=== session: ' + mgr.name + ' branch=' + BID);
+
+      /* ========================= 1. the list ========================= */
+      log('=== TEST 1: stock-counts.html');
+      let list = mk(stockCountsPage, '?range=all');
+      const mine = db.all('stock_counts').filter((c) => c.branch_id == BID);
+      eq(list.rows.length, mine.length, 'T1: a manager sees only their branch counts');
+      ok(list.rows.every((r) => r.total > 0), 'T1: every row knows how many lines it has');
+      const prog = list.rows.find((r) => r.status === 'in_progress');
+      eq(prog.pct, Math.round(prog.counted / prog.total * 100), 'T1: progress % = counted / lines');
+      ok(list.k.open >= 1, 'T1: the in-progress tile counts open sheets');
+      ok(list.k.shrinkAll <= 0, 'T1: shrinkage is a loss (never positive)');
+      ok(list.k.missingUnits >= 1, 'T1: the completed seed count left a missing unit on record (' + list.k.missingUnits + ')');
+      list.f.status = 'completed';
+      ok(list.filtered.every((r) => r.status === 'completed'), 'T1: the status filter works');
+      list.clearFilters();
+      list.q = 'zzzz-nothing';
+      eq(list.filtered.length, 0, 'T1: a search with no match shows nothing');
+      list.q = '';
+
+      /* ========================= 2. starting a count ========================= */
+      log('=== TEST 2: starting a count freezes a sheet');
+      list.openStart();
+      eq(list.start.open, true, 'T2: the start dialog opened');
+      list.start.scope = 'category';
+      list.start.category_id = '';
+      eq(list.previewCount, 0, 'T2: no category chosen means nothing to preview');
+      // pick a category that really holds stock at this branch (an empty one is a legitimate "nothing to count")
+      const stocked = (catId) => db.all('products').filter((p) => p.is_active && db.isStockTracked(p) && String(p.category_id) === String(catId) && stock.qty(BID, p.id) > 0).length;
+      const cat = utils.sortBy(db.all('categories').filter((c) => c.product_type === 'accessory'), (c) => -stocked(c.id))[0];
+      ok(stocked(cat.id) > 0, 'T2: chose a category with stock: ' + cat.name);
+      list.start.category_id = String(cat.id);
+      const previewBefore = list.previewCount;
+      ok(previewBefore > 0, 'T2: the preview counts the products in scope (' + previewBefore + ')');
+      list.start.includeZero = true;
+      ok(list.previewCount >= previewBefore, 'T2: including zero-stock products never shrinks the sheet');
+      list.start.includeZero = false;
+      near(list.previewValue, utils.round2(list.previewRows.reduce((a, r) => a + r.expected * r.product.cost_price, 0)), 'T2: the preview value is the stock at cost');
+      list.start.count_date = utils.isoDate(utils.addDays(new Date(), 3));
+      list.createCount();
+      ok(!!list.start.errors.date, 'T2: a future count date is refused');
+      list.start.count_date = utils.today();
+
+      const before = db.all('stock_counts').length;
+      noNav(() => list.createCount());
+      const sheet = db.all('stock_counts').slice(-1)[0];
+      eq(db.all('stock_counts').length, before + 1, 'T2: one count was created');
+      eq(sheet.status, 'in_progress', 'T2: it opens in progress');
+      eq(sheet.branch_id, BID, 'T2: at the manager branch');
+      ok(/^CNT-[A-Z0-9]+-\d{6}$/.test(sheet.count_no), 'T2: numbered ' + sheet.count_no);
+      eq(sheet.scope_label, cat.name, 'T2: the scope is named on the sheet');
+      const sheetItems = db.where('stock_count_items', { count_id: sheet.id });
+      eq(sheetItems.length, previewBefore, 'T2: a line per product in scope');
+      ok(sheetItems.every((i) => i.counted_qty === null), 'T2: nothing is counted yet');
+      ok(sheetItems.every((i) => i.expected_qty === stock.qty(BID, i.product_id)), 'T2: each line froze the quantity the system holds');
+      eq(db.all('stock_movements').filter((m) => m.reference_type === 'stock_count' && String(m.reference_id) === String(sheet.id)).length, 0, 'T2: starting a count moves no stock');
+
+      /* ========================= 3. counting quantities ========================= */
+      log('=== TEST 3: counting a quantity sheet');
+      let v = mk(stockCountViewPage, '?id=' + sheet.id);
+      ok(!!v.count, 'T3: the sheet opened');
+      eq(v.isOpen, true, 'T3: it is open for counting');
+      eq(v.items.length, sheetItems.length, 'T3: every line loaded');
+      eq(v.countedItems, 0, 'T3: nothing counted yet');
+      eq(v.plan.actions.length, 0, 'T3: nothing to post yet');
+
+      const rowA = v.items.find((r) => !r.serialized && r.expected_qty > 3);
+      v.setCounted(rowA, rowA.expected_qty - 2);                       // two short
+      eq(rowA.variance, -2, 'T3: a shortage is negative');
+      eq(rowA.state, 'short', 'T3: the line reads short');
+      near(rowA.varianceValue, utils.round2(-2 * rowA.unit_cost), 'T3: the shortage is valued at cost');
+      eq(db.find('stock_count_items', rowA.id).counted_qty, rowA.expected_qty - 2, 'T3: the count is saved as you type');
+      eq(db.find('stock_counts', sheet.id).counted_items, 1, 'T3: the header tracks progress');
+      eq(stock.qty(BID, rowA.product_id), rowA.expected_qty, 'T3: counting has still not moved stock');
+
+      const rowB = v.items.find((r) => !r.serialized && r.id !== rowA.id);
+      v.setCounted(rowB, rowB.expected_qty + 1);
+      eq(rowB.state, 'over', 'T3: a surplus reads over');
+      v.setCounted(rowB, 'abc');
+      eq(db.find('stock_count_items', rowB.id).counted_qty, rowB.expected_qty + 1, 'T3: rubbish input is rejected and the saved count stands');
+      v.setCounted(rowB, -3);
+      eq(db.find('stock_count_items', rowB.id).counted_qty, rowB.expected_qty + 1, 'T3: a negative count is rejected too');
+      v.clearLine(v.items.find((r) => r.id === rowB.id));
+      eq(db.find('stock_count_items', rowB.id).counted_qty, null, 'T3: a line can be cleared back to "to count"');
+
+      const pendingBefore = v.items.filter((r) => r.counted_qty === null && !r.serialized).length;
+      v.matchRemaining();
+      eq(v.items.filter((r) => r.counted_qty === null && !r.serialized).length, 0, 'T3: bulk-match counts every remaining quantity line');
+      ok(v.items.filter((r) => r.state === 'matched').length >= pendingBefore - 1, 'T3: those lines all match the system');
+      eq(v.plan.blockers.length, 0, 'T3: nothing blocks posting');
+      eq(v.plan.actions.length, 1, 'T3: only the real difference will be posted');
+
+      /* ========================= 4. posting ========================= */
+      log('=== TEST 4: posting the sheet');
+      const qtyBefore = stock.qty(BID, rowA.product_id);
+      const lossValue = v.plan.loss;
+      v.openPost();
+      v.postCount();
+      eq(db.find('stock_counts', sheet.id).status, 'completed', 'T4: the count completed');
+      ok(!!db.find('stock_counts', sheet.id).completed_at, 'T4: stamped completed');
+      eq(stock.qty(BID, rowA.product_id), qtyBefore - 2, 'T4: the shortage left stock');
+      const mv = db.all('stock_movements').filter((m) => m.reference_type === 'stock_count' && String(m.reference_id) === String(sheet.id));
+      eq(mv.length, 1, 'T4: exactly one movement was posted');
+      eq(mv[0].movement_type, 'count_out', 'T4: as a count loss');
+      near(db.find('stock_counts', sheet.id).loss_value, lossValue, 'T4: the loss is recorded on the count');
+      eq(db.find('stock_counts', sheet.id).variance_qty, -2, 'T4: the posted unit variance is stored');
+      ok(db.all('audit_logs').some((a) => a.action === 'stock_count.post' && String(a.entity_id) === String(sheet.id)), 'T4: the post is in the audit log');
+
+      v = mk(stockCountViewPage, '?id=' + sheet.id);
+      eq(v.isOpen, false, 'T4: a posted count is closed');
+      const frozen = v.items.find((r) => r.id === rowA.id);
+      v.setCounted(frozen, 1);
+      eq(db.find('stock_count_items', rowA.id).counted_qty, rowA.expected_qty - 2, 'T4: a closed count cannot be edited');
+      v.matchRemaining();
+      v.postCount();
+      eq(db.all('stock_movements').filter((m) => m.reference_type === 'stock_count' && String(m.reference_id) === String(sheet.id)).length, 1, 'T4: it cannot be posted twice');
+
+      /* ========================= 5. serialized counting ========================= */
+      log('=== TEST 5: counting serialized units');
+      const seedOpen = db.all('stock_counts').find((c) => c.status === 'in_progress' && c.branch_id == BID);
+      let sv = mk(stockCountViewPage, '?id=' + seedOpen.id);
+      ok(!!sv.count, 'T5: the seeded in-progress sheet opened');
+      const ser = sv.items.find((r) => r.serialized && r.units.length >= 2);
+      ok(!!ser, 'T5: it has a serialized line with units on the system');
+      eq(ser.counted_qty, ser.scanned.length || ser.counted_qty, 'T5: scanned units and the counted number agree');
+
+      sv.clearLine(ser);
+      eq(ser.counted_qty, null, 'T5: the line starts empty');
+      ser.scanInput = ser.units[0].imei;
+      sv.scanUnit(ser);
+      eq(ser.counted_qty, 1, 'T5: a scan counts one unit');
+      eq(ser.units.find((u) => u.imei === ser.units[0].imei).seen, true, 'T5: the unit shows as seen');
+      eq(ser.missingUnits.length, ser.units.length - 1, 'T5: the rest are not found yet');
+      ser.scanInput = ser.units[0].imei;
+      sv.scanUnit(ser);
+      eq(ser.counted_qty, 1, 'T5: scanning the same unit twice does not double count');
+
+      const otherProductUnit = db.all('product_imeis').find((u) => u.branch_id == BID && u.status === 'available' && String(u.product_id) !== String(ser.product_id));
+      ser.scanInput = otherProductUnit.imei;
+      sv.scanUnit(ser);
+      eq(ser.counted_qty, 1, 'T5: a unit belonging to another product is refused');
+
+      ser.scanInput = 'NOSUCHUNIT123';
+      sv.scanUnit(ser);
+      eq(ser.extras.length, 1, 'T5: an unknown serial is kept as an extra');
+      eq(ser.extras[0].kind, 'unknown', 'T5: and classified as not registered');
+      sv.removeScan(ser, 'NOSUCHUNIT123');
+      eq(ser.extras.length, 0, 'T5: an extra can be removed');
+
+      const elsewhere = db.all('product_imeis').find((u) => String(u.product_id) === String(ser.product_id) && u.branch_id != BID && u.status === 'available');
+      if (elsewhere) {
+        ser.scanInput = elsewhere.imei;
+        sv.scanUnit(ser);
+        eq(ser.extras[0].kind, 'other_branch', 'T5: a unit the system holds at another branch is flagged');
+        sv.removeScan(ser, elsewhere.imei);
+      } else { log('NOTE: no same-product unit at another branch, cross-branch scan skipped'); }
+
+      const soldUnit = db.all('product_imeis').find((u) => String(u.product_id) === String(ser.product_id) && u.status === 'sold');
+      if (soldUnit) {
+        ser.scanInput = soldUnit.imei;
+        sv.scanUnit(ser);
+        const bad = ser.extras.find((x) => x.value === soldUnit.imei);
+        eq(!!bad && bad.kind, 'not_sellable', 'T5: a sold unit cannot be counted as shelf stock');
+        ok(sv.plan.blockers.length > 0, 'T5: and it blocks posting until removed');
+        sv.removeScan(ser, soldUnit.imei);
+        eq(sv.plan.blockers.length, 0, 'T5: removing it clears the block');
+      } else { log('NOTE: no sold unit of this product, blocker check skipped'); }
+
+      sv.scanAllPresent(ser);
+      eq(ser.counted_qty, ser.units.length, 'T5: "all present" ticks every expected unit');
+      eq(ser.missingUnits.length, 0, 'T5: nothing is missing then');
+      eq(ser.variance, ser.units.length - ser.expected_qty, 'T5: the difference is against the frozen sheet');
+
+      // now leave one unit unscanned: it must be written off as missing when posting
+      const dropped = ser.units[0];
+      sv.removeScan(ser, dropped.imei);
+      eq(ser.missingUnits.length, 1, 'T5: one unit is not found');
+      const serQtyBefore = stock.qty(BID, ser.product_id);
+      const plan = sv.plan;
+      ok(plan.actions.some((a) => a.detail.includes(dropped.imei)), 'T5: the post plan names the unit that will be written off');
+
+      /* ========================= 6. posting serialized ========================= */
+      log('=== TEST 6: posting serialized differences');
+      // count every other line so the post is clean
+      sv.items.filter((r) => !r.serialized && r.counted_qty === null).forEach((r) => sv.setCounted(r, r.expected_qty));
+      sv.items.filter((r) => r.serialized && r.id !== ser.id).forEach((r) => sv.scanAllPresent(r));
+      sv.openPost();
+      sv.postCount();
+      eq(db.find('stock_counts', seedOpen.id).status, 'completed', 'T6: the serialized count posted');
+      eq(db.find('product_imeis', dropped.id).status, 'missing', 'T6: the unit that was never seen is marked missing');
+      eq(stock.qty(BID, ser.product_id), serQtyBefore - 1, 'T6: stock dropped by exactly that one unit');
+      ok(!stock.findSellable(dropped.imei, BID), 'T6: a missing unit can no longer be sold');
+      ok(db.all('stock_movements').some((m) => m.imei_id === dropped.id && m.movement_type === 'count_out' && String(m.reference_id) === String(seedOpen.id)), 'T6: the write-off points at the count');
+
+      /* ========================= 7. counting against stock that moved ========================= */
+      log('=== TEST 7: stock that moves while the sheet is open');
+      list = mk(stockCountsPage, '?range=all');
+      list.openStart();
+      list.start.scope = 'category';
+      const deep = (c) => db.all('products').filter((p) => p.is_active && db.isStockTracked(p) && !db.isSerialized(p) && String(p.category_id) === String(c.id) && stock.qty(BID, p.id) > 4).length;
+      const cat2 = utils.sortBy(db.all('categories').filter((c) => c.product_type !== 'service' && !c.is_serialized && String(c.id) !== String(cat.id)), (c) => -deep(c))[0];
+      ok(deep(cat2) > 0, 'T7: chose a category with quantity stock: ' + cat2.name);
+      list.start.category_id = String(cat2.id);
+      list.start.includeZero = false;
+      noNav(() => list.createCount());
+      const sheet2 = db.all('stock_counts').slice(-1)[0];
+      let v2 = mk(stockCountViewPage, '?id=' + sheet2.id);
+      const target = v2.items.find((r) => !r.serialized && r.expected_qty > 4);
+      ok(!!target, 'T7: found a line to work with');
+      // a sale takes 2 units off the shelf after the sheet was frozen
+      stock.remove(BID, target.product_id, 2, 'sale', { type: 'sale', id: 999 }, { notes: 'sold while counting' });
+      v2 = mk(stockCountViewPage, '?id=' + sheet2.id);
+      const moved = v2.items.find((r) => r.id === target.id);
+      eq(moved.expected_qty - moved.currentQty, 2, 'T7: the sheet shows the system moved by 2');
+      ok(v2.moved.length >= 1, 'T7: the page flags lines that moved since freezing');
+      v2.setCounted(moved, moved.currentQty);                          // the counter finds exactly what is there now
+      eq(moved.variance, -2, 'T7: against the frozen sheet it looks 2 short');
+      eq(v2.plan.actions.length, 0, 'T7: but nothing needs posting — the sale already accounts for it');
+      const qtyNow = stock.qty(BID, target.product_id);
+      v2.items.filter((r) => r.counted_qty === null && !r.serialized).forEach((r) => v2.setCounted(r, r.currentQty));
+      v2.openPost();
+      v2.postCount();
+      eq(stock.qty(BID, target.product_id), qtyNow, 'T7: posting does not double count the sale');
+
+      /* ========================= 8. cancelling ========================= */
+      log('=== TEST 8: cancelling a count');
+      list = mk(stockCountsPage, '?range=all');
+      list.openStart();
+      list.start.scope = 'all';
+      noNav(() => list.createCount());
+      const doomed = db.all('stock_counts').slice(-1)[0];
+      let v3 = mk(stockCountViewPage, '?id=' + doomed.id);
+      const someRow = v3.items.find((r) => !r.serialized);
+      v3.setCounted(someRow, someRow.expected_qty + 5);
+      const qtyKeep = stock.qty(BID, someRow.product_id);
+      await noNavAsync(() => v3.cancelCount());
+      eq(db.find('stock_counts', doomed.id).status, 'cancelled', 'T8: the count was cancelled');
+      ok(!!db.find('stock_counts', doomed.id).cancelled_at, 'T8: stamped cancelled');
+      eq(stock.qty(BID, someRow.product_id), qtyKeep, 'T8: nothing was posted to stock');
+      eq(db.where('stock_count_items', { count_id: doomed.id }).length > 0, true, 'T8: the sheet is kept for the record');
+      v3 = mk(stockCountViewPage, '?id=' + doomed.id);
+      eq(v3.isOpen, false, 'T8: a cancelled count is closed');
+      v3.setCounted(v3.items[0], 1);
+      eq(db.find('stock_count_items', v3.items[0].id).counted_qty, v3.items[0].counted_qty, 'T8: and can no longer be counted');
+
+      /* ========================= 9. guards ========================= */
+      log('=== TEST 9: branch and permission guards');
+      const other = mk(stockCountViewPage, '?id=99999');
+      eq(other.count, null, 'T9: an unknown count yields the not-found state');
+      const b2 = db.all('stock_counts').find((c) => c.branch_id != BID);
+      const foreign = mk(stockCountViewPage, '?id=' + b2.id);
+      eq(foreign.count, null, 'T9: another branch count is not shown');
+      eq(foreign.otherBranch, true, 'T9: and the page explains why');
+
+      const cashier = db.all('users').find((u) => u.username === 'cashier');
+      session.logout(); session.login(cashier);
+      const readOnly = mk(stockCountViewPage, '?id=' + sheet.id);
+      eq(readOnly.canCount, false, 'T9: a cashier cannot adjust stock');
+      const rows0 = db.where('stock_count_items', { count_id: sheet.id })[0].counted_qty;
+      readOnly.setCounted(readOnly.items[0], 123);
+      eq(db.where('stock_count_items', { count_id: sheet.id })[0].counted_qty, rows0, 'T9: and cannot change a sheet');
+      const listRO = mk(stockCountsPage, '?range=all');
+      eq(listRO.canCount, false, 'T9: the list hides the start button for a cashier');
+      listRO.openStart();
+      eq(listRO.start.open, false, 'T9: and refuses to open the dialog');
+    }
+
+    setTimeout(() => {
+      main().catch((e) => { fails++; L.push('FAIL  exception: ' + e.message + '\n' + (e.stack || '')); }).finally(() => {
+        L.push(''); L.push('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ')'));
+        document.getElementById('out').textContent = L.join('\n');
+        L.forEach((l) => console.log('DRIVE ' + l));
+      });
+    }, 900);
+  </script>
+</body>
+</html>

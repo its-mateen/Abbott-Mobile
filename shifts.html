@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Cashier Shifts · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="shifts" data-title="Cashier Shifts" data-perm="shifts.view">
+  <main x-data="shiftsPage()" @keydown.escape.window="start.open = false">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Cashier shifts</h2>
+        <p class="page-subtitle">Who had the drawer, what went through it and whether it balanced · <span x-text="range.label"></span> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="day-end.html" class="btn btn-secondary"><span x-html="ABM.icon('lock')"></span>Day-end</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canOpen && !myOpen">
+          <button type="button" class="btn btn-primary" @click="openStart()"><span x-html="ABM.icon('plus')"></span>Open a shift</button>
+        </template>
+        <template x-if="myOpen">
+          <a :href="'shift-view.html?id=' + myOpen.id" class="btn btn-money"><span x-html="ABM.icon('wallet')"></span>My open drawer</a>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'shifts.html?range=all&status=open' + branchQuery" class="stat" :class="k.open ? 'stat-accent' : 'stat-money'" title="Drawers open right now">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Drawers open now</div><div class="stat-value" x-text="ABM.utils.num(k.open)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('wallet')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.open ? $money(k.inDrawer, {decimals:0}) + ' in the drawers · ' + k.openNames : 'Every drawer is closed'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'shifts.html?' + range.query + branchQuery" class="stat stat-money" title="Cash taken in this period">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Cash taken · <span x-text="periodShort"></span></div><div class="stat-value" x-text="$money(k.cashIn, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.count"></span> shift<span x-text="k.count === 1 ? '' : 's'"></span> · <span x-text="ABM.utils.num(k.invoices)"></span> cash invoice<span x-text="k.invoices === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'shifts.html?' + range.query + '&variance=short' + branchQuery" class="stat" :class="k.short ? 'stat-danger' : 'stat-money'" title="Shifts that came up short">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Short · <span x-text="periodShort"></span></div><div class="stat-value" :class="k.short ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(Math.abs(k.shortValue), {decimals:0})"></div></div>
+          <span class="chip" :class="k.short ? 'chip-danger' : 'chip-money'" x-html="ABM.icon('trend-down')"></span>
+        </div>
+        <div class="stat-meta" x-text="k.short ? k.short + ' shift(s) short of the expected cash' : 'No shift came up short'"></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'shifts.html?' + range.query + '&variance=over' + branchQuery" class="stat" :class="k.over ? 'stat-warning' : 'stat-money'" title="Shifts with more cash than expected">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Over · <span x-text="periodShort"></span></div><div class="stat-value" :class="k.over ? 'text-amber-700' : 'text-emerald-700'" x-text="$money(k.overValue, {decimals:0})"></div></div>
+          <span class="chip" :class="k.over ? 'chip-warning' : 'chip-money'" x-html="ABM.icon('trend-up')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.balanced"></span> of <span x-text="k.closed"></span> closed shift<span x-text="k.closed === 1 ? '' : 's'"></span> balanced exactly</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2">
+          <div class="relative sm:col-span-2">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search shift number, cashier or notes…" x-model.debounce.200ms="q" aria-label="Search shifts">
+          </div>
+          <select class="select" x-model="f.user" aria-label="Cashier" x-show="!ownOnly">
+            <option value="">All cashiers</option>
+            <template x-for="u in cashiers" :key="u.id"><option :value="String(u.id)" x-text="u.name"></option></template>
+          </select>
+          <select class="select" x-model="f.status" aria-label="Status">
+            <option value="">Any status</option>
+            <option value="open">Open</option>
+            <option value="closed">Closed</option>
+          </select>
+          <select class="select" x-model="f.variance" aria-label="Variance">
+            <option value="">Any variance</option>
+            <option value="balanced">Balanced</option>
+            <option value="short">Short</option>
+            <option value="over">Over</option>
+          </select>
+          <template x-if="isSuperAdmin">
+            <select class="select" x-model="f.branch" aria-label="Branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> shifts in period</span>
+          <span x-show="ownOnly" class="text-slate-400">· showing your own shifts</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Shifts</div><div class="card-subtitle">Newest first · click a shift number for the drawer report</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Shift</th>
+              <th>Cashier</th>
+              <th class="hidden lg:table-cell" x-show="showBranch">Branch</th>
+              <th class="hidden md:table-cell">Opened</th>
+              <th class="hidden md:table-cell">Closed</th>
+              <th class="num hidden lg:table-cell">Float</th>
+              <th class="num">Expected</th>
+              <th class="num hidden sm:table-cell">Counted</th>
+              <th class="num">Variance</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="r.status === 'open' && 'bg-emerald-50/40'">
+                <td>
+                  <a :href="'shift-view.html?id=' + r.id" class="font-semibold text-navy-700 hover:underline mono whitespace-nowrap" x-text="r.shift_no"></a>
+                  <div class="mt-0.5"><span x-html="$badge(r.status, r.status === 'open' ? 'Open' : 'Closed')"></span></div>
+                </td>
+                <td>
+                  <div class="font-medium text-slate-800 truncate max-w-[8rem] sm:max-w-[12rem]" x-text="r.userName"></div>
+                  <div class="text-[11px] text-slate-400 md:hidden whitespace-nowrap" x-text="$date(r.opened_at) + ' · ' + ABM.utils.time(r.opened_at)"></div>
+                  <div class="text-[11px] text-slate-400 hidden md:block" x-show="showBranch" x-text="r.branchCode"></div>
+                </td>
+                <td class="hidden lg:table-cell" x-show="showBranch"><span class="badge badge-slate" x-text="r.branchCode"></span></td>
+                <td class="hidden md:table-cell whitespace-nowrap text-slate-600"><div x-text="$date(r.opened_at)"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(r.opened_at)"></div></td>
+                <td class="hidden md:table-cell whitespace-nowrap text-slate-600">
+                  <template x-if="r.closed_at"><div><div x-text="$date(r.closed_at)"></div><div class="text-[11px] text-slate-400" x-text="ABM.utils.time(r.closed_at)"></div></div></template>
+                  <template x-if="!r.closed_at"><span class="badge badge-green">In progress</span></template>
+                </td>
+                <td class="num hidden lg:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.opening_float, {decimals:0})"></td>
+                <td class="num font-semibold whitespace-nowrap" x-text="$money(r.expected, {decimals:0})"></td>
+                <td class="num hidden sm:table-cell whitespace-nowrap" x-text="r.status === 'open' ? '—' : $money(r.counted_cash, {decimals:0})"></td>
+                <td class="num whitespace-nowrap">
+                  <template x-if="r.status === 'closed'"><span x-html="$badge(r.varianceKey, r.varianceLabel)"></span></template>
+                  <template x-if="r.status === 'open'"><span class="text-slate-400">—</span></template>
+                </td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'shift-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" :title="r.status === 'open' ? 'Open drawer' : 'Shift report'" x-html="ABM.icon(r.status === 'open' ? 'edit' : 'eye','w-4 h-4')"></a>
+                    <a :href="'shift-view.html?id=' + r.id + '&print=1'" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Print shift report" x-html="ABM.icon('printer','w-4 h-4')"></a>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="10">
+                <div class="empty">
+                  <span x-html="ABM.icon('wallet')"></span>
+                  <div class="empty-title">No shifts found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'No drawer was opened in this period.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="range.preset !== 'all'" @click="range.set('all')">Show all time</button>
+                    <template x-if="canOpen && !myOpen"><button type="button" class="btn btn-primary btn-sm" @click="openStart()">Open a shift</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td colspan="2">Totals · closed shifts</td>
+              <td class="hidden lg:table-cell" x-show="showBranch"></td>
+              <td class="hidden md:table-cell"></td>
+              <td class="hidden md:table-cell"></td>
+              <td class="num hidden lg:table-cell" x-text="$money(filteredTotals.float, {decimals:0})"></td>
+              <td class="num whitespace-nowrap" x-text="$money(filteredTotals.expected, {decimals:0})"></td>
+              <td class="num hidden sm:table-cell whitespace-nowrap" x-text="$money(filteredTotals.counted, {decimals:0})"></td>
+              <td class="num whitespace-nowrap" :class="filteredTotals.variance < 0 ? 'text-rose-600' : filteredTotals.variance > 0 ? 'text-amber-700' : 'text-emerald-700'" x-text="ABM.utils.money(filteredTotals.variance, {decimals:0})"></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open a shift -->
+    <div x-show="start.open" x-cloak class="modal-backdrop" @click.self="start.open = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+        <form @submit.prevent="openShift()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="startTitle">Open a shift</div>
+              <div class="text-xs text-slate-500">Count the float into the drawer first — everything after this is measured against it.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="start.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="sf-branch">Branch <span class="req">*</span></label>
+                <template x-if="isSuperAdmin">
+                  <select id="sf-branch" class="select" x-model="start.branch_id" @change="start.float = suggestedFloat(start.branch_id)">
+                    <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+                  </select>
+                </template>
+                <template x-if="!isSuperAdmin">
+                  <div class="input bg-slate-50 flex items-center gap-2"><span class="badge badge-slate" x-text="ABM.db.branchCode(start.branch_id)"></span><span class="truncate" x-text="ABM.db.branchName(start.branch_id)"></span></div>
+                </template>
+              </div>
+              <div>
+                <label class="label" for="sf-user">Cashier <span class="req">*</span></label>
+                <template x-if="canOpenForOthers">
+                  <select id="sf-user" class="select" x-model="start.user_id" :class="start.errors.user && 'is-invalid'">
+                    <template x-for="u in branchCashiers" :key="u.id"><option :value="String(u.id)" x-text="u.name + (ABM.shift.current(u.id, null) ? ' — already has a drawer' : '')"></option></template>
+                  </select>
+                </template>
+                <template x-if="!canOpenForOthers">
+                  <div class="input bg-slate-50 truncate" x-text="ABM.db.userName(start.user_id)"></div>
+                </template>
+                <p class="field-error" x-show="start.errors.user" x-text="start.errors.user"></p>
+              </div>
+              <div>
+                <label class="label" for="sf-float">Opening float <span class="req">*</span></label>
+                <div class="input-group"><input id="sf-float" type="number" min="0" step="0.01" class="input input-money" x-model.number="start.float" :class="start.errors.float && 'is-invalid'"><span class="addon">Rs.</span></div>
+                <p class="field-error" x-show="start.errors.float" x-text="start.errors.float"></p>
+                <p class="help" x-show="!start.errors.float" x-text="floatHint"></p>
+              </div>
+              <div>
+                <label class="label" for="sf-notes">Notes</label>
+                <input id="sf-notes" type="text" class="input" x-model="start.notes" placeholder="Optional — morning shift, counter 2…" maxlength="200">
+              </div>
+            </div>
+            <div class="alert alert-info"><span x-html="ABM.icon('info')"></span><span>Sales, khata receipts, repair payments, refunds and expenses taken by this cashier at this branch from now on belong to this shift.</span></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="start.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="start.busy"><span x-html="ABM.icon('check')"></span>Open the drawer</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function shiftsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canManage: session.can('shifts.edit'),
+        canOpen: session.can('shifts.add'),
+        // a cashier is trusted with their own drawer only; a manager sees the whole branch
+        // without "every cashier's drawer" a user sees and runs only their own
+        ownOnly: !session.can('shifts.all'),
+        me: (session.user() || {}).id || null,
+        branches: db.all('branches').filter((b) => b.is_active),
+        today: utils.today(),
+        range: null, rows: [], page: 1, q: '',
+        f: { user: '', status: '', variance: '', branch: String(session.branchId() || '') },
+        k: { open: 0, inDrawer: 0, openNames: '', count: 0, closed: 0, cashIn: 0, invoices: 0, short: 0, shortValue: 0, over: 0, overValue: 0, balanced: 0 },
+        start: { open: false, branch_id: String(session.branchId() || ''), user_id: String((session.user() || {}).id || ''), float: 0, notes: '', errors: {}, busy: false },
+
+        get periodShort() { const p = utils.RANGE_PRESETS.find((x) => x.key === this.range.preset); return this.range.preset === 'custom' ? 'custom' : (p ? p.label.toLowerCase() : ''); },
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+        get showBranch() { return this.isSuperAdmin && this.f.branch === 'all'; },
+        get branchQuery() { return this.isSuperAdmin ? '&branch=' + this.f.branch : ''; },
+        get canOpenForOthers() { return !this.ownOnly && this.canOpen; },
+        get cashiers() { return utils.sortBy(db.all('users').filter((u) => u.is_active), 'name'); },
+        get branchCashiers() { return utils.sortBy(db.all('users').filter((u) => u.is_active && String(u.branch_id) === String(this.start.branch_id)), 'name'); },
+        get myOpen() { return this.me ? ABM.shift.current(this.me, null) : null; },
+        get floatHint() {
+          const s = ABM.shift.suggestedFloat(this.start.branch_id);
+          return s > 0 ? 'Suggested ' + utils.money(s) + ' — what the last closed shift handed over.' : 'No float handed over; set what you are putting in.';
+        },
+        suggestedFloat(branchId) { return ABM.shift.suggestedFloat(branchId); },
+
+        init() {
+          if (!this.isSuperAdmin) { this.f.branch = String(session.branchId()); this.start.branch_id = String(session.branchId()); }
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const st = utils.qs('status', ''); if (['open', 'closed'].includes(st)) this.f.status = st;
+          const v = utils.qs('variance', ''); if (['balanced', 'short', 'over'].includes(v)) this.f.variance = v;
+          const u = utils.qs('user', ''); if (u && db.find('users', u)) this.f.user = String(u);
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('this_month', () => { this.page = 1; this.compute(); }, 'shifts');
+          this.compute();
+          this.$watch('q', () => { this.page = 1; });
+          ['user', 'status', 'variance'].forEach((key) => this.$watch('f.' + key, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+          if (utils.qs('new') === '1' && this.canOpen && !this.myOpen) this.openStart();
+        },
+
+        /* ------------------------------------------------------------ data */
+        inScope(s) {
+          if (this.ownOnly && String(s.user_id) !== String(this.me)) return false;
+          return this.f.branch === 'all' ? true : String(s.branch_id) === String(this.f.branch);
+        },
+        varianceKey(v) { const n = utils.round2(v); return n === 0 ? 'balanced' : n < 0 ? 'short' : 'over'; },
+        buildRows(list) {
+          return list.map((s) => {
+            const open = s.status === 'open';
+            const expected = open ? ABM.shift.tally(s).expected : (Number(s.expected_cash) || 0);
+            const variance = open ? 0 : (Number(s.variance) || 0);
+            return {
+              ...s, userName: db.userName(s.user_id), branchCode: db.branchCode(s.branch_id), expected, variance,
+              varianceKey: this.varianceKey(variance),
+              varianceLabel: variance === 0 ? 'Balanced' : (variance < 0 ? 'Short ' : 'Over ') + utils.money(Math.abs(variance), { decimals: 0 }),
+              cashIn: (s.totals && Number(s.totals.cash_sales) + Number(s.totals.cash_received) + Number(s.totals.repair_cash)) || 0,
+              invoices: (s.totals && Number(s.totals.invoices)) || 0,
+            };
+          });
+        },
+        compute() {
+          const scoped = db.all('cashier_shifts').filter((s) => this.inScope(s));
+          this.rows = utils.sortBy(this.buildRows(scoped.filter((s) => this.range.contains(s.opened_at))),
+            (r) => String(r.opened_at) + '|' + String(r.id).padStart(8, '0'), 'desc');
+          const allRows = this.buildRows(scoped);
+          const openRows = allRows.filter((r) => r.status === 'open');
+          const closed = this.rows.filter((r) => r.status === 'closed');
+          this.k = {
+            open: openRows.length,
+            inDrawer: utils.sum(openRows, 'expected'),
+            openNames: openRows.slice(0, 3).map((r) => r.userName.split(' ')[0]).join(', '),
+            count: this.rows.length, closed: closed.length,
+            cashIn: utils.sum(closed, 'cashIn'), invoices: closed.reduce((a, r) => a + r.invoices, 0),
+            short: closed.filter((r) => r.variance < 0).length, shortValue: utils.sum(closed.filter((r) => r.variance < 0), 'variance'),
+            over: closed.filter((r) => r.variance > 0).length, overValue: utils.sum(closed.filter((r) => r.variance > 0), 'variance'),
+            balanced: closed.filter((r) => r.variance === 0).length,
+          };
+        },
+        get hasFilters() { return !!(this.q || this.f.user || this.f.status || this.f.variance); },
+        clearFilters() { this.q = ''; this.f.user = ''; this.f.status = ''; this.f.variance = ''; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          return this.rows.filter((r) => {
+            if (this.f.user && String(r.user_id) !== String(this.f.user)) return false;
+            if (this.f.status && r.status !== this.f.status) return false;
+            if (this.f.variance) { if (r.status !== 'closed' || r.varianceKey !== this.f.variance) return false; }
+            if (q && ![r.shift_no, r.userName, r.notes].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+        },
+        get filteredTotals() {
+          const closed = this.filtered.filter((r) => r.status === 'closed');
+          return {
+            float: utils.sum(closed, 'opening_float'), expected: utils.sum(closed, 'expected'),
+            counted: utils.sum(closed, 'counted_cash'), variance: utils.sum(closed, 'variance'),
+          };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'Shift No', key: 'shift_no' }, { label: 'Branch', key: 'branchCode' }, { label: 'Cashier', key: 'userName' },
+            { label: 'Opened', key: 'opened_at' }, { label: 'Closed', key: 'closed_at' }, { label: 'Status', value: (r) => ui.statusLabel(r.status) },
+            { label: 'Opening float', key: 'opening_float' }, { label: 'Expected', key: 'expected' }, { label: 'Counted', key: 'counted_cash' },
+            { label: 'Variance', key: 'variance' }, { label: 'Handed over', key: 'handover_amount' }, { label: 'Banked', key: 'banked_amount' },
+            { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('cashier-shifts-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' shift' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* ------------------------------------------------------ open shift */
+        openStart() {
+          if (!this.canOpen) { ui.warn('You do not have permission to open a drawer.'); return; }
+          if (this.myOpen) { ui.warn('You already have an open drawer.'); return; }
+          const branchId = this.isSuperAdmin ? this.start.branch_id : String(session.branchId());
+          this.start = {
+            open: true, branch_id: String(branchId),
+            user_id: String(this.ownOnly ? this.me : (this.me || '')),
+            float: ABM.shift.suggestedFloat(branchId), notes: '', errors: {}, busy: false,
+          };
+        },
+        openShift() {
+          const s = this.start, e = {};
+          if (!s.user_id || !db.find('users', s.user_id)) e.user = 'Choose the cashier taking the drawer.';
+          else if (ABM.shift.current(s.user_id, null)) e.user = db.userName(s.user_id) + ' already has an open drawer.';
+          const f = Number(s.float);
+          if (s.float === '' || s.float === null || isNaN(f) || f < 0) e.float = 'Enter the float going into the drawer (0 or more).';
+          s.errors = e;
+          if (Object.keys(e).length) { ui.error('Please fix the highlighted fields.'); return; }
+          s.busy = true;
+          try {
+            const row = ABM.shift.open({ branchId: s.branch_id, userId: s.user_id, float: f, notes: s.notes });
+            ui.success('Shift ' + row.shift_no + ' opened for ' + db.userName(row.user_id) + '.');
+            s.open = false;
+            setTimeout(() => { location.href = 'shift-view.html?id=' + row.id; }, 350);
+          } catch (err) {
+            ui.error(err.message || 'Could not open the shift.');
+            s.busy = false;
+          }
+        },
+      };
+    }
+  </script>
+</body>
+</html>

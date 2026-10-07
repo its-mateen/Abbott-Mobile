@@ -1,0 +1,1610 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Products · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="products" data-title="Products" data-perm="products.view">
+  <main x-data="productsPage()" @keydown.escape.window="closeModal()">
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Products</h2>
+        <p class="page-subtitle"><span x-text="rows.length"></span> items in catalog · devices, accessories, spare parts &amp; services · stock shown for <b x-text="stockCol === 'all' ? 'all branches' : branch.name"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="categories.html" class="btn btn-secondary"><span x-html="ABM.icon('tag')"></span><span class="hidden sm:inline">Categories</span></a>
+        <a href="labels.html" class="btn btn-secondary"><span x-html="ABM.icon('barcode')"></span><span class="hidden sm:inline">Labels</span></a>
+        <template x-if="canAdd">
+          <a href="products-import.html" class="btn btn-secondary"><span x-html="ABM.icon('upload')"></span><span class="hidden sm:inline">Import</span></a>
+        </template>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canAdd">
+          <button type="button" class="btn btn-primary" @click="openAdd()"><span x-html="ABM.icon('plus')"></span>Add Product</button>
+        </template>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a href="products.html?status=active" class="stat stat-accent" title="Show active products" @click.prevent="clearFilters(); f.status = 'active'">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Active products</div><div class="stat-value" x-text="ABM.utils.num(tiles.active)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('cube')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.inactive"></span> inactive · <span x-text="tiles.categories"></span> categories</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="imeis.html" class="stat" title="Open the IMEI / Serial registry">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Serialized items</div><div class="stat-value" x-text="ABM.utils.num(tiles.serialized)"></div></div>
+          <span class="chip chip-info" x-html="ABM.icon('qr')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="tiles.imei"></span> by IMEI · <span x-text="tiles.serial"></span> by serial no. · <span x-text="tiles.units"></span> units registered</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="stock.html?filter=low" class="stat stat-warning" title="Open low stock in branch stock">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Low stock</div><div class="stat-value" :class="tiles.low ? 'text-rose-600' : ''" x-text="ABM.utils.num(tiles.low)"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('warning')"></span>
+        </div>
+        <div class="stat-meta">at <span x-text="branch.name"></span> · qty at or below minimum</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-stock-valuation.html" class="stat stat-money" title="Open stock valuation report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Stock value (cost)</div><div class="stat-value" x-text="$money(tiles.value, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="ABM.utils.num(tiles.stockUnits)"></span> units at <span x-text="branch.code"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Type strip (clickable) -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
+      <template x-for="t in TYPES" :key="t.key">
+        <a :href="'products.html?type=' + t.key" class="card card-hover px-4 py-3 flex items-center gap-3 min-w-0" :class="f.type === t.key && 'ring-2 ring-navy-500/40 border-navy-500/40'" @click.prevent="f.type = f.type === t.key ? '' : t.key" :title="'Filter by ' + t.label.toLowerCase()">
+          <span class="chip !w-9 !h-9" :class="t.chip" x-html="ABM.icon(t.icon,'w-4 h-4')"></span>
+          <div class="min-w-0"><div class="text-[11px] font-bold uppercase tracking-wider text-slate-500 truncate" x-text="t.plural"></div><div class="text-sm font-bold text-slate-900 truncate"><span x-text="tiles.byType[t.key] || 0"></span> <span class="font-normal text-slate-500 text-xs">active</span></div></div>
+        </a>
+      </template>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+          <div class="relative md:col-span-4">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search name, model, SKU, barcode, tag…" x-model.debounce.200ms="q" aria-label="Search products">
+          </div>
+          <select class="select md:col-span-2" x-model="f.type" aria-label="Product type">
+            <option value="">All product types</option>
+            <template x-for="t in TYPES" :key="t.key"><option :value="t.key" x-text="t.label"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="f.device" aria-label="Device type">
+            <option value="">All device types</option>
+            <template x-for="d in DEVICE_TYPES" :key="d"><option :value="d" x-text="ABM.db.deviceTypeLabel(d)"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="f.category" x-effect="syncSelect($el, f.category, categoriesForFilter.length)" aria-label="Category">
+            <option value="">All categories</option>
+            <template x-for="c in categoriesForFilter" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="f.brand" x-effect="syncSelect($el, f.brand, brands.length)" aria-label="Brand">
+            <option value="">All brands</option>
+            <template x-for="b in brands" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+          </select>
+        </div>
+        <div class="mt-2 grid grid-cols-1 md:grid-cols-12 gap-2">
+          <select class="select md:col-span-2" x-model="f.condition" aria-label="Condition">
+            <option value="">Any condition</option>
+            <template x-for="c in CONDITIONS" :key="c"><option :value="c" x-text="ABM.utils.titleCase(c)"></option></template>
+          </select>
+          <select class="select md:col-span-2" x-model="f.status" aria-label="Status">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
+          <select class="select md:col-span-2" x-model="f.pta" aria-label="PTA status">
+            <option value="">Any PTA status</option>
+            <template x-for="o in PTA_FILTERS" :key="o.key"><option :value="o.key" x-text="o.label"></option></template>
+          </select>
+          <div class="md:col-span-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+            <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="checkbox" x-model="f.low">
+              <span class="text-slate-700">Low stock only <span class="text-slate-400">(qty ≤ minimum)</span></span>
+            </label>
+            <template x-if="f.group">
+              <button type="button" class="badge badge-purple badge-lg max-w-full" @click="f.group = ''" title="Show all products again">
+                <span x-html="ABM.icon('grid','w-3.5 h-3.5')"></span><span class="truncate" x-text="'Variants of ' + f.group"></span><span x-html="ABM.icon('x','w-3.5 h-3.5')"></span>
+              </button>
+            </template>
+            <template x-if="isSuperAdmin">
+              <div class="inline-flex items-center gap-2">
+                <span class="text-slate-500">Stock column:</span>
+                <div class="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-xs font-semibold">
+                  <button type="button" class="px-2.5 py-1 rounded-md" :class="stockCol === 'branch' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="stockCol = 'branch'" x-text="branch.code"></button>
+                  <button type="button" class="px-2.5 py-1 rounded-md" :class="stockCol === 'all' ? 'bg-navy-800 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="stockCol = 'all'">All branches</button>
+                </div>
+              </div>
+            </template>
+            <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear filters</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <template x-if="!selected.length">
+          <div><div class="card-title">Catalog</div><div class="card-subtitle"><span x-text="filtered.length"></span> product<span x-text="filtered.length === 1 ? '' : 's'"></span> match · click a heading to sort</div></div>
+        </template>
+        <template x-if="selected.length">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="badge badge-navy badge-lg"><span x-text="selected.length"></span> selected</span>
+            <template x-if="canManage"><button type="button" class="btn btn-primary btn-sm" @click="openBulk()"><span x-html="ABM.icon('edit','w-4 h-4')"></span>Bulk edit</button></template>
+            <template x-if="canManage"><button type="button" class="btn btn-secondary btn-sm" @click="bulkActive(1)"><span x-html="ABM.icon('check-circle','w-4 h-4')"></span>Activate</button></template>
+            <template x-if="canManage"><button type="button" class="btn btn-secondary btn-sm" @click="bulkActive(0)"><span x-html="ABM.icon('x-circle','w-4 h-4')"></span>Deactivate</button></template>
+            <a :href="'labels.html?ids=' + selected.join(',')" class="btn btn-secondary btn-sm"><span x-html="ABM.icon('barcode','w-4 h-4')"></span>Print labels</a>
+            <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary btn-sm" @click="exportCsv(true)"><span x-html="ABM.icon('download','w-4 h-4')"></span>Export selected</button>
+            <button type="button" class="btn btn-ghost btn-sm" @click="selected = []"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+          </div>
+        </template>
+        <div class="text-xs text-slate-500 hidden sm:flex items-center gap-1.5"><span class="badge badge-navy">Device</span><span class="badge badge-blue">Accessory</span><span class="badge badge-amber">Spare Part</span><span class="badge badge-purple">Service</span></div>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th class="w-8"><input type="checkbox" class="checkbox" :checked="allPageSelected" x-effect="$el.indeterminate = somePageSelected" @change="toggleAll()" aria-label="Select all on this page"></th>
+              <th class="cursor-pointer select-none" @click="setSort('product')"><span class="inline-flex items-center gap-1">Product <span x-html="sortIcon('product')"></span></span></th>
+              <th class="hidden md:table-cell cursor-pointer select-none" @click="setSort('sku')"><span class="inline-flex items-center gap-1">SKU / Barcode <span x-html="sortIcon('sku')"></span></span></th>
+              <th class="cursor-pointer select-none" @click="setSort('product_type')"><span class="inline-flex items-center gap-1">Type <span x-html="sortIcon('product_type')"></span></span></th>
+              <th class="hidden lg:table-cell">Condition</th>
+              <th class="hidden lg:table-cell">Serial</th>
+              <th class="hidden xl:table-cell cursor-pointer select-none" @click="setSort('warranty_months')"><span class="inline-flex items-center gap-1">Warranty <span x-html="sortIcon('warranty_months')"></span></span></th>
+              <th class="num hidden lg:table-cell cursor-pointer select-none" @click="setSort('cost_price')"><span class="inline-flex items-center gap-1">Cost <span x-html="sortIcon('cost_price')"></span></span></th>
+              <th class="num cursor-pointer select-none" @click="setSort('retail_price')"><span class="inline-flex items-center gap-1">Retail <span x-html="sortIcon('retail_price')"></span></span></th>
+              <th class="num hidden 2xl:table-cell cursor-pointer select-none" @click="setSort('wholesale_price')"><span class="inline-flex items-center gap-1">Wholesale <span x-html="sortIcon('wholesale_price')"></span></span></th>
+              <th class="num hidden xl:table-cell cursor-pointer select-none" @click="setSort('margin')"><span class="inline-flex items-center gap-1">Margin <span x-html="sortIcon('margin')"></span></span></th>
+              <th class="num cursor-pointer select-none" @click="setSort('qty')"><span class="inline-flex items-center gap-1">Stock <span x-html="sortIcon('qty')"></span></span></th>
+              <th class="hidden sm:table-cell cursor-pointer select-none" @click="setSort('status')"><span class="inline-flex items-center gap-1">Status <span x-html="sortIcon('status')"></span></span></th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="{ 'opacity-60': !r.is_active, 'selected': selected.includes(r.id) }">
+                <td><input type="checkbox" class="checkbox" :checked="selected.includes(r.id)" @change="toggleSelect(r.id)" :aria-label="'Select ' + r.name"></td>
+                <td>
+                  <div class="flex items-center gap-3 min-w-0">
+                    <template x-if="r.image"><img :src="r.image" :alt="r.name" class="w-9 h-9 rounded-lg flex-none object-cover border border-slate-200 bg-white"></template>
+                    <template x-if="!r.image"><span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center" :class="typeChip(r)" x-html="ABM.icon(typeIcon(r),'w-4 h-4')"></span></template>
+                    <div class="min-w-0">
+                      <a :href="'product-view.html?id=' + r.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate max-w-[14rem]" x-text="r.name"></a>
+                      <div class="text-xs text-slate-500 truncate max-w-[14rem]"><span x-text="[r.variant, r.color].filter(Boolean).join(' · ')"></span><span x-show="r.variant || r.color"> · </span><span x-text="r.brandName"></span> · <span x-text="r.categoryName"></span></div>
+                      <template x-if="r.variant_group">
+                        <button type="button" class="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-purple-700 hover:underline max-w-[14rem]" @click="f.group = r.variant_group" :title="'Show every variant of ' + r.variant_group">
+                          <span class="flex-none" x-html="ABM.icon('grid','w-3 h-3')"></span><span class="truncate" x-text="r.variant_group + ' · ' + r.groupCount + ' variant' + (r.groupCount === 1 ? '' : 's')"></span>
+                        </button>
+                      </template>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden md:table-cell whitespace-nowrap"><div class="mono text-slate-700" x-text="r.sku"></div><div class="mono text-[11px] text-slate-400" x-text="r.barcode || '—'"></div></td>
+                <td>
+                  <div class="flex flex-col items-start gap-1">
+                    <span x-html="$badge(r.product_type)"></span>
+                    <span class="badge badge-slate" x-show="r.device_type" x-text="ABM.utils.titleCase(r.device_type || '')"></span>
+                    <span x-show="r.pta !== 'not_applicable'" x-html="ptaBadge(r.pta)"></span>
+                  </div>
+                </td>
+                <td class="hidden lg:table-cell"><span x-html="r.product_type === 'service' ? '<span class=&quot;text-slate-400&quot;>—</span>' : $badge(r.condition || 'new')"></span></td>
+                <td class="hidden lg:table-cell"><span x-html="r.is_serialized ? $badge(r.serial_type, ABM.db.serialLabel(r)) : '<span class=&quot;text-slate-400&quot;>—</span>'"></span></td>
+                <td class="hidden xl:table-cell text-slate-600 whitespace-nowrap" x-text="r.warranty_months ? r.warranty_months + ' mo' : '—'"></td>
+                <td class="num hidden lg:table-cell text-slate-600 whitespace-nowrap" x-text="r.product_type === 'service' ? '—' : $money(r.cost_price, {decimals:0})"></td>
+                <td class="num font-semibold whitespace-nowrap" x-text="$money(r.retail_price, {decimals:0})"></td>
+                <td class="num hidden 2xl:table-cell text-slate-600 whitespace-nowrap" x-text="$money(r.wholesale_price, {decimals:0})"></td>
+                <td class="num hidden xl:table-cell"><span x-show="r.product_type !== 'service'" :class="r.margin < 0 ? 'text-rose-600 font-semibold' : r.margin < 5 ? 'text-amber-700' : 'text-emerald-700'" x-text="r.margin + '%'"></span><span x-show="r.product_type === 'service'" class="text-slate-400">—</span></td>
+                <td class="num">
+                  <template x-if="!r.stockTracked"><span class="text-slate-400" title="Services have no stock">—</span></template>
+                  <template x-if="r.stockTracked && stockCol === 'branch'">
+                    <div>
+                      <span class="font-semibold" :class="r.qty === 0 ? 'text-rose-600' : r.qty <= r.min_stock ? 'text-amber-700' : 'text-slate-800'" x-text="r.qty"></span>
+                      <div class="text-[11px] text-slate-400">min <span x-text="r.min_stock"></span></div>
+                    </div>
+                  </template>
+                  <template x-if="r.stockTracked && stockCol === 'all'">
+                    <div class="flex flex-wrap justify-end gap-1">
+                      <template x-for="b in branches" :key="b.id">
+                        <span class="badge" :class="r.perBranch[b.id] === 0 ? 'badge-red' : r.perBranch[b.id] <= r.min_stock ? 'badge-amber' : 'badge-slate'" x-text="b.code + ' ' + r.perBranch[b.id]"></span>
+                      </template>
+                      <span class="badge badge-navy" x-text="'Σ ' + r.totalQty"></span>
+                    </div>
+                  </template>
+                </td>
+                <td class="hidden sm:table-cell"><span x-html="$badge(r.is_active ? 'active' : 'inactive')"></span></td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'product-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="View details" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canManage"><button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit" @click="openEdit(r.id)" x-html="ABM.icon('edit','w-4 h-4')"></button></template>
+                    <template x-if="canAdd"><button type="button" class="btn btn-ghost btn-sm btn-icon hidden sm:inline-flex" title="Duplicate (copy as new)" @click="openDuplicate(r.id)" x-html="ABM.icon('document','w-4 h-4')"></button></template>
+                    <template x-if="canPurchase && r.is_active && r.stockTracked"><a :href="'purchase-create.html?product=' + r.id + (r.supplier_id ? '&supplier=' + r.supplier_id : '')" class="btn btn-ghost btn-sm btn-icon text-emerald-700 hidden sm:inline-flex" title="Add stock (new purchase)" x-html="ABM.icon('truck','w-4 h-4')"></a></template>
+                    <template x-if="canManage"><button type="button" class="btn btn-ghost btn-sm btn-icon" :class="r.is_active ? 'text-amber-700' : 'text-emerald-700'" :title="r.is_active ? 'Deactivate' : 'Activate'" @click="toggleActive(r)" x-html="ABM.icon(r.is_active ? 'x-circle' : 'check-circle','w-4 h-4')"></button></template>
+                    <template x-if="canDelete"><button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete" @click="remove(r)" x-html="ABM.icon('trash','w-4 h-4')"></button></template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="14">
+                <div class="empty">
+                  <span x-html="ABM.icon('cube')"></span>
+                  <div class="empty-title">No products match</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search or clear the filters.' : 'Add your first product to get started.'"></div>
+                  <div class="mt-4 flex justify-center gap-2">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <template x-if="canAdd"><button type="button" class="btn btn-primary btn-sm" @click="openAdd()">Add product</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bulk edit modal -->
+    <div x-show="bulk.open" x-cloak class="modal-backdrop" @click.self="bulk.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="bulkTitle">
+        <form @submit.prevent="applyBulk()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="bulkTitle">Edit <span x-text="selected.length"></span> product<span x-text="selected.length === 1 ? '' : 's'"></span></div>
+              <div class="text-xs text-slate-500">Leave a field on "unchanged" and it is not touched. Prices that would break the cost ≤ minimum ≤ retail rule are skipped.</div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="bulk.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="label" for="bk-cat">Category</label>
+                <select id="bk-cat" class="select" x-model="bulk.category_id">
+                  <option value="">Unchanged</option>
+                  <template x-for="c in categories.filter(c => c.is_active)" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="bk-brand">Brand</label>
+                <select id="bk-brand" class="select" x-model="bulk.brand_id">
+                  <option value="">Unchanged</option>
+                  <template x-for="b in brands.filter(b => b.is_active)" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="bk-tax">Tax rate</label>
+                <div class="input-group"><input id="bk-tax" type="number" min="0" max="100" step="0.01" class="input" x-model="bulk.tax_rate" placeholder="Unchanged"><span class="addon">%</span></div>
+              </div>
+              <div>
+                <label class="label" for="bk-min">Minimum stock</label>
+                <input id="bk-min" type="number" min="0" step="1" class="input" x-model="bulk.min_stock" placeholder="Unchanged">
+              </div>
+              <div>
+                <label class="label" for="bk-warranty">Warranty (months)</label>
+                <input id="bk-warranty" type="number" min="0" max="120" step="1" class="input" x-model="bulk.warranty_months" placeholder="Unchanged">
+              </div>
+              <div>
+                <label class="label" for="bk-supplier">Default supplier</label>
+                <select id="bk-supplier" class="select" x-model="bulk.supplier_id">
+                  <option value="">Unchanged</option>
+                  <template x-for="s in suppliers" :key="s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+                </select>
+              </div>
+              <div>
+                <label class="label" for="bk-pta">PTA status</label>
+                <select id="bk-pta" class="select" x-model="bulk.pta_status">
+                  <option value="">Unchanged</option>
+                  <template x-for="o in PTA_OPTIONS" :key="o.key"><option :value="o.key" x-text="o.label"></option></template>
+                </select>
+                <p class="help">Phones, tablets and smartwatches only — other products are left alone.</p>
+              </div>
+              <div>
+                <label class="label" for="bk-group">Variant group</label>
+                <input id="bk-group" type="text" class="input" x-model="bulk.variant_group" list="variant-groups" placeholder="Unchanged" maxlength="80">
+                <p class="help">Groups the selected products as variants of one model, e.g. <i>iPhone 15 128GB</i>.</p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-slate-200 p-3 space-y-3">
+              <div class="flex items-center justify-between gap-2">
+                <div class="label !mb-0">Price change</div>
+                <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="bulk.priceOn"> Change prices</label>
+              </div>
+              <div class="grid grid-cols-1 sm:grid-cols-4 gap-2" x-show="bulk.priceOn">
+                <select class="select" x-model="bulk.priceField" aria-label="Which price">
+                  <option value="retail_price">Retail price</option>
+                  <option value="wholesale_price">Wholesale price</option>
+                  <option value="cost_price">Cost price</option>
+                  <option value="min_sale_price">Minimum sale price</option>
+                </select>
+                <select class="select" x-model="bulk.priceMode" aria-label="How">
+                  <option value="inc_pct">Increase by %</option>
+                  <option value="dec_pct">Decrease by %</option>
+                  <option value="inc_amt">Increase by amount</option>
+                  <option value="dec_amt">Decrease by amount</option>
+                  <option value="set">Set to</option>
+                </select>
+                <input type="number" min="0" step="0.01" class="input" x-model.number="bulk.priceValue" :aria-label="'Value'" placeholder="0">
+                <select class="select" x-model="bulk.rounding" aria-label="Rounding">
+                  <option value="none">No rounding</option>
+                  <option value="10">Round to 10</option>
+                  <option value="50">Round to 50</option>
+                  <option value="100">Round to 100</option>
+                  <option value="99">End in 99</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="rounded-xl bg-slate-50 border border-slate-200 divide-y divide-slate-100 max-h-[32vh] overflow-y-auto" x-show="bulkPreview.rows.length">
+              <template x-for="r in bulkPreview.rows.slice(0, 40)" :key="r.id">
+                <div class="flex items-center justify-between gap-3 px-3 py-2 min-w-0 text-sm">
+                  <span class="min-w-0">
+                    <span class="block font-medium text-slate-800 truncate" x-text="r.label"></span>
+                    <span class="block text-xs" :class="r.error ? 'text-rose-600' : 'text-slate-500'" x-text="r.error || r.summary"></span>
+                  </span>
+                  <span class="badge flex-none" :class="r.error ? 'badge-red' : 'badge-green'" x-text="r.error ? 'Skipped' : 'Will change'"></span>
+                </div>
+              </template>
+              <div class="px-3 py-2 text-xs text-slate-500" x-show="bulkPreview.rows.length > 40">…and <span x-text="bulkPreview.rows.length - 40"></span> more</div>
+            </div>
+            <div class="alert" :class="bulkPreview.skipped ? 'alert-warning' : 'alert-info'">
+              <span x-html="ABM.icon(bulkPreview.skipped ? 'warning' : 'info')"></span>
+              <span><b x-text="bulkPreview.changing"></b> product(s) will change<span x-show="bulkPreview.skipped">, <b x-text="bulkPreview.skipped"></b> skipped because the price ladder would break</span><span x-show="!bulkPreview.changing && !bulkPreview.skipped"> — nothing selected to change yet</span>.</span>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" @click="bulk.open = false">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="bulk.busy || !bulkPreview.changing"><span x-html="ABM.icon('check')"></span>Apply to <span x-text="bulkPreview.changing"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add / Edit modal -->
+    <div x-show="modal.open" x-cloak class="modal-backdrop" @click.self="closeModal()">
+      <div class="modal-panel modal-xl" role="dialog" aria-modal="true" aria-labelledby="productModalTitle">
+        <form @submit.prevent="save()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="productModalTitle" x-text="modal.mode === 'add' ? (modal.variantOf ? 'Add another variant' : modal.duplicateOf ? 'Duplicate product' : 'Add product') : 'Edit product'"></div>
+              <div class="text-xs text-slate-500 truncate" x-text="modal.mode === 'add' ? (modal.variantOf ? 'New variant of ' + modal.variantSource + ' · group ' + modal.form.variant_group : modal.duplicateOf ? 'Copy of ' + modal.duplicateOf + ' — saved as a new product' : 'New catalog item · ' + typeMeta(modal.form.product_type).label) : ('Editing ' + modal.form.sku + ' · ' + typeMeta(modal.form.product_type).label)"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeModal()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+
+          <!-- Section tabs -->
+          <div class="px-4 sm:px-5 pt-4">
+            <div class="tabs-pill !flex flex-wrap w-full">
+              <template x-for="t in visibleTabs" :key="t.key">
+                <button type="button" class="tab inline-flex items-center justify-center gap-1.5 !px-2.5" :class="modal.tab === t.key && 'active'" @click="modal.tab = t.key">
+                  <span class="w-5 h-5 rounded-full text-[11px] font-bold inline-flex items-center justify-center flex-none" :class="tabHasError(t.key) ? 'bg-rose-600 text-white' : (modal.tab === t.key ? 'bg-navy-700 text-white' : 'bg-slate-500/20 text-slate-600')" x-text="t.n"></span>
+                  <span class="truncate" x-text="t.label"></span>
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <div class="modal-body space-y-4">
+            <!-- 1 Basics -->
+            <div x-show="modal.tab === 'basics'" class="space-y-4">
+              <div>
+                <label class="label">Product type <span class="req">*</span></label>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <template x-for="t in TYPES" :key="t.key">
+                    <button type="button" class="rounded-xl border p-3 text-left transition disabled:opacity-50 disabled:cursor-not-allowed" :class="modal.form.product_type === t.key ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 hover:border-slate-400 bg-white'" :disabled="typeLocked(t.key)" @click="setType(t.key)" :aria-pressed="modal.form.product_type === t.key ? 'true' : 'false'">
+                      <span class="flex items-center gap-2 min-w-0"><span class="chip !w-8 !h-8" :class="t.chip" x-html="ABM.icon(t.icon,'w-4 h-4')"></span><span class="text-sm font-semibold text-slate-800 truncate" x-text="t.label"></span></span>
+                      <span class="block text-[11px] text-slate-500 mt-1.5 leading-snug" x-text="t.hint"></span>
+                    </button>
+                  </template>
+                </div>
+                <p class="help" x-show="modal.hasUnits" x-text="'Locked: ' + modal.unitCount + ' unit' + (modal.unitCount === 1 ? ' is' : 's are') + ' registered against this product, so its type and serial tracking cannot be changed.'"></p>
+                <p class="help" x-show="!modal.hasUnits && modal.hasStock">This product has stock on hand, so it cannot be turned into a service.</p>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div x-show="needsDeviceType">
+                  <label class="label" for="pf-device">Device type <span class="req" x-show="modal.form.product_type === 'device'">*</span></label>
+                  <select id="pf-device" class="select" x-model="modal.form.device_type" x-effect="syncSelect($el, modal.form.device_type, DEVICE_TYPES.length)" :class="modal.errors.device_type && 'is-invalid'" @change="onDeviceTypeChange()">
+                    <option value="">Select device type…</option>
+                    <template x-for="d in DEVICE_TYPES" :key="d"><option :value="d" x-text="ABM.db.deviceTypeLabel(d)"></option></template>
+                  </select>
+                  <p class="field-error" x-show="modal.errors.device_type" x-text="modal.errors.device_type"></p>
+                  <p class="help" x-show="!modal.errors.device_type" x-text="modal.form.product_type === 'part' ? 'Which device this part fits (optional).' : 'Drives the specification fields and serial number rules.'"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-category">Category <span class="req">*</span></label>
+                  <select id="pf-category" class="select" x-model="modal.form.category_id" x-effect="syncSelect($el, modal.form.category_id, typeCategories.length)" :class="modal.errors.category_id && 'is-invalid'" @change="onCategoryChange()">
+                    <option value="">Select category…</option>
+                    <template x-for="c in typeCategories" :key="c.id"><option :value="String(c.id)" x-text="c.name + (c.device_type ? ' · ' + ABM.db.deviceTypeLabel(c.device_type) : '')"></option></template>
+                  </select>
+                  <p class="field-error" x-show="modal.errors.category_id" x-text="modal.errors.category_id"></p>
+                  <p class="help" x-show="!modal.errors.category_id"><span x-text="typeCategories.length"></span> <span x-text="typeMeta(modal.form.product_type).label.toLowerCase()"></span> categor<span x-text="typeCategories.length === 1 ? 'y' : 'ies'"></span> · sets tracking defaults · <a href="categories.html" class="text-navy-700 font-semibold hover:underline">manage</a></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-brand">Brand</label>
+                  <select id="pf-brand" class="select" x-model="modal.form.brand_id" x-effect="syncSelect($el, modal.form.brand_id, brands.length)" :class="modal.errors.brand_id && 'is-invalid'" @change="onIdentityChange()">
+                    <option value="">No brand / generic</option>
+                    <template x-for="b in brands.filter(b => b.is_active || String(b.id) === String(modal.form.brand_id))" :key="b.id"><option :value="String(b.id)" x-text="b.name"></option></template>
+                  </select>
+                  <p class="field-error" x-show="modal.errors.brand_id" x-text="modal.errors.brand_id"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-name">Product name <span class="req">*</span></label>
+                  <input id="pf-name" type="text" class="input" x-ref="firstField" x-model="modal.form.name" :class="modal.errors.name && 'is-invalid'" @input="onIdentityChange()" :placeholder="typeMeta(modal.form.product_type).namePlaceholder" maxlength="120">
+                  <p class="field-error" x-show="modal.errors.name" x-text="modal.errors.name"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-model">Model number</label>
+                  <input id="pf-model" type="text" class="input" x-model="modal.form.model" placeholder="e.g. SM-A556E / Latitude 5420" maxlength="60">
+                </div>
+                <div>
+                  <label class="label" for="pf-variant">Variant <span class="text-slate-400 font-normal">(storage / RAM / size)</span></label>
+                  <input id="pf-variant" type="text" class="input" x-ref="variantField" x-model="modal.form.variant" :class="modal.errors.variant && 'is-invalid'" placeholder="e.g. 8GB/256GB · i5 / 16GB / 512GB" maxlength="80">
+                  <p class="field-error" x-show="modal.errors.variant" x-text="modal.errors.variant"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-color">Color</label>
+                  <input id="pf-color" type="text" class="input" x-model="modal.form.color" :class="modal.errors.variant && 'is-invalid'" placeholder="e.g. Awesome Navy" maxlength="60">
+                </div>
+                <div>
+                  <label class="label" for="pf-group">Variant group <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <input id="pf-group" type="text" class="input" x-model="modal.form.variant_group" list="variant-groups" placeholder="e.g. iPhone 15 128GB" maxlength="80">
+                  <p class="help" x-text="groupHelp"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-tags">Tags</label>
+                  <div class="input flex flex-wrap items-center gap-1.5 !py-1.5 min-h-[2.6rem] cursor-text" :class="modal.errors.tags && 'is-invalid'" @click="$refs.tagInput && $refs.tagInput.focus()">
+                    <template x-for="(t, i) in modal.form.tags" :key="t">
+                      <span class="badge badge-navy !text-xs"><span x-text="t"></span><button type="button" class="ml-0.5 -mr-1 rounded-full hover:bg-navy-500/20 p-0.5" @click.stop="removeTag(i)" :aria-label="'Remove tag ' + t" x-html="ABM.icon('x','w-3 h-3')"></button></span>
+                    </template>
+                    <input id="pf-tags" type="text" class="flex-1 min-w-[6rem] bg-transparent outline-none text-sm py-0.5" x-ref="tagInput" x-model="modal.tagInput" @keydown.enter.prevent="addTag()" @input="if (modal.tagInput.includes(',')) addTag()" @keydown.backspace="if (!modal.tagInput && modal.form.tags.length) modal.form.tags.pop()" @blur="addTag()" placeholder="Type and press Enter…" maxlength="30" autocomplete="off">
+                  </div>
+                  <p class="help">Used by search and the online store filters, e.g. <i>pta-approved</i>, <i>gaming</i>, <i>bestseller</i>.</p>
+                </div>
+              </div>
+
+              <template x-if="modal.mode === 'edit' && canAdd">
+                <div class="rounded-xl border border-slate-200 bg-purple-50 p-3 flex flex-wrap items-center gap-3">
+                  <span class="chip chip-slate !w-9 !h-9 flex-none" x-html="ABM.icon('grid','w-4 h-4')"></span>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-slate-800">Other colours or storage sizes?</div>
+                    <div class="text-xs text-slate-600">Copies this product as a new variant — same model, prices and specs, a new variant / colour, SKU and barcode, and the same variant group.</div>
+                  </div>
+                  <button type="button" class="btn btn-secondary btn-sm flex-none" @click="openVariant(modal.id)"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add another variant</button>
+                </div>
+              </template>
+
+              <div>
+                <label class="label" for="pf-desc">Description</label>
+                <textarea id="pf-desc" class="textarea" rows="3" x-model="modal.form.description" placeholder="Shown on the product page and the online store" maxlength="1000"></textarea>
+              </div>
+
+              <!-- Photos & video: the first image is the main one used on cards, POS and the online store -->
+              <div>
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                  <label class="label !mb-0">Photos &amp; video</label>
+                  <span class="text-xs text-slate-500" x-show="(modal.form.media || []).length" x-cloak
+                        x-text="(modal.form.media || []).length + ' file' + ((modal.form.media || []).length === 1 ? '' : 's') + ' · ' + mediaSizeLabel()"></span>
+                </div>
+
+                <!-- gallery -->
+                <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2 mt-2" x-show="(modal.form.media || []).length" x-cloak>
+                  <template x-for="(m, i) in (modal.form.media || [])" :key="m.id">
+                    <div class="relative group rounded-xl overflow-hidden border border-slate-200 bg-slate-50 aspect-square">
+                      <template x-if="m.type === 'image'">
+                        <img :src="m.url" :alt="m.alt || 'Product photo'" class="w-full h-full object-cover">
+                      </template>
+                      <template x-if="m.type === 'video'">
+                        <div class="w-full h-full flex flex-col items-center justify-center text-slate-500 bg-slate-900/5">
+                          <span x-html="ABM.icon('video','w-7 h-7')"></span>
+                          <span class="text-[10px] mt-1 px-1 text-center truncate w-full" x-text="m.name || 'Video'"></span>
+                        </div>
+                      </template>
+
+                      <span class="absolute top-1 left-1 badge badge-green !text-[9px] !px-1.5" x-show="m.is_primary" x-cloak>Main</span>
+
+                      <div class="absolute inset-x-0 bottom-0 flex justify-center gap-0.5 p-1 bg-slate-900/55 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
+                        <button type="button" class="p-1 rounded text-white hover:bg-white/20 disabled:opacity-30" :disabled="i === 0"
+                                @click="moveMedia(i, -1)" title="Move earlier"><span x-html="ABM.icon('chevron-left','w-3.5 h-3.5')"></span></button>
+                        <button type="button" class="p-1 rounded text-white hover:bg-white/20 disabled:opacity-30" :disabled="m.type === 'video' || m.is_primary"
+                                @click="setPrimary(i)" title="Make main photo"><span x-html="ABM.icon('star','w-3.5 h-3.5')"></span></button>
+                        <button type="button" class="p-1 rounded text-white hover:bg-white/20 disabled:opacity-30" :disabled="i === (modal.form.media || []).length - 1"
+                                @click="moveMedia(i, 1)" title="Move later"><span x-html="ABM.icon('chevron-right','w-3.5 h-3.5')"></span></button>
+                        <button type="button" class="p-1 rounded text-rose-200 hover:bg-white/20"
+                                @click="removeMedia(i)" title="Remove"><span x-html="ABM.icon('trash','w-3.5 h-3.5')"></span></button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- empty state -->
+                <div class="mt-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center" x-show="!(modal.form.media || []).length" x-cloak>
+                  <span class="text-slate-300 inline-block" x-html="ABM.icon('image','w-8 h-8')"></span>
+                  <p class="text-sm text-slate-500 mt-1">No photos yet — the store shows a placeholder until you add one.</p>
+                </div>
+
+                <!-- add controls -->
+                <div class="flex flex-wrap items-center gap-2 mt-3">
+                  <label class="btn btn-secondary btn-sm cursor-pointer !mb-0">
+                    <span x-html="ABM.icon('upload','w-4 h-4')"></span>Add photos
+                    <input type="file" class="sr-only" multiple :accept="ABM.media.ACCEPT_IMAGE" @change="onMediaFiles($event, 'image')">
+                  </label>
+                  <label class="btn btn-secondary btn-sm cursor-pointer !mb-0">
+                    <span x-html="ABM.icon('video','w-4 h-4')"></span>Add video
+                    <input type="file" class="sr-only" :accept="ABM.media.ACCEPT_VIDEO" @change="onMediaFiles($event, 'video')">
+                  </label>
+                  <div class="flex gap-2 flex-1 min-w-[16rem]">
+                    <input type="url" class="input input-sm flex-1 min-w-0" x-model="modal.mediaUrl"
+                           placeholder="…or paste an image / YouTube URL" @keydown.enter.prevent="addMediaUrl()">
+                    <button type="button" class="btn btn-secondary btn-sm flex-none" @click="addMediaUrl()">Add</button>
+                  </div>
+                </div>
+                <p class="help">
+                  Drag order with the arrows; the star sets the main photo shown on cards and at the POS.
+                  Photos are resized to 1400px. Videos: MP4/WebM under 4 MB, or paste a YouTube link.
+                </p>
+                <p class="field-error" x-show="modal.errors.image" x-text="modal.errors.image"></p>
+              </div>
+            </div>
+
+            <!-- 2 Identification -->
+            <div x-show="modal.tab === 'ident'" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label" for="pf-sku">SKU <span class="req">*</span></label>
+                  <div class="flex gap-2">
+                    <input id="pf-sku" type="text" class="input mono uppercase flex-1 min-w-0" x-model="modal.form.sku" :class="modal.errors.sku && 'is-invalid'" @input="modal.skuTouched = true" placeholder="AUTO-GENERATED" maxlength="40">
+                    <button type="button" class="btn btn-secondary btn-sm flex-none" @click="modal.form.sku = suggestSku(); modal.skuTouched = true" title="Regenerate SKU suggestion"><span x-html="ABM.icon('sparkles','w-4 h-4')"></span>Suggest</button>
+                  </div>
+                  <p class="field-error" x-show="modal.errors.sku" x-text="modal.errors.sku"></p>
+                  <p class="help" x-show="!modal.errors.sku">Suggested from brand + name. Must be unique across the catalog.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-barcode">Barcode <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <div class="flex gap-2">
+                    <input id="pf-barcode" type="text" inputmode="numeric" class="input mono flex-1 min-w-0" x-model="modal.form.barcode" :class="modal.errors.barcode && 'is-invalid'" placeholder="Scan or type" maxlength="20">
+                    <button type="button" class="btn btn-secondary btn-sm flex-none" @click="modal.form.barcode = generateBarcode()"><span x-html="ABM.icon('barcode','w-4 h-4')"></span>Generate</button>
+                  </div>
+                  <p class="field-error" x-show="modal.errors.barcode" x-text="modal.errors.barcode"></p>
+                  <p class="help" x-show="!modal.errors.barcode">Scanned at POS and purchases. Unique per product.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-unit">Unit</label>
+                  <select id="pf-unit" class="select" x-model="modal.form.unit">
+                    <option value="pcs">pcs — pieces</option>
+                    <option value="job">job — service / labor</option>
+                  </select>
+                </div>
+                <div x-show="modal.form.is_serialized && modal.form.serial_type === 'serial'">
+                  <label class="label" for="pf-prefix">Serial prefix <span class="text-slate-400 font-normal">(optional)</span></label>
+                  <input id="pf-prefix" type="text" class="input mono uppercase" x-model="modal.form.serial_prefix" placeholder="e.g. DL5420" maxlength="12">
+                  <p class="help">Shown as a hint when registering serial numbers.</p>
+                </div>
+              </div>
+
+              <div class="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-4" x-show="modal.form.product_type !== 'service'">
+                <div class="flex items-start gap-3">
+                  <button type="button" class="switch mt-0.5" :class="{ on: modal.form.is_serialized, 'opacity-50 cursor-not-allowed': modal.hasUnits }" role="switch" :aria-checked="modal.form.is_serialized ? 'true' : 'false'" :disabled="modal.hasUnits" @click="toggleSerialized()"></button>
+                  <div class="min-w-0">
+                    <div class="text-sm font-semibold text-slate-800">Serialized — track every unit</div>
+                    <div class="text-xs text-slate-500" x-text="modal.hasUnits ? 'Locked: ' + modal.unitCount + ' unit' + (modal.unitCount === 1 ? ' is' : 's are') + ' already registered for this product.' : 'Each unit is registered by IMEI or serial number and sold individually (phones, tablets, watches, laptops, desktops).'"></div>
+                  </div>
+                </div>
+                <div x-show="modal.form.is_serialized">
+                  <label class="label">Serial type <span class="req">*</span></label>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button type="button" class="rounded-xl border p-3 text-left disabled:opacity-50 disabled:cursor-not-allowed" :class="modal.form.serial_type === 'imei' ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white hover:border-slate-400'" :disabled="modal.hasUnits" @click="modal.form.serial_type = 'imei'">
+                      <div class="flex items-center gap-2"><span class="chip chip-navy !w-8 !h-8" x-html="ABM.icon('phone','w-4 h-4')"></span><span class="text-sm font-semibold text-slate-800">IMEI</span></div>
+                      <div class="text-[11px] text-slate-500 mt-1.5">15 digits<span x-show="luhnOn">, Luhn checked</span> · phones, tablets, cellular watches</div>
+                    </button>
+                    <button type="button" class="rounded-xl border p-3 text-left disabled:opacity-50 disabled:cursor-not-allowed" :class="modal.form.serial_type === 'serial' ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white hover:border-slate-400'" :disabled="modal.hasUnits" @click="modal.form.serial_type = 'serial'">
+                      <div class="flex items-center gap-2"><span class="chip chip-info !w-8 !h-8" x-html="ABM.icon('laptop','w-4 h-4')"></span><span class="text-sm font-semibold text-slate-800">Serial No.</span></div>
+                      <div class="text-[11px] text-slate-500 mt-1.5">4–40 letters / digits · laptops, desktops, printers</div>
+                    </button>
+                  </div>
+                  <p class="field-error" x-show="modal.errors.serial_type" x-text="modal.errors.serial_type"></p>
+                </div>
+              </div>
+              <div class="alert alert-info" x-show="modal.form.product_type === 'service'"><span x-html="ABM.icon('info')"></span><div>Services and labor are not stock items: no quantity, no serial numbers and cost is always 0. They can be sold at the POS and added to repair job cards.</div></div>
+            </div>
+
+            <!-- 3 Specifications -->
+            <div x-show="modal.tab === 'specs'" class="space-y-4">
+              <div>
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <div class="text-sm font-semibold text-slate-800">Specifications <span class="text-slate-400 font-normal" x-show="modal.form.device_type" x-text="'· ' + ABM.db.deviceTypeLabel(modal.form.device_type)"></span></div>
+                  <button type="button" class="btn btn-secondary btn-sm" @click="addCustomSpec()"><span x-html="ABM.icon('plus','w-4 h-4')"></span>Add custom spec</button>
+                </div>
+                <template x-if="specKeys.length">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <template x-for="k in specKeys" :key="k">
+                      <div>
+                        <label class="label" :for="'pf-spec-' + k" x-text="ABM.db.specLabel(k)"></label>
+                        <input :id="'pf-spec-' + k" type="text" class="input" x-model="modal.form.specs[k]" :placeholder="specPlaceholder(k)" maxlength="80">
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <p class="help" x-show="!specKeys.length" x-text="modal.form.product_type === 'device' ? 'Select a device type in Basics to get the standard spec fields (RAM, storage, processor, …).' : 'No standard spec fields for this product type — add custom specs below (e.g. Length: 1 m, Output: 20 W).'"></p>
+                <div class="mt-3 space-y-2" x-show="modal.custom.length">
+                  <div class="text-xs font-semibold uppercase tracking-wider text-slate-500">Custom specs</div>
+                  <template x-for="(row, i) in modal.custom" :key="row.uid">
+                    <div class="flex gap-2 items-start">
+                      <input type="text" class="input flex-1 min-w-0" x-model="row.key" placeholder="Name (e.g. Weight)" maxlength="40" :class="modal.errors.specs && !String(row.key).trim() && String(row.value).trim() && 'is-invalid'">
+                      <input type="text" class="input flex-1 min-w-0" x-model="row.value" placeholder="Value (e.g. 1.4 kg)" maxlength="80">
+                      <button type="button" class="btn btn-ghost btn-icon text-rose-600 flex-none" @click="modal.custom.splice(i, 1)" aria-label="Remove spec" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </div>
+                  </template>
+                  <p class="field-error" x-show="modal.errors.specs" x-text="modal.errors.specs"></p>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4" x-show="modal.form.product_type !== 'service'">
+                <div>
+                  <label class="label">Condition</label>
+                  <div class="grid grid-cols-3 gap-2">
+                    <template x-for="c in CONDITIONS" :key="c">
+                      <button type="button" class="rounded-lg border px-2 py-2 text-sm font-semibold" :class="modal.form.condition === c ? 'border-navy-500 bg-navy-50 text-navy-800 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'" @click="modal.form.condition = c" x-text="ABM.utils.titleCase(c)"></button>
+                    </template>
+                  </div>
+                  <p class="help">Shown on the product page, invoices and the online store.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-warranty">Warranty</label>
+                  <div class="input-group"><input id="pf-warranty" type="number" min="0" max="120" step="1" class="input" x-model.number="modal.form.warranty_months" :class="modal.errors.warranty_months && 'is-invalid'"><span class="addon">months</span></div>
+                  <p class="field-error" x-show="modal.errors.warranty_months" x-text="modal.errors.warranty_months"></p>
+                  <p class="help" x-show="!modal.errors.warranty_months">0 = no warranty. Printed on invoices next to the item.</p>
+                </div>
+                <div class="sm:col-span-2" x-show="formPtaApplies">
+                  <label class="label">PTA status</label>
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <template x-for="o in PTA_OPTIONS" :key="o.key">
+                      <button type="button" class="rounded-lg border px-3 py-2 text-left" :class="modal.form.pta_status === o.key ? 'border-navy-500 bg-navy-50 ring-2 ring-navy-500/20' : 'border-slate-200 bg-white hover:border-slate-400'" @click="modal.form.pta_status = o.key" :aria-pressed="modal.form.pta_status === o.key ? 'true' : 'false'">
+                        <span class="block text-sm font-semibold" :class="modal.form.pta_status === o.key ? 'text-navy-800' : 'text-slate-700'" x-text="o.label"></span>
+                        <span class="block text-[11px] text-slate-500 leading-snug" x-text="o.hint"></span>
+                      </button>
+                    </template>
+                  </div>
+                  <p class="field-error" x-show="modal.errors.pta_status" x-text="modal.errors.pta_status"></p>
+                  <p class="help" x-show="!modal.errors.pta_status">The online store says "PTA approved" only when this is Approved, and warns buyers when it is Non-PTA.</p>
+                </div>
+              </div>
+              <div x-show="modal.form.product_type === 'service'">
+                <label class="label" for="pf-warranty-svc">Workmanship warranty</label>
+                <div class="input-group max-w-xs"><input id="pf-warranty-svc" type="number" min="0" max="120" step="1" class="input" x-model.number="modal.form.warranty_months" :class="modal.errors.warranty_months && 'is-invalid'"><span class="addon">months</span></div>
+                <p class="field-error" x-show="modal.errors.warranty_months" x-text="modal.errors.warranty_months"></p>
+                <p class="help" x-show="!modal.errors.warranty_months">Optional — repair jobs carry their own warranty days.</p>
+              </div>
+            </div>
+
+            <!-- 4 Pricing & tax -->
+            <div x-show="modal.tab === 'pricing'" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label" for="pf-cost">Cost price <span class="req" x-show="modal.form.product_type !== 'service'">*</span></label>
+                  <div class="input-group"><input id="pf-cost" type="number" min="0" step="0.01" class="input" x-model.number="modal.form.cost_price" :class="modal.errors.cost_price && 'is-invalid'" :disabled="modal.form.product_type === 'service'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="modal.errors.cost_price" x-text="modal.errors.cost_price"></p>
+                  <p class="help" x-show="!modal.errors.cost_price" x-text="modal.form.product_type === 'service' ? 'Services have no cost (labor).' : 'Default purchase cost. Actual stock value uses the weighted average of purchases.'"></p>
+                </div>
+                <div>
+                  <label class="label" for="pf-retail">Retail price <span class="req">*</span></label>
+                  <div class="input-group"><input id="pf-retail" type="number" min="0" step="0.01" class="input" x-model.number="modal.form.retail_price" :class="modal.errors.retail_price && 'is-invalid'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="modal.errors.retail_price" x-text="modal.errors.retail_price"></p>
+                  <p class="help text-amber-700 font-medium" x-show="!modal.errors.retail_price && retailBelowCost">Retail is below cost — you would sell at a loss.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-wholesale">Wholesale price</label>
+                  <div class="input-group"><input id="pf-wholesale" type="number" min="0" step="0.01" class="input" x-model.number="modal.form.wholesale_price" :class="modal.errors.wholesale_price && 'is-invalid'" placeholder="= retail"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="modal.errors.wholesale_price" x-text="modal.errors.wholesale_price"></p>
+                  <p class="help" x-show="!modal.errors.wholesale_price">Offered to wholesale customers at POS. Leave blank to use retail.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-minsale">Minimum sale price</label>
+                  <div class="input-group"><input id="pf-minsale" type="number" min="0" step="0.01" class="input" x-model.number="modal.form.min_sale_price" :class="modal.errors.min_sale_price && 'is-invalid'" :placeholder="modal.form.product_type === 'service' ? '= retail' : '= cost'"><span class="addon">Rs.</span></div>
+                  <p class="field-error" x-show="modal.errors.min_sale_price" x-text="modal.errors.min_sale_price"></p>
+                  <p class="help" x-show="!modal.errors.min_sale_price">Cashiers cannot discount below this. Must satisfy cost ≤ minimum ≤ retail and wholesale ≥ minimum.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-tax">Tax rate</label>
+                  <div class="input-group"><input id="pf-tax" type="number" min="0" max="100" step="0.01" class="input" x-model.number="modal.form.tax_rate" :class="modal.errors.tax_rate && 'is-invalid'"><span class="addon">%</span></div>
+                  <p class="field-error" x-show="modal.errors.tax_rate" x-text="modal.errors.tax_rate"></p>
+                  <p class="help" x-show="!modal.errors.tax_rate"><span x-text="db.setting('tax_label') || 'Sales Tax'"></span> applied on top of the price at POS.</p>
+                </div>
+                <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Margin preview</div>
+                  <div class="mt-1 flex items-baseline gap-2 flex-wrap">
+                    <span class="text-2xl font-extrabold tabular" :class="formMargin !== null && formMargin < 0 ? 'text-rose-600' : 'text-emerald-800'" x-text="formMargin === null ? '—' : formMargin + '%'"></span>
+                    <span class="text-sm text-emerald-800" x-show="formMargin !== null">on retail · <b x-text="$money(Number(modal.form.retail_price || 0) - Number(modal.form.cost_price || 0))"></b> / unit</span>
+                  </div>
+                  <div class="text-xs text-emerald-800/80 mt-1.5" x-show="wholesaleMargin !== null">Wholesale margin <b x-text="wholesaleMargin + '%'"></b><span x-show="modal.form.min_sale_price !== '' && modal.form.min_sale_price !== null"> · floor margin <b x-text="floorMargin + '%'"></b></span></div>
+                </div>
+              </div>
+              <template x-if="modal.mode === 'edit'">
+                <div class="rounded-xl border border-slate-200">
+                  <div class="px-3 py-2 border-b border-slate-200 flex items-center justify-between gap-2">
+                    <span class="text-sm font-semibold text-slate-800">Price history</span>
+                    <span class="text-xs text-slate-500" x-text="priceHistory.total ? priceHistory.total + ' change' + (priceHistory.total === 1 ? '' : 's') : 'no changes yet'"></span>
+                  </div>
+                  <div class="divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                    <template x-for="h in priceHistory.rows" :key="h.id">
+                      <div class="px-3 py-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 text-sm min-w-0">
+                        <span class="min-w-0">
+                          <span class="font-medium text-slate-800" x-text="priceLabel(h.field)"></span>
+                          <span class="tabular text-slate-500" x-text="$money(h.old_value, {decimals:0}) + ' → '"></span><b class="tabular text-slate-800" x-text="$money(h.new_value, {decimals:0})"></b>
+                        </span>
+                        <span class="text-xs text-slate-500" x-text="ABM.utils.date(h.created_at) + ' · ' + sourceLabel(h.source) + (h.user_id ? ' · ' + db.userName(h.user_id) : '')"></span>
+                      </div>
+                    </template>
+                    <div class="px-3 py-3 text-xs text-slate-500" x-show="!priceHistory.rows.length">Price changes made here, in bulk edits, purchases and imports are listed here.</div>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <!-- 5 Stock settings -->
+            <div x-show="modal.tab === 'stock' && modal.form.product_type !== 'service'" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label class="label" for="pf-min">Minimum stock <span class="text-slate-400 font-normal">(per branch)</span></label>
+                  <input id="pf-min" type="number" min="0" step="1" class="input" x-model.number="modal.form.min_stock" :class="modal.errors.min_stock && 'is-invalid'">
+                  <p class="field-error" x-show="modal.errors.min_stock" x-text="modal.errors.min_stock"></p>
+                  <p class="help" x-show="!modal.errors.min_stock">Low-stock alert when quantity falls to this level.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-max">Maximum stock <span class="text-slate-400 font-normal">(per branch)</span></label>
+                  <input id="pf-max" type="number" min="0" step="1" class="input" x-model.number="modal.form.max_stock" :class="modal.errors.max_stock && 'is-invalid'">
+                  <p class="field-error" x-show="modal.errors.max_stock" x-text="modal.errors.max_stock"></p>
+                  <p class="help" x-show="!modal.errors.max_stock">Target level after a reorder. 0 = no limit.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-reorder">Reorder quantity</label>
+                  <input id="pf-reorder" type="number" min="0" step="1" class="input" x-model.number="modal.form.reorder_qty" :class="modal.errors.reorder_qty && 'is-invalid'">
+                  <p class="field-error" x-show="modal.errors.reorder_qty" x-text="modal.errors.reorder_qty"></p>
+                  <p class="help" x-show="!modal.errors.reorder_qty">Suggested purchase quantity shown on Branch Stock when the item is low.</p>
+                </div>
+                <div>
+                  <label class="label" for="pf-supplier">Default supplier</label>
+                  <select id="pf-supplier" class="select" x-model="modal.form.supplier_id" x-effect="syncSelect($el, modal.form.supplier_id, suppliers.length)">
+                    <option value="">No default supplier</option>
+                    <template x-for="s in suppliers" :key="s.id"><option :value="String(s.id)" x-text="s.name"></option></template>
+                  </select>
+                  <p class="help">Pre-selected when creating a purchase for this product.</p>
+                </div>
+              </div>
+              <div class="alert alert-info" x-show="modal.mode === 'edit'"><span x-html="ABM.icon('info')"></span><div>Current stock: <b x-text="modal.stockSummary"></b>. Quantities are changed through purchases, sales, transfers and stock adjustments — never here.</div></div>
+            </div>
+          </div>
+
+          <div class="modal-footer flex-wrap">
+            <label class="mr-auto inline-flex items-center gap-2.5 cursor-pointer select-none">
+              <button type="button" class="switch" :class="modal.form.is_active && 'on'" role="switch" :aria-checked="modal.form.is_active ? 'true' : 'false'" @click="modal.form.is_active = modal.form.is_active ? 0 : 1"></button>
+              <span class="text-sm"><span class="font-semibold text-slate-800" x-text="modal.form.is_active ? 'Active' : 'Inactive'"></span><span class="text-slate-500 hidden sm:inline" x-text="modal.form.is_active ? ' · visible at POS, purchases and online' : ' · hidden from POS and the store'"></span></span>
+            </label>
+            <button type="button" class="btn btn-secondary" @click="closeModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="modal.busy"><span x-html="ABM.icon('check')"></span><span x-text="modal.mode === 'add' ? 'Add product' : 'Save changes'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- existing variant groups, offered by the product form and the bulk editor -->
+    <datalist id="variant-groups">
+      <template x-for="g in variantGroups" :key="g"><option :value="g"></option></template>
+    </datalist>
+  </main>
+
+  <script>
+    function productsPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const branchId = session.branchId();
+      const TYPES = [
+        { key: 'device', label: 'Device', plural: 'Devices', icon: 'phone', chip: 'chip-navy', hint: 'Phones, tablets, watches, laptops, desktops — usually serialized', namePlaceholder: 'e.g. Galaxy A55 / Latitude 5420' },
+        { key: 'accessory', label: 'Accessory', plural: 'Accessories', icon: 'cube', chip: 'chip-info', hint: 'Chargers, cables, cases, audio — stock by quantity', namePlaceholder: 'e.g. 20W USB-C Charger' },
+        { key: 'part', label: 'Spare Part', plural: 'Spare parts', icon: 'cpu', chip: 'chip-warning', hint: 'Screens, batteries, keyboards — used in repair jobs', namePlaceholder: 'e.g. iPhone 13 Screen Assembly' },
+        { key: 'service', label: 'Service', plural: 'Services', icon: 'wrench', chip: 'chip-slate', hint: 'Labor & services — no stock, no cost', namePlaceholder: 'e.g. Screen Replacement Labor' },
+      ];
+      const DEVICE_TYPES = ['mobile', 'tablet', 'smartwatch', 'laptop', 'desktop'];
+      const CONDITIONS = ['new', 'used', 'refurbished'];
+      // PTA (Pakistan Telecommunication Authority) registration: only phones, tablets and SIM watches carry one
+      const PTA_DEVICE_TYPES = ['mobile', 'tablet', 'smartwatch'];
+      const PTA_OPTIONS = [
+        { key: 'approved', label: 'PTA approved', hint: 'Registered — any local SIM works' },
+        { key: 'non_pta', label: 'Non-PTA', hint: 'Not registered — SIMs stop after the grace period' },
+        { key: 'unknown', label: 'Not checked', hint: 'Status not confirmed yet' },
+      ];
+      const PTA_FILTERS = [...PTA_OPTIONS.map((o) => ({ key: o.key, label: o.label })), { key: 'not_applicable', label: 'Not applicable' }];
+      const ptaApplies = (p) => !!p && (p.product_type || db.productType(p)) === 'device' && PTA_DEVICE_TYPES.includes(p.device_type);
+      /** A product's PTA status as the lists use it: not_applicable outside phones / tablets / watches, unknown when never set. */
+      const ptaOf = (p) => (ptaApplies(p) ? (['approved', 'non_pta', 'unknown'].includes(p.pta_status) ? p.pta_status : 'unknown') : 'not_applicable');
+      const groupKey = (g) => String(g || '').trim().toLowerCase();
+      const TABS = [
+        { key: 'basics', n: 1, label: 'Basics', fields: ['product_type', 'device_type', 'category_id', 'brand_id', 'name', 'image', 'tags', 'variant', 'variant_group'] },
+        { key: 'ident', n: 2, label: 'Identification', fields: ['sku', 'barcode', 'serial_type', 'unit', 'serial_prefix'] },
+        { key: 'specs', n: 3, label: 'Specifications', fields: ['specs', 'condition', 'warranty_months', 'pta_status'] },
+        { key: 'pricing', n: 4, label: 'Pricing & tax', fields: ['cost_price', 'retail_price', 'wholesale_price', 'min_sale_price', 'tax_rate'] },
+        { key: 'stock', n: 5, label: 'Stock settings', fields: ['min_stock', 'max_stock', 'reorder_qty', 'supplier_id'] },
+      ];
+      const SPEC_HINTS = { processor: 'Intel Core i5-1135G7', generation: '11th Gen', ram: '8GB DDR4', storage: '256GB NVMe SSD', screen: '6.1" OLED / 14" FHD', os: 'Android 14 / Windows 11 Pro', battery_health: '88%', graphics: 'Intel Iris Xe', camera: '50MP + 12MP', battery: '5000 mAh', connectivity: 'Wi-Fi 6, BT 5.3, 5G', ports: '2× USB-C, HDMI, 3.5 mm' };
+      let uid = 0;
+      const catType = (c) => c.product_type || (c.is_imei_tracked ? 'device' : 'accessory');
+      return {
+        db,
+        TYPES, DEVICE_TYPES, CONDITIONS, TABS, PTA_OPTIONS, PTA_FILTERS,
+        branch: session.branch() || { name: '', code: '' },
+        isSuperAdmin: session.isSuperAdmin(),
+        canAdd: session.can('products.add'),
+        canManage: session.can('products.edit'),
+        canDelete: session.can('products.delete'),
+        canPurchase: session.can('purchases.add'),
+        luhnOn: !!db.setting('imei_luhn_check'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        categories: utils.sortBy(db.all('categories'), 'name'),
+        brands: utils.sortBy(db.all('brands'), 'name'),
+        suppliers: utils.sortBy(db.all('suppliers').filter((s) => s.is_active), 'name'),
+        rows: [],
+        tiles: { active: 0, inactive: 0, serialized: 0, imei: 0, serial: 0, units: 0, low: 0, value: 0, stockUnits: 0, categories: 0, byType: {} },
+        q: '',
+        f: { category: '', brand: '', type: '', device: '', condition: '', status: 'active', low: false, pta: '', group: '' },
+        sort: { key: 'product', dir: 'asc' },
+        page: 1,
+        stockCol: 'branch',
+        selected: [],
+        variantGroups: [],
+        suppliers: utils.sortBy(db.all('suppliers').filter((s) => s.is_active), 'name'),
+        bulk: { open: false, category_id: '', brand_id: '', tax_rate: '', min_stock: '', warranty_months: '', supplier_id: '', pta_status: '', variant_group: '', priceOn: false, priceField: 'retail_price', priceMode: 'inc_pct', priceValue: '', rounding: 'none', busy: false },
+        modal: { open: false, mode: 'add', id: null, duplicateOf: '', variantOf: null, variantSource: '', snapshot: '', busy: false, tab: 'basics', skuTouched: false, hasUnits: false, hasStock: false, unitCount: 0, stockSummary: '', form: {}, errors: {}, custom: [], tagInput: '', mediaUrl: '' },
+
+        init() {
+          this.f.category = utils.qs('category', '');
+          this.f.brand = utils.qs('brand', '');
+          if (TYPES.some((t) => t.key === utils.qs('type'))) this.f.type = utils.qs('type');
+          if (DEVICE_TYPES.includes(utils.qs('device'))) this.f.device = utils.qs('device');
+          if (CONDITIONS.includes(utils.qs('condition'))) this.f.condition = utils.qs('condition');
+          if (utils.qs('status') !== null && ['', 'active', 'inactive'].includes(utils.qs('status'))) this.f.status = utils.qs('status');
+          if (utils.qs('filter') === 'low') this.f.low = true;
+          if (PTA_FILTERS.some((o) => o.key === utils.qs('pta'))) this.f.pta = utils.qs('pta');
+          if (utils.qs('group')) { this.f.group = utils.qs('group'); this.f.status = ''; }
+          if (utils.qs('q')) this.q = utils.qs('q');
+          this.refresh();
+          this.$watch('q', () => { this.page = 1; });
+          ['category', 'brand', 'type', 'device', 'condition', 'status', 'low', 'pta', 'group'].forEach((k) => this.$watch('f.' + k, () => { this.page = 1; }));
+          this.$watch('stockCol', () => { this.page = 1; });
+          const editId = utils.qs('edit');
+          this.$nextTick(() => {
+            if (editId && this.canManage) this.openEdit(editId);
+            else if (utils.qs('new') && this.canAdd) this.openAdd();
+          });
+        },
+
+        /* ---------------------------------------------------------- helpers */
+        /** Re-apply a select's model value after its x-for options have rendered (Alpine only marks options that already exist). */
+        syncSelect(el, value) { this.$nextTick(() => { const v = value === null || value === undefined ? '' : String(value); if (el.value !== v) el.value = v; }); },
+        typeMeta(key) { return TYPES.find((t) => t.key === key) || TYPES[1]; },
+        typeIcon(p) { const t = db.productType(p); if (t === 'service') return 'wrench'; if (t === 'part') return 'cpu'; if (t === 'accessory') return 'cube'; return ['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : 'phone'; },
+        typeChip(p) { return { device: 'bg-navy-50 text-navy-700', accessory: 'bg-sky-50 text-sky-700', part: 'bg-amber-50 text-amber-700', service: 'bg-purple-50 text-purple-700' }[db.productType(p)] || 'bg-slate-100 text-slate-500'; },
+        specPlaceholder(k) { return SPEC_HINTS[k] || ''; },
+        ptaBadge(status) {
+          if (status === 'approved') return ui.badge('approved', 'PTA approved');
+          if (status === 'non_pta') return ui.badge('non_pta', 'Non-PTA');
+          if (status === 'unknown') return ui.badge('unknown', 'PTA unknown');
+          return '';
+        },
+        priceLabel(field) { return ({ retail_price: 'Retail', wholesale_price: 'Wholesale', cost_price: 'Cost', min_sale_price: 'Min sale' })[field] || field; },
+        sourceLabel(src) { return ({ product_edit: 'Product edit', bulk_edit: 'Bulk edit', purchase: 'Purchase', import: 'Import' })[src] || utils.titleCase(src || ''); },
+
+        /* ------------------------------------------------------------ data */
+        refresh() {
+          const products = db.all('products');
+          const stockRows = db.all('branch_stock');
+          const count = (coll, key) => { const m = {}; db.all(coll).forEach((r) => { m[r[key]] = (m[r[key]] || 0) + 1; }); return m; };
+          const imeiCounts = count('product_imeis', 'product_id');
+          const saleCounts = count('sale_items', 'product_id');
+          const purchaseCounts = count('purchase_items', 'product_id');
+          const repairCounts = count('repair_items', 'product_id');
+          const groupCounts = {}; const groupNames = {};
+          products.forEach((p) => { const k = groupKey(p.variant_group); if (k) { groupCounts[k] = (groupCounts[k] || 0) + 1; if (!groupNames[k]) groupNames[k] = String(p.variant_group).trim(); } });
+          this.variantGroups = Object.values(groupNames).sort((a, b) => a.localeCompare(b));
+          this.rows = products.map((p) => {
+            const perBranch = {}; let totalQty = 0;
+            this.branches.forEach((b) => { const q = db.stockQty(b.id, p.id); perBranch[b.id] = q; totalQty += q; });
+            const qty = db.stockQty(branchId, p.id);
+            const margin = p.retail_price > 0 ? Math.round((p.retail_price - (Number(p.cost_price) || 0)) / p.retail_price * 1000) / 10 : 0;
+            return {
+              ...p,
+              product_type: db.productType(p), stockTracked: db.isStockTracked(p), is_serialized: db.isSerialized(p) ? 1 : 0, serial_type: db.isSerialized(p) ? db.serialType(p) : null,
+              condition: p.condition || 'new', warranty_months: Number(p.warranty_months) || 0, tags: Array.isArray(p.tags) ? p.tags : [],
+              label: db.productLabel(p.id), brandName: db.brandName(p.brand_id), categoryName: db.categoryName(p.category_id),
+              qty, perBranch, totalQty, margin,
+              pta: ptaOf(p), variant_group: String(p.variant_group || '').trim(), groupCount: groupCounts[groupKey(p.variant_group)] || 0,
+              imeiCount: imeiCounts[p.id] || 0, saleCount: saleCounts[p.id] || 0, purchaseCount: purchaseCounts[p.id] || 0, repairCount: repairCounts[p.id] || 0,
+              stockAny: stockRows.some((s) => s.product_id === p.id && s.quantity > 0),
+            };
+          });
+          const active = this.rows.filter((r) => r.is_active);
+          const branchStock = stockRows.filter((s) => s.branch_id === branchId);
+          const byType = {}; active.forEach((r) => { byType[r.product_type] = (byType[r.product_type] || 0) + 1; });
+          this.tiles = {
+            active: active.length, inactive: this.rows.length - active.length,
+            serialized: active.filter((r) => r.is_serialized).length, imei: active.filter((r) => r.is_serialized && r.serial_type === 'imei').length, serial: active.filter((r) => r.is_serialized && r.serial_type === 'serial').length,
+            units: db.all('product_imeis').length,
+            low: active.filter((r) => r.stockTracked && r.qty <= r.min_stock).length,
+            value: utils.sum(branchStock, (s) => s.quantity * s.avg_cost),
+            stockUnits: branchStock.reduce((a, s) => a + s.quantity, 0),
+            categories: this.categories.filter((c) => c.is_active).length,
+            byType,
+          };
+          this.selected = this.selected.filter((id) => this.rows.some((r) => r.id === id));
+        },
+        get categoriesForFilter() { return this.categories.filter((c) => !this.f.type || catType(c) === this.f.type); },
+        get hasFilters() { return !!(this.q || this.f.category || this.f.brand || this.f.type || this.f.device || this.f.condition || this.f.status !== 'active' || this.f.low || this.f.pta || this.f.group); },
+        clearFilters() { this.q = ''; this.f = { category: '', brand: '', type: '', device: '', condition: '', status: 'active', low: false, pta: '', group: '' }; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const list = this.rows.filter((r) => {
+            if (this.f.status === 'active' && !r.is_active) return false;
+            if (this.f.status === 'inactive' && r.is_active) return false;
+            if (this.f.type && r.product_type !== this.f.type) return false;
+            if (this.f.device && r.device_type !== this.f.device) return false;
+            if (this.f.condition && r.condition !== this.f.condition) return false;
+            if (this.f.pta && r.pta !== this.f.pta) return false;
+            if (this.f.group && groupKey(r.variant_group) !== groupKey(this.f.group)) return false;
+            if (this.f.category && String(r.category_id) !== String(this.f.category)) return false;
+            if (this.f.brand && String(r.brand_id) !== String(this.f.brand)) return false;
+            if (this.f.low && !(r.stockTracked && (this.stockCol === 'all' ? r.totalQty : r.qty) <= r.min_stock)) return false;
+            if (q && ![r.name, r.model, r.sku, r.barcode, r.variant, r.color, r.variant_group, r.brandName, r.categoryName, r.tags.join(' '), ABM.db.productTypeLabel(r.product_type), r.device_type].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+            return true;
+          });
+          const { key, dir } = this.sort;
+          const val = (r) => {
+            if (key === 'product') return r.label.toLowerCase();
+            if (key === 'status') return r.is_active ? 1 : 0;
+            if (key === 'qty') return r.stockTracked ? (this.stockCol === 'all' ? r.totalQty : r.qty) : -1;
+            const v = r[key]; return typeof v === 'string' ? v.toLowerCase() : (Number(v) || 0);
+          };
+          return utils.sortBy(list, val, dir);
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        setSort(key) { if (this.sort.key === key) this.sort.dir = this.sort.dir === 'asc' ? 'desc' : 'asc'; else this.sort = { key, dir: 'asc' }; },
+        sortIcon(key) { if (this.sort.key !== key) return ABM.icon('chevron-up', 'w-3 h-3 text-slate-300'); return ABM.icon(this.sort.dir === 'asc' ? 'chevron-up' : 'chevron-down', 'w-3 h-3 text-navy-700'); },
+
+        /* ------------------------------------------------------- selection */
+        get allPageSelected() { const ids = this.pager.items.map((r) => r.id); return ids.length > 0 && ids.every((id) => this.selected.includes(id)); },
+        get somePageSelected() { const ids = this.pager.items.map((r) => r.id); return !this.allPageSelected && ids.some((id) => this.selected.includes(id)); },
+        toggleSelect(id) { const i = this.selected.indexOf(id); if (i >= 0) this.selected.splice(i, 1); else this.selected.push(id); },
+        toggleAll() { const ids = this.pager.items.map((r) => r.id); if (this.allPageSelected) this.selected = this.selected.filter((id) => !ids.includes(id)); else ids.forEach((id) => { if (!this.selected.includes(id)) this.selected.push(id); }); },
+        /* ------------------------------------------------------ bulk edit */
+        openBulk() {
+          if (!this.canManage) { ui.warn('You do not have permission to edit products.'); return; }
+          if (!this.selected.length) { ui.warn('Select some products first.'); return; }
+          this.bulk = { open: true, category_id: '', brand_id: '', tax_rate: '', min_stock: '', warranty_months: '', supplier_id: '', pta_status: '', variant_group: '', priceOn: false, priceField: 'retail_price', priceMode: 'inc_pct', priceValue: '', rounding: 'none', busy: false };
+        },
+        roundPrice(v) {
+          const n = Number(v) || 0;
+          const r = this.bulk.rounding;
+          if (r === 'none') return utils.round2(n);
+          if (r === '99') return Math.max(0, Math.round(n / 100) * 100 - 1);
+          const step = Number(r);
+          return Math.max(0, Math.round(n / step) * step);
+        },
+        /** What the bulk edit would do, line by line — also what the dialog shows before you commit. */
+        get bulkPreview() {
+          const b = this.bulk;
+          if (!b.open) return { rows: [], changing: 0, skipped: 0 };
+          const rows = [];
+          this.rows.filter((r) => this.selected.includes(r.id)).forEach((r) => {
+            const p = db.find('products', r.id);
+            if (!p) return;
+            const patch = {}; const bits = [];
+            if (b.category_id && String(p.category_id) !== String(b.category_id)) { patch.category_id = Number(b.category_id); bits.push('category → ' + db.categoryName(b.category_id)); }
+            if (b.brand_id && String(p.brand_id) !== String(b.brand_id)) { patch.brand_id = Number(b.brand_id); bits.push('brand → ' + db.brandName(b.brand_id)); }
+            if (b.supplier_id && String(p.supplier_id || '') !== String(b.supplier_id)) { patch.supplier_id = Number(b.supplier_id); bits.push('supplier → ' + db.supplierName(b.supplier_id)); }
+            if (b.tax_rate !== '' && b.tax_rate !== null && Number(b.tax_rate) !== Number(p.tax_rate)) { patch.tax_rate = Number(b.tax_rate); bits.push('tax → ' + b.tax_rate + '%'); }
+            if (b.min_stock !== '' && b.min_stock !== null && Number(b.min_stock) !== Number(p.min_stock)) { patch.min_stock = Math.max(0, Math.round(Number(b.min_stock))); bits.push('min stock → ' + patch.min_stock); }
+            if (b.warranty_months !== '' && b.warranty_months !== null && Number(b.warranty_months) !== Number(p.warranty_months)) { patch.warranty_months = Math.max(0, Math.round(Number(b.warranty_months))); bits.push('warranty → ' + patch.warranty_months + ' m'); }
+            // PTA status only means something on a phone, tablet or watch; everything else keeps not_applicable
+            if (b.pta_status && ptaApplies(p) && ptaOf(p) !== b.pta_status) { patch.pta_status = b.pta_status; bits.push('PTA → ' + (PTA_OPTIONS.find((o) => o.key === b.pta_status) || {}).label); }
+            const grp = String(b.variant_group || '').trim();
+            if (grp && String(p.variant_group || '').trim() !== grp) { patch.variant_group = grp; bits.push('variant group → ' + grp); }
+            let error = '';
+            if (b.priceOn && b.priceValue !== '' && b.priceValue !== null) {
+              const v = Number(b.priceValue) || 0;
+              const curRaw = Number(p[b.priceField]);
+              const cur = Number.isFinite(curRaw) ? curRaw : 0;
+              let next = cur;
+              if (b.priceMode === 'inc_pct') next = cur * (1 + v / 100);
+              else if (b.priceMode === 'dec_pct') next = cur * (1 - v / 100);
+              else if (b.priceMode === 'inc_amt') next = cur + v;
+              else if (b.priceMode === 'dec_amt') next = cur - v;
+              else next = v;
+              next = this.roundPrice(Math.max(0, next));
+              if (next !== utils.round2(cur)) {
+                patch[b.priceField] = next;
+                bits.push(this.priceLabel(b.priceField) + ' ' + utils.money(cur, { decimals: 0 }) + ' → ' + utils.money(next, { decimals: 0 }));
+                // the catalogue rule the product form enforces: cost <= minimum <= retail, wholesale >= minimum
+                const after = Object.assign({}, p, patch);
+                const cost = Number(after.cost_price) || 0, retail = Number(after.retail_price) || 0;
+                const floor = after.min_sale_price === '' || after.min_sale_price === null || after.min_sale_price === undefined ? null : Number(after.min_sale_price);
+                const wholesale = Number(after.wholesale_price) || 0;
+                if (retail <= 0) error = 'retail price would be zero';
+                else if (floor !== null && floor < cost) error = 'minimum sale price would fall below cost';
+                else if (floor !== null && floor > retail) error = 'minimum sale price would exceed retail';
+                else if (wholesale > 0 && floor !== null && wholesale < floor) error = 'wholesale would fall below the minimum sale price';
+                else if (db.productType(p) !== 'service' && retail < cost) error = 'retail would fall below cost';
+              }
+            }
+            if (!Object.keys(patch).length) return;
+            rows.push({ id: r.id, label: r.name + ' · ' + r.sku, summary: bits.join(' · '), error, patch });
+          });
+          return { rows, changing: rows.filter((r) => !r.error).length, skipped: rows.filter((r) => r.error).length };
+        },
+        applyBulk() {
+          if (!this.canManage) { ui.error('Your role is not allowed to edit products.'); return; }
+          const preview = this.bulkPreview;
+          const rows = preview.rows.filter((r) => !r.error);
+          if (!rows.length) { ui.warn('Nothing to change.'); return; }
+          this.bulk.busy = true;
+          try {
+            rows.forEach((r) => {
+              const before = { ...db.find('products', r.id) };
+              db.update('products', r.id, r.patch);
+              db.recordPrices(before, r.patch, 'bulk_edit');         // one price_history row per price that moved
+            });
+            db.audit('product.bulk_update', 'product', null, `${rows.length} product(s) bulk edited: ${rows.slice(0, 12).map((r) => r.label.split(' · ')[1] + ' (' + r.summary + ')').join(', ')}${rows.length > 12 ? '…' : ''}`);
+            ui.success(rows.length + ' product' + (rows.length === 1 ? '' : 's') + ' updated' + (preview.skipped ? ' · ' + preview.skipped + ' skipped' : '') + '.');
+            this.bulk.open = false;
+            this.selected = [];
+            this.refresh();
+          } catch (err) {
+            ui.error(err.message || 'Could not apply the changes.');
+          } finally { this.bulk.busy = false; }
+        },
+
+        async bulkActive(active) {
+          if (!this.canManage) { ui.error('Your role is not allowed to edit products.'); return; }
+          const rows = this.rows.filter((r) => this.selected.includes(r.id) && (r.is_active ? 1 : 0) !== active);
+          if (!rows.length) { ui.warn(active ? 'All selected products are already active.' : 'All selected products are already inactive.'); return; }
+          const ok = await ui.confirm({ title: (active ? 'Activate ' : 'Deactivate ') + rows.length + ' product' + (rows.length > 1 ? 's' : '') + '?', message: active ? 'They become available at POS, purchases and the online store.' : 'They are hidden from POS, purchases and the store. Stock and history are kept.', confirmText: active ? 'Activate' : 'Deactivate', danger: !active });
+          if (!ok) return;
+          rows.forEach((r) => db.update('products', r.id, { is_active: active }));
+          db.audit(active ? 'product.activate' : 'product.deactivate', 'product', null, `${rows.length} products ${active ? 'activated' : 'deactivated'} (bulk): ${rows.map((r) => r.sku).join(', ')}`);
+          ui.success(rows.length + ' product' + (rows.length > 1 ? 's' : '') + (active ? ' activated.' : ' deactivated.'));
+          this.selected = [];
+          this.refresh();
+        },
+        exportCsv(selectedOnly = false) {
+          const list = selectedOnly ? this.rows.filter((r) => this.selected.includes(r.id)) : this.filtered;
+          if (!list.length) { ui.warn('Nothing to export.'); return; }
+          const cols = [
+            { label: 'SKU', key: 'sku' }, { label: 'Barcode', key: 'barcode' }, { label: 'Name', key: 'name' }, { label: 'Model', key: 'model' },
+            { label: 'Variant', key: 'variant' }, { label: 'Color', key: 'color' }, { label: 'Brand', key: 'brandName' }, { label: 'Category', key: 'categoryName' },
+            { label: 'Product type', value: (r) => db.productTypeLabel(r.product_type) }, { label: 'Device type', value: (r) => (r.device_type ? db.deviceTypeLabel(r.device_type) : '') },
+            { label: 'Serialized', value: (r) => (r.is_serialized ? db.serialLabel(r) : 'No') }, { label: 'Condition', value: (r) => utils.titleCase(r.condition) }, { label: 'Warranty (months)', key: 'warranty_months' },
+            { label: 'PTA status', value: (r) => ui.statusLabel(r.pta) }, { label: 'Variant group', key: 'variant_group' },
+            { label: 'Cost', key: 'cost_price' }, { label: 'Retail', key: 'retail_price' }, { label: 'Wholesale', key: 'wholesale_price' }, { label: 'Min sale price', key: 'min_sale_price' }, { label: 'Margin %', key: 'margin' }, { label: 'Tax %', key: 'tax_rate' },
+            { label: 'Min stock', key: 'min_stock' }, { label: 'Max stock', key: 'max_stock' }, { label: 'Reorder qty', key: 'reorder_qty' }, { label: 'Supplier', value: (r) => (r.supplier_id ? db.supplierName(r.supplier_id) : '') },
+            { label: 'Specs', value: (r) => Object.entries(r.specs || {}).map(([k, v]) => db.specLabel(k) + ': ' + v).join('; ') }, { label: 'Tags', value: (r) => r.tags.join(', ') },
+          ];
+          if (this.stockCol === 'all') this.branches.forEach((b) => cols.push({ label: 'Stock ' + b.code, value: (r) => (r.stockTracked ? r.perBranch[b.id] : '') }));
+          else cols.push({ label: 'Stock ' + this.branch.code, value: (r) => (r.stockTracked ? r.qty : '') });
+          cols.push({ label: 'Status', value: (r) => (r.is_active ? 'Active' : 'Inactive') });
+          if (!utils.download('products-' + utils.today() + '.csv', utils.toCsv(list, cols))) return;
+          ui.success('Exported ' + list.length + ' products.');
+        },
+
+        /* ----------------------------------------------------------- modal */
+        blankForm() {
+          return {
+            product_type: 'device', device_type: '', category_id: '', brand_id: '', name: '', model: '', variant: '', color: '', variant_group: '', description: '', tags: [], image: null, media: [],
+            sku: '', barcode: '', is_serialized: 1, serial_type: 'imei', serial_prefix: '', unit: 'pcs',
+            specs: {}, condition: 'new', warranty_months: 12, pta_status: 'unknown',
+            cost_price: '', retail_price: '', wholesale_price: '', min_sale_price: '', tax_rate: Number(db.setting('default_tax_rate')) || 0,
+            min_stock: 1, max_stock: 0, reorder_qty: 0, supplier_id: '', is_active: 1,
+          };
+        },
+        formFrom(p) {
+          const form = this.blankForm();
+          Object.keys(form).forEach((k) => { if (p[k] !== undefined && p[k] !== null) form[k] = p[k]; });
+          form.product_type = db.productType(p);
+          form.device_type = p.device_type || '';
+          form.category_id = p.category_id ? String(p.category_id) : '';
+          form.brand_id = p.brand_id ? String(p.brand_id) : '';
+          form.supplier_id = p.supplier_id ? String(p.supplier_id) : '';
+          form.barcode = p.barcode || ''; form.serial_prefix = p.serial_prefix || '';
+          form.is_serialized = db.isSerialized(p) ? 1 : 0; form.serial_type = db.isSerialized(p) ? db.serialType(p) : (['laptop', 'desktop'].includes(p.device_type) ? 'serial' : 'imei');
+          form.unit = p.unit || (form.product_type === 'service' ? 'job' : 'pcs');
+          form.condition = p.condition || 'new';
+          // outside phones / tablets / watches the selector is hidden; it starts on "not checked" if the type changes
+          form.pta_status = ptaOf(p) === 'not_applicable' ? 'unknown' : ptaOf(p);
+          form.variant_group = String(p.variant_group || '').trim();
+          form.tags = Array.isArray(p.tags) ? [...p.tags] : [];
+          // ABM.media.list() also lifts a legacy single `image` into the gallery
+          form.media = ABM.media.list(p).map((m, i) => ({ id: m.id || i + 1, type: m.type, url: m.url, name: m.name || '', alt: m.alt || '', is_primary: m.is_primary, sort_order: i + 1 }));
+          form.warranty_months = Number(p.warranty_months) || 0;
+          form.min_sale_price = p.min_sale_price === undefined || p.min_sale_price === null ? '' : p.min_sale_price;
+          form.wholesale_price = p.wholesale_price === undefined || p.wholesale_price === null ? '' : p.wholesale_price;
+          form.image = p.image || null;
+          // split specs into standard keys (by device type) and custom rows
+          const std = db.SPEC_KEYS[form.device_type] || [];
+          const specs = {}; const custom = [];
+          Object.entries(p.specs || {}).forEach(([k, v]) => { if (std.includes(k)) specs[k] = v; else custom.push({ uid: ++uid, key: db.specLabel(k), value: v }); });
+          std.forEach((k) => { if (specs[k] === undefined) specs[k] = ''; });
+          form.specs = specs;
+          return { form, custom };
+        },
+        baseModal() { return { open: true, mode: 'add', id: null, duplicateOf: '', variantOf: null, variantSource: '', snapshot: '', busy: false, tab: 'basics', skuTouched: false, hasUnits: false, hasStock: false, unitCount: 0, stockSummary: '', form: this.blankForm(), errors: {}, custom: [], tagInput: '', mediaUrl: '' }; },
+        /** What the form holds, to tell whether the user changed anything since it opened. */
+        formState() { return JSON.stringify({ form: this.modal.form, custom: this.modal.custom }); },
+        get formDirty() { return !!this.modal.snapshot && this.formState() !== this.modal.snapshot; },
+        openAdd() {
+          if (!this.canAdd) { ui.error('Your role is not allowed to add products.'); return; }
+          const m = this.baseModal();
+          if (this.f.type) { m.form.product_type = this.f.type; this.applyTypeDefaults(m.form, this.f.type, { hasUnits: false, mode: 'add' }); }
+          const cat = this.f.category ? db.find('categories', this.f.category) : null;
+          if (cat && catType(cat) === m.form.product_type) { m.form.category_id = String(cat.id); }
+          if (this.f.brand) m.form.brand_id = String(this.f.brand);
+          this.modal = m;
+          if (cat) this.onCategoryChange();
+          this.focusFirst();
+        },
+        openEdit(id) {
+          if (!this.canManage) { ui.error('Your role is not allowed to edit products.'); return; }
+          const p = db.find('products', id);
+          if (!p) { ui.error('Product not found.'); return; }
+          const { form, custom } = this.formFrom(p);
+          const unitCount = db.count('product_imeis', { product_id: p.id });
+          const stockRows = db.all('branch_stock').filter((s) => s.product_id === p.id && s.quantity > 0);
+          const m = this.baseModal();
+          Object.assign(m, { mode: 'edit', id: p.id, skuTouched: true, hasUnits: unitCount > 0, unitCount, hasStock: stockRows.length > 0, form, custom, mediaUrl: '' });
+          m.stockSummary = stockRows.length ? stockRows.map((s) => db.branchCode(s.branch_id) + ' ' + s.quantity).join(' · ') : 'none';
+          this.modal = m;
+          this.modal.snapshot = this.formState();
+          this.focusFirst();
+        },
+        openDuplicate(id) {
+          if (!this.canAdd) { ui.error('Your role is not allowed to add products.'); return; }
+          const p = db.find('products', id);
+          if (!p) { ui.error('Product not found.'); return; }
+          const { form, custom } = this.formFrom(p);
+          form.name = p.name + ' (Copy)'; form.barcode = ''; form.is_active = 1; form.variant_group = '';
+          const m = this.baseModal();
+          Object.assign(m, { mode: 'add', duplicateOf: p.sku, form, custom, mediaUrl: '' });
+          this.modal = m;
+          this.modal.form.sku = this.suggestSku();
+          this.focusFirst(true);
+        },
+        /** The group a product's variants share: its own, else its name (e.g. "iPhone 15"). */
+        defaultGroup(p) { return String(p.variant_group || '').trim() || String(p.name || '').trim(); },
+        /**
+         * "Add another variant": a copy of the SAVED product (same model, prices, specs and photos) with an empty
+         * variant / colour, a new SKU and barcode, and the same variant group. The source joins that group on save.
+         */
+        async openVariant(id) {
+          if (!this.canAdd) { ui.error('Your role is not allowed to add products.'); return; }
+          const p = db.find('products', id);
+          if (!p) { ui.error('Product not found.'); return; }
+          if (this.modal.open && this.modal.mode === 'edit' && this.formDirty) {
+            const ok = await ui.confirm({ title: 'Discard your changes?', message: `Unsaved changes to ${p.sku} are dropped before the new variant opens. Save them first to keep them.`, confirmText: 'Discard and continue', danger: true });
+            if (!ok) return;
+          }
+          const { form, custom } = this.formFrom(p);
+          form.variant_group = this.defaultGroup(p);
+          form.variant = ''; form.color = ''; form.is_active = 1; form.barcode = '';
+          const m = this.baseModal();
+          Object.assign(m, { mode: 'add', variantOf: p.id, variantSource: p.sku, form, custom, mediaUrl: '', skuTouched: false });
+          this.modal = m;
+          if (p.barcode) this.modal.form.barcode = this.generateBarcode();
+          this.modal.form.sku = this.suggestSku();
+          this.$nextTick(() => { const el = this.$refs.variantField; if (el) el.focus(); });
+        },
+        focusFirst(select = false) { this.$nextTick(() => { const el = this.$refs.firstField; if (el) { el.focus(); if (select) el.select(); } }); },
+        closeModal() { if (this.modal.open) this.modal.open = false; },
+        get visibleTabs() { return TABS.filter((t) => t.key !== 'stock' || this.modal.form.product_type !== 'service'); },
+        tabHasError(key) { const t = TABS.find((x) => x.key === key); return !!t && t.fields.some((f) => this.modal.errors[f]); },
+        get needsDeviceType() { return ['device', 'part'].includes(this.modal.form.product_type); },
+        /** PTA registration applies to phones, tablets and smartwatches sold as devices. */
+        get formPtaApplies() { return ptaApplies(this.modal.form); },
+        /** Other products already in the form's variant group (never the product being edited). */
+        get groupSiblings() {
+          const k = groupKey(this.modal.form.variant_group);
+          if (!k) return [];
+          return db.all('products').filter((p) => groupKey(p.variant_group) === k && String(p.id) !== String(this.modal.id));
+        },
+        get groupHelp() {
+          const n = this.groupSiblings.length;
+          if (!groupKey(this.modal.form.variant_group)) return 'Products that are the same model in another colour or size share one group name.';
+          return n ? 'Shared with ' + n + ' other product' + (n === 1 ? '' : 's') + ' in this group.' : 'A new group — add the other colours or sizes to it.';
+        },
+        /** The latest price changes of the product being edited (price_history, newest first). */
+        get priceHistory() {
+          if (this.modal.mode !== 'edit' || !this.modal.id) return { rows: [], total: 0 };
+          const all = db.all('price_history').filter((h) => String(h.product_id) === String(this.modal.id));
+          const rows = utils.sortBy(all, (h) => String(h.created_at || '') + '|' + String(h.id).padStart(8, '0'), 'desc').slice(0, 12);
+          return { rows, total: all.length };
+        },
+        get typeCategories() { const f = this.modal.form; return this.categories.filter((c) => catType(c) === f.product_type && (c.is_active || String(c.id) === String(f.category_id))); },
+        get specKeys() { return this.needsDeviceType && this.modal.form.device_type ? (db.SPEC_KEYS[this.modal.form.device_type] || []) : []; },
+        /** A product with registered units keeps its type (and therefore its serial tracking) — changing it would orphan the registry. */
+        typeLocked(key) {
+          if (key === this.modal.form.product_type) return false;
+          if (this.modal.hasUnits) return true;
+          return key === 'service' && this.modal.hasStock;
+        },
+        applyTypeDefaults(form, type, ctx = {}) {
+          const hasUnits = !!ctx.hasUnits, isAdd = ctx.mode !== 'edit';
+          if (type === 'service') {
+            form.unit = 'job'; form.cost_price = 0; form.device_type = ''; form.min_stock = 0; form.max_stock = 0; form.reorder_qty = 0; form.supplier_id = ''; form.condition = 'new';
+            if (!hasUnits) { form.is_serialized = 0; form.serial_type = null; }
+          } else {
+            if (form.unit === 'job') form.unit = 'pcs';
+            if (form.cost_price === 0 && isAdd) form.cost_price = '';
+            if (type === 'accessory') form.device_type = '';
+            if (!hasUnits) {
+              if (type !== 'device') form.is_serialized = 0;
+              else { form.is_serialized = 1; form.serial_type = ['laptop', 'desktop'].includes(form.device_type) ? 'serial' : 'imei'; }
+            }
+          }
+          if (type !== 'device' && type !== 'service' && Number(form.min_stock) === 0 && isAdd) form.min_stock = 1;
+        },
+        setType(key) {
+          if (this.typeLocked(key) || this.modal.form.product_type === key) return;
+          const f = this.modal.form;
+          f.product_type = key;
+          this.applyTypeDefaults(f, key, { hasUnits: this.modal.hasUnits, mode: this.modal.mode });
+          if (!this.typeCategories.some((c) => String(c.id) === String(f.category_id))) { f.category_id = this.typeCategories.length === 1 ? String(this.typeCategories[0].id) : ''; }
+          if (f.category_id) this.onCategoryChange();
+          if (this.modal.tab === 'stock' && key === 'service') this.modal.tab = 'pricing';
+          this.syncSpecKeys();
+          this.onIdentityChange();
+        },
+        onCategoryChange() {
+          const c = db.find('categories', this.modal.form.category_id);
+          if (!c) return;
+          const f = this.modal.form;
+          if (c.device_type && this.needsDeviceType) f.device_type = c.device_type;
+          if (!this.modal.hasUnits && f.product_type !== 'service') {
+            f.is_serialized = (c.is_serialized !== undefined ? c.is_serialized : c.is_imei_tracked) ? 1 : 0;
+            if (f.is_serialized) f.serial_type = c.serial_type || (['laptop', 'desktop'].includes(f.device_type) ? 'serial' : 'imei');
+          }
+          this.syncSpecKeys();
+        },
+        onDeviceTypeChange() {
+          const f = this.modal.form;
+          if (f.is_serialized && !this.modal.hasUnits) f.serial_type = ['laptop', 'desktop'].includes(f.device_type) ? 'serial' : 'imei';
+          this.syncSpecKeys();
+        },
+        syncSpecKeys() { const s = this.modal.form.specs || {}; this.specKeys.forEach((k) => { if (s[k] === undefined) s[k] = ''; }); this.modal.form.specs = s; },
+        toggleSerialized() {
+          if (this.modal.hasUnits) return;
+          const f = this.modal.form;
+          f.is_serialized = f.is_serialized ? 0 : 1;
+          if (f.is_serialized && !f.serial_type) f.serial_type = ['laptop', 'desktop'].includes(f.device_type) ? 'serial' : 'imei';
+        },
+        onIdentityChange() { if (this.modal.mode === 'add' && !this.modal.skuTouched) this.modal.form.sku = this.suggestSku(); },
+        skuExists(sku) { const s = String(sku || '').trim().toLowerCase(); return db.all('products').some((p) => String(p.sku || '').toLowerCase() === s && String(p.id) !== String(this.modal.id)); },
+        barcodeExists(code) { const s = String(code || '').trim(); return !!s && db.all('products').some((p) => utils.sameBarcode(p.barcode, s) && String(p.id) !== String(this.modal.id)); },
+        suggestSku() {
+          const b = db.find('brands', this.modal.form.brand_id);
+          const prefix = this.modal.form.product_type === 'service' ? 'SVC' : (b ? b.name.slice(0, 3) : 'GEN');
+          const namePart = String(this.modal.form.name || '').replace(/\(copy\)/i, '').replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'ITEM';
+          const base = (prefix + '-' + namePart).toUpperCase();
+          let n = this.modal.mode === 'edit' ? Number(this.modal.id) : db.nextId('products');
+          let sku = base + '-' + utils.pad(n, 3);
+          while (this.skuExists(sku)) { n += 1; sku = base + '-' + utils.pad(n, 3); }
+          return sku;
+        },
+        // a full EAN-13 (with its check digit), so the printed label scans back to exactly this product
+        generateBarcode() { let code; do { code = utils.toEan13('880' + String(Math.floor(Math.random() * 1e9)).padStart(9, '0')); } while (this.barcodeExists(code)); return code; },
+        addTag() {
+          const raw = String(this.modal.tagInput || '');
+          raw.split(',').map((t) => t.trim().toLowerCase().replace(/\s+/g, '-')).filter(Boolean).forEach((t) => { if (!this.modal.form.tags.includes(t) && this.modal.form.tags.length < 20) this.modal.form.tags.push(t); });
+          this.modal.tagInput = '';
+        },
+        removeTag(i) { this.modal.form.tags.splice(i, 1); },
+        addCustomSpec() { this.modal.custom.push({ uid: ++uid, key: '', value: '' }); this.$nextTick(() => { const inputs = this.$root.querySelectorAll('input[placeholder^="Name (e.g."]'); const last = inputs[inputs.length - 1]; if (last) last.focus(); }); },
+        /* ---------------------------------------------- photos & video ---- */
+        mediaId() { return ++uid; },
+        /** Files picked from "Add photos" / "Add video": resized and appended to the gallery. */
+        onMediaFiles(e, kind) {
+          const files = e.target.files;
+          if (!files || !files.length) return;
+          delete this.modal.errors.image;
+          ABM.media.fromFiles(files).then(({ items, errors }) => {
+            items.forEach((m) => {
+              if (kind === 'video' && m.type !== 'video') { errors.push(`"${m.name}" is not a video.`); return; }
+              this.modal.form.media.push({ id: this.mediaId(), type: m.type, url: m.url, name: m.name, alt: '', is_primary: 0, sort_order: this.modal.form.media.length + 1 });
+            });
+            this.syncPrimary();
+            if (errors.length) this.modal.errors.image = errors.join(' ');
+            if (items.length) ABM.ui.success(items.length + (items.length === 1 ? ' file added' : ' files added'));
+          });
+          e.target.value = '';
+        },
+        /** Paste an image URL or a YouTube / Vimeo / MP4 link. */
+        addMediaUrl() {
+          const u = String(this.modal.mediaUrl || '').trim();
+          if (!u) return;
+          if (!/^(https?:\/\/|data:(image|video)\/)/i.test(u)) { this.modal.errors.image = 'Enter a full http(s) address.'; return; }
+          const isVideo = !!ABM.media.videoEmbed(u) || /\.(mp4|webm|ogg|mov)(\?|$)/i.test(u) || /^data:video\//i.test(u);
+          this.modal.form.media.push({ id: this.mediaId(), type: isVideo ? 'video' : 'image', url: u, name: '', alt: '', is_primary: 0, sort_order: this.modal.form.media.length + 1 });
+          this.modal.mediaUrl = '';
+          delete this.modal.errors.image;
+          this.syncPrimary();
+        },
+        moveMedia(i, dir) {
+          const list = this.modal.form.media; const j = i + dir;
+          if (j < 0 || j >= list.length) return;
+          const [item] = list.splice(i, 1); list.splice(j, 0, item);
+          this.syncPrimary();
+        },
+        setPrimary(i) {
+          this.modal.form.media.forEach((m, k) => { m.is_primary = k === i && m.type === 'image' ? 1 : 0; });
+          // the main photo leads the gallery
+          const [main] = this.modal.form.media.splice(i, 1);
+          this.modal.form.media.unshift(main);
+          this.syncPrimary();
+        },
+        removeMedia(i) { this.modal.form.media.splice(i, 1); this.syncPrimary(); },
+        /** Keep exactly one primary image and mirror it onto form.image (used by cards, POS and the store). */
+        syncPrimary() {
+          const list = this.modal.form.media;
+          list.forEach((m, i) => { m.sort_order = i + 1; });
+          const images = list.filter((m) => m.type === 'image');
+          if (images.length && !images.some((m) => m.is_primary)) images[0].is_primary = 1;
+          const main = images.find((m) => m.is_primary) || images[0];
+          this.modal.form.image = main ? main.url : null;
+        },
+        mediaSizeLabel() {
+          const bytes = (this.modal.form.media || []).reduce((s, m) => s + (ABM.media.isDataUrl(m.url) ? ABM.media.bytes(m.url) : 0), 0);
+          if (!bytes) return 'links only';
+          return bytes > 1048576 ? (bytes / 1048576).toFixed(1) + ' MB stored' : Math.round(bytes / 1024) + ' KB stored';
+        },
+        get retailBelowCost() { const f = this.modal.form; return f.retail_price !== '' && f.cost_price !== '' && Number(f.retail_price) < Number(f.cost_price); },
+        get formMargin() { const f = this.modal.form; const r = Number(f.retail_price), c = Number(f.cost_price) || 0; if (!(r > 0) || f.retail_price === '') return null; return Math.round((r - c) / r * 1000) / 10; },
+        get wholesaleMargin() { const f = this.modal.form; const w = Number(f.wholesale_price), c = Number(f.cost_price) || 0; if (f.wholesale_price === '' || f.wholesale_price === null || !(w > 0)) return null; return Math.round((w - c) / w * 1000) / 10; },
+        get floorMargin() { const f = this.modal.form; const m = Number(f.min_sale_price), c = Number(f.cost_price) || 0; if (!(m > 0)) return 0; return Math.round((m - c) / m * 1000) / 10; },
+        validate() {
+          const f = this.modal.form; const e = {};
+          const isService = f.product_type === 'service';
+          const num = (v) => (v === '' || v === null || v === undefined ? null : Number(v));
+          if (!TYPES.some((t) => t.key === f.product_type)) e.product_type = 'Select a product type.';
+          if (f.product_type === 'device' && !f.device_type) e.device_type = 'Select the device type.';
+          if (!f.category_id) e.category_id = 'Select a category.';
+          else { const c = db.find('categories', f.category_id); if (c && catType(c) !== f.product_type) e.category_id = 'This category belongs to another product type.'; }
+          if (!String(f.name || '').trim()) e.name = 'Product name is required.';
+          if (!String(f.sku || '').trim()) e.sku = 'SKU is required.'; else if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{1,39}$/.test(String(f.sku).trim())) e.sku = 'Use letters, digits and - _ . / only.'; else if (this.skuExists(f.sku)) e.sku = 'This SKU is already used by another product.';
+          if (String(f.barcode || '').trim() && this.barcodeExists(f.barcode)) e.barcode = 'This barcode is already used by another product.';
+          if (!isService && f.is_serialized && !['imei', 'serial'].includes(f.serial_type)) e.serial_type = 'Choose IMEI or serial number tracking.';
+          const cost = isService ? 0 : num(f.cost_price), retail = num(f.retail_price), wholesale = num(f.wholesale_price), minSale = num(f.min_sale_price);
+          if (!isService && (cost === null || isNaN(cost) || cost < 0)) e.cost_price = 'Enter a cost of 0 or more.';
+          if (retail === null || isNaN(retail) || retail <= 0) e.retail_price = 'Enter a retail price greater than 0.';
+          if (wholesale !== null && (isNaN(wholesale) || wholesale < 0)) e.wholesale_price = 'Enter an amount of 0 or more.';
+          if (minSale !== null && (isNaN(minSale) || minSale < 0)) e.min_sale_price = 'Enter an amount of 0 or more.';
+          if (!e.retail_price && !e.min_sale_price && minSale !== null) {
+            if (!isService && !e.cost_price && minSale < cost) e.min_sale_price = 'Minimum sale price cannot be below cost (' + utils.money(cost) + ').';
+            else if (minSale > retail) e.min_sale_price = 'Minimum sale price cannot exceed retail (' + utils.money(retail) + ').';
+            else if (wholesale !== null && !e.wholesale_price && wholesale < minSale) e.wholesale_price = 'Wholesale cannot be below the minimum sale price (' + utils.money(minSale) + ').';
+          }
+          const tr = Number(f.tax_rate); if (f.tax_rate === '' || isNaN(tr) || tr < 0 || tr > 100) e.tax_rate = 'Tax rate must be between 0 and 100.';
+          const wm = Number(f.warranty_months); if (f.warranty_months === '' || !Number.isInteger(wm) || wm < 0 || wm > 120) e.warranty_months = 'Enter whole months between 0 and 120.';
+          if (!isService) {
+            const ms = Number(f.min_stock); if (f.min_stock === '' || !Number.isInteger(ms) || ms < 0) e.min_stock = 'Enter a whole number of 0 or more.';
+            const mx = Number(f.max_stock); if (f.max_stock === '' || !Number.isInteger(mx) || mx < 0) e.max_stock = 'Enter a whole number of 0 or more.'; else if (mx > 0 && !e.min_stock && mx < ms) e.max_stock = 'Maximum must be at least the minimum stock.';
+            const rq = Number(f.reorder_qty); if (f.reorder_qty === '' || !Number.isInteger(rq) || rq < 0) e.reorder_qty = 'Enter a whole number of 0 or more.';
+          }
+          if (this.modal.custom.some((r) => String(r.value).trim() && !String(r.key).trim())) e.specs = 'Give every custom spec a name.';
+          if (ptaApplies(f) && !['approved', 'non_pta', 'unknown'].includes(f.pta_status)) e.pta_status = 'Choose Approved, Non-PTA or Not checked.';
+          // variants: a new variant needs its own storage / colour, and two products in one group never share both
+          const vKey = (x) => (String(x.variant || '').trim() + '|' + String(x.color || '').trim()).toLowerCase();
+          if (this.modal.variantOf && !String(f.variant || '').trim() && !String(f.color || '').trim()) e.variant = 'Enter the variant or colour that makes this one different.';
+          else if (groupKey(f.variant_group)) {
+            const saved = this.modal.mode === 'edit' ? db.find('products', this.modal.id) : null;
+            const touched = !saved || vKey(saved) !== vKey(f) || groupKey(saved.variant_group) !== groupKey(f.variant_group);
+            const twin = touched ? this.groupSiblings.find((p) => vKey(p) === vKey(f)) : null;
+            if (twin) e.variant = `${twin.sku} in this group already has this variant and colour.`;
+          }
+          this.modal.errors = e;
+          if (Object.keys(e).length) { const first = this.visibleTabs.find((t) => this.tabHasError(t.key)); if (first) this.modal.tab = first.key; }
+          return !Object.keys(e).length;
+        },
+        collectSpecs() {
+          const f = this.modal.form; const out = {};
+          this.specKeys.forEach((k) => { const v = String((f.specs || {})[k] ?? '').trim(); if (v) out[k] = v; });
+          this.modal.custom.forEach((r) => { const k = String(r.key || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''); const v = String(r.value || '').trim(); if (k && v) out[k] = v; });
+          return out;
+        },
+        save() {
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); return; }
+          this.modal.busy = true;
+          try {
+            const f = this.modal.form;
+            const isService = f.product_type === 'service';
+            const retail = utils.round2(f.retail_price);
+            const cost = isService ? 0 : utils.round2(f.cost_price);
+            const serialized = !isService && f.is_serialized ? 1 : 0;
+            const serialType = serialized ? f.serial_type : null;
+            const data = {
+              product_type: f.product_type, device_type: this.needsDeviceType && f.device_type ? f.device_type : null,
+              category_id: Number(f.category_id), brand_id: f.brand_id ? Number(f.brand_id) : null,
+              name: f.name.trim(), model: String(f.model || '').trim(), variant: String(f.variant || '').trim(), color: String(f.color || '').trim(),
+              variant_group: String(f.variant_group || '').trim() || null,
+              description: String(f.description || '').trim(), tags: [...f.tags],
+              media: ABM.media.normalize(f.media), image: (ABM.media.normalize(f.media).find((m) => m.is_primary && m.type === 'image') || {}).url || null,
+              sku: f.sku.trim().toUpperCase(), barcode: String(f.barcode || '').trim() || null,
+              is_serialized: serialized, serial_type: serialType, is_imei_tracked: serialized, serial_prefix: serialType === 'serial' && String(f.serial_prefix || '').trim() ? String(f.serial_prefix).trim().toUpperCase() : null,
+              is_stock_tracked: isService ? 0 : 1, unit: isService ? 'job' : (f.unit || 'pcs'),
+              specs: this.collectSpecs(), condition: isService ? 'new' : (f.condition || 'new'), warranty_months: Number(f.warranty_months) || 0,
+              cost_price: cost, retail_price: retail,
+              wholesale_price: f.wholesale_price === '' || f.wholesale_price === null ? retail : utils.round2(f.wholesale_price),
+              min_sale_price: f.min_sale_price === '' || f.min_sale_price === null ? (isService ? retail : cost) : utils.round2(f.min_sale_price),
+              tax_rate: utils.round2(f.tax_rate),
+              min_stock: isService ? 0 : Number(f.min_stock) || 0, max_stock: isService ? 0 : Number(f.max_stock) || 0, reorder_qty: isService ? 0 : Number(f.reorder_qty) || 0,
+              supplier_id: !isService && f.supplier_id ? Number(f.supplier_id) : null,
+              is_active: f.is_active ? 1 : 0,
+            };
+            // never let an edit change serial tracking while units are registered against the product
+            if (this.modal.mode === 'edit' && this.modal.hasUnits) {
+              const cur = db.find('products', this.modal.id);
+              if (cur) {
+                data.is_serialized = db.isSerialized(cur) ? 1 : 0;
+                data.serial_type = data.is_serialized ? db.serialType(cur) : null;
+                data.is_imei_tracked = data.is_serialized;
+                data.is_stock_tracked = 1;
+                data.product_type = db.productType(cur);
+                if (['device', 'part'].includes(data.product_type) && !data.device_type) data.device_type = cur.device_type || null;
+                if (data.serial_type !== 'serial') data.serial_prefix = cur.serial_prefix || null;
+              }
+            }
+            // PTA status belongs to phones, tablets and watches; every other product is not_applicable
+            data.pta_status = ptaApplies(data) ? (['approved', 'non_pta', 'unknown'].includes(f.pta_status) ? f.pta_status : 'unknown') : 'not_applicable';
+            if (this.modal.mode === 'add') {
+              const source = this.modal.variantOf ? db.find('products', this.modal.variantOf) : null;
+              const rec = db.insert('products', data);
+              db.audit('product.create', 'product', rec.id, `Product ${rec.sku} (${rec.name}) created as ${db.productTypeLabel(rec.product_type)}${this.modal.duplicateOf ? ' — copied from ' + this.modal.duplicateOf : ''}${source ? ' — variant of ' + source.sku + ' in group "' + (rec.variant_group || '') + '"' : ''}`);
+              // the product the variant was made from joins the same group, so the two list together
+              if (source && rec.variant_group && groupKey(source.variant_group) !== groupKey(rec.variant_group)) {
+                db.update('products', source.id, { variant_group: rec.variant_group });
+                db.audit('product.update', 'product', source.id, `Variant group -> "${rec.variant_group}" (variant ${rec.sku} added)`);
+              }
+              ui.success(source ? 'Variant added.' : this.modal.duplicateOf ? 'Product duplicated.' : 'Product added.');
+            } else {
+              const before = { ...db.find('products', this.modal.id) };
+              const changes = [];
+              ['cost_price', 'retail_price', 'wholesale_price', 'min_sale_price'].forEach((k) => { if (Number(before[k] || 0) !== data[k]) changes.push(`${utils.titleCase(k)} ${before[k] ?? 0} -> ${data[k]}`); });
+              if ((before.is_active ? 1 : 0) !== data.is_active) changes.push(data.is_active ? 'Activated' : 'Deactivated');
+              if (db.productType(before) !== data.product_type) changes.push('Type ' + db.productType(before) + ' -> ' + data.product_type);
+              if ((db.isSerialized(before) ? 1 : 0) !== data.is_serialized) changes.push('Serial tracking ' + (data.is_serialized ? 'enabled (' + db.serialLabel(data) + ')' : 'disabled'));
+              if ((before.condition || 'new') !== data.condition) changes.push('Condition -> ' + data.condition);
+              if (ptaOf(before) !== data.pta_status) changes.push('PTA status ' + ui.statusLabel(ptaOf(before)) + ' -> ' + ui.statusLabel(data.pta_status));
+              if (groupKey(before.variant_group) !== groupKey(data.variant_group)) changes.push('Variant group -> ' + (data.variant_group ? '"' + data.variant_group + '"' : 'none'));
+              db.update('products', this.modal.id, data);
+              db.recordPrices(before, data, 'product_edit');           // one price_history row per price that moved
+              db.audit('product.update', 'product', this.modal.id, changes.length ? changes.join('; ') : `Product ${data.sku} details updated`);
+              ui.success('Product updated.');
+            }
+            if (!isService && data.retail_price < data.cost_price) ui.warn('Note: retail price is below cost price.');
+            this.modal.open = false;
+            this.refresh();
+          } catch (err) {
+            ui.error(err.message || 'Could not save product.');
+          } finally {
+            this.modal.busy = false;
+          }
+        },
+
+        /* --------------------------------------------------------- actions */
+        async toggleActive(r) {
+          if (!this.canManage) { ui.error('Your role is not allowed to edit products.'); return; }
+          const activate = !r.is_active;
+          if (!activate) {
+            const ok = await ui.confirm({ title: 'Deactivate product?', message: `${r.label} will be hidden from POS, purchases and the online store. Stock and history are kept.`, confirmText: 'Deactivate', danger: true });
+            if (!ok) return;
+          }
+          db.update('products', r.id, { is_active: activate ? 1 : 0 });
+          db.audit(activate ? 'product.activate' : 'product.deactivate', 'product', r.id, `${r.sku} ${activate ? 'activated' : 'deactivated'}`);
+          ui.success(activate ? 'Product activated.' : 'Product deactivated.');
+          this.refresh();
+        },
+        /**
+         * Everything in the database that still points at a product, as readable reasons. Every collection is
+         * scanned (rows with a product_id, and documents whose items[] carry one, such as online orders), so a
+         * module added later is covered too. branch_stock counts only when a quantity is not zero.
+         */
+        productRefs(productId) {
+          const store = db.raw();
+          const id = String(productId);
+          const LABELS = {
+            sale_items: 'sale line', sale_return_items: 'sale return line', purchase_items: 'purchase line', purchase_order_items: 'purchase order line',
+            transfer_items: 'stock transfer line', repair_items: 'repair job line', supplier_return_items: 'supplier return line', stock_count_items: 'stock count line',
+            online_orders: 'online order', product_imeis: 'registered unit', stock_movements: 'stock movement', repair_requests: 'repair booking',
+          };
+          const SKIP = new Set(['products', 'branch_stock', 'price_history', 'audit_logs']);
+          const reasons = [];
+          const stockRows = (Array.isArray(store.branch_stock) ? store.branch_stock : []).filter((s) => String(s.product_id) === id && Number(s.quantity) !== 0);
+          if (stockRows.length) reasons.push('stock on hand (' + stockRows.map((s) => db.branchCode(s.branch_id) + ' ' + s.quantity).join(', ') + ')');
+          const order = Object.keys(LABELS);
+          const colls = Object.keys(store).filter((c) => Array.isArray(store[c]) && !SKIP.has(c) && !c.startsWith('__'))
+            .sort((a, b) => (order.includes(a) ? order.indexOf(a) : 99) - (order.includes(b) ? order.indexOf(b) : 99));
+          colls.forEach((coll) => {
+            let n = 0;
+            store[coll].forEach((row) => {
+              if (!row || typeof row !== 'object') return;
+              if (row.product_id != null && String(row.product_id) === id) n++;
+              else if (Array.isArray(row.items) && row.items.some((x) => x && x.product_id != null && String(x.product_id) === id)) n++;
+            });
+            if (!n) return;
+            const label = LABELS[coll] || utils.titleCase(coll).toLowerCase().replace(/s$/, '') + ' record';
+            reasons.push(n + ' ' + label + (n === 1 ? '' : 's'));
+          });
+          return reasons;
+        },
+        async remove(r) {
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete products.'); return; }
+          const p = db.find('products', r.id);
+          if (!p) { ui.error('Product not found.'); this.refresh(); return; }
+          const label = db.productLabel(p.id);
+          const reasons = this.productRefs(p.id);
+          if (reasons.length) {
+            const ok = await ui.confirm({ title: 'This product cannot be deleted', message: `${label} is still used by: ${reasons.join(', ')}. Products with history are kept for reporting${p.is_active ? ' — deactivate it instead?' : '.'}`, confirmText: p.is_active ? 'Deactivate instead' : 'OK', cancelText: 'Close', danger: !!p.is_active });
+            if (ok && p.is_active) {
+              db.update('products', p.id, { is_active: 0 });
+              db.audit('product.deactivate', 'product', p.id, `${p.sku} deactivated instead of deleted — still used by: ${reasons.join(', ')}`);
+              ui.success('Product deactivated.');
+              this.refresh();
+            }
+            return;
+          }
+          const ok = await ui.confirm({ title: 'Delete product?', message: `${label} (${p.sku}) will be permanently removed from the catalog.`, confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          // nothing references it: drop its empty stock rows, its own price history and any storefront "featured" slot
+          db.all('branch_stock').filter((s) => String(s.product_id) === String(p.id)).forEach((s) => db.remove('branch_stock', s.id));
+          db.all('price_history').filter((h) => String(h.product_id) === String(p.id)).forEach((h) => db.remove('price_history', h.id));
+          const site = db.cms().site || {};
+          if (Array.isArray(site.featured_product_ids) && site.featured_product_ids.some((x) => String(x) === String(p.id))) {
+            site.featured_product_ids = site.featured_product_ids.filter((x) => String(x) !== String(p.id));
+            db.save();
+          }
+          db.remove('products', p.id);
+          db.audit('product.delete', 'product', p.id, `${p.sku} (${p.name}) deleted`);
+          ui.success('Product deleted.');
+          this.refresh();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

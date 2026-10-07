@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Customers · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="customers" data-title="Customers" data-perm="customers.view">
+  <main x-data="customersPage()" @keydown.escape.window="closeForm()">
+
+    <!-- Page header -->
+    <div class="page-header">
+      <div class="min-w-0">
+        <h2 class="page-title">Customers</h2>
+        <p class="page-subtitle">Khata, store credit &amp; contact book · activity for <b x-text="range.label"></b> · <b x-text="scopeLabel"></b></p>
+      </div>
+      <div class="page-actions">
+        <a href="report-receivables.html" class="btn btn-secondary"><span x-html="ABM.icon('chart')"></span>Receivables</a>
+        <button x-show="ABM.utils.canExportHere()" type="button" class="btn btn-secondary" @click="exportCsv()" :disabled="!filtered.length"><span x-html="ABM.icon('download')"></span>Export CSV</button>
+        <template x-if="canCreate">
+          <button type="button" class="btn btn-primary" @click="openCreate()"><span x-html="ABM.icon('plus')"></span>New Customer</button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Period filter (standard range bar) -->
+    <div class="card mb-4">
+      <div class="card-body !py-3">
+        <div class="range-bar">
+          <div class="tabs-pill">
+            <template x-for="p in range.presets" :key="p.key">
+              <button type="button" class="tab" :class="range.preset === p.key && 'active'" @click="range.set(p.key)" x-text="p.label"></button>
+            </template>
+          </div>
+          <div class="range-custom" x-show="range.preset === 'custom'" x-cloak>
+            <input type="date" class="input input-sm" x-model="range.from" @change="range.set('custom')">
+            <span class="text-xs text-slate-500">to</span>
+            <input type="date" class="input input-sm" x-model="range.to" @change="range.set('custom')">
+          </div>
+          <span class="range-label" x-text="range.label"></span>
+        </div>
+        <p class="help mt-1.5">Scopes the <b>last sale</b>, <b>sales</b> and <b>repairs</b> columns. Balances and credit limits are always all-time.</p>
+      </div>
+    </div>
+
+    <!-- KPI tiles (clickable) -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <a :href="'customers.html?filter=all&' + range.query" class="stat stat-accent" title="Show every customer">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Customers</div><div class="stat-value" x-text="ABM.utils.num(k.total)"></div></div>
+          <span class="chip chip-navy" x-html="ABM.icon('users')"></span>
+        </div>
+        <div class="stat-meta"><span x-text="k.active"></span> active<span x-show="k.inactive"> · <span x-text="k.inactive"></span> inactive</span> · <span x-text="k.newInPeriod"></span> added in period</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a href="report-receivables.html" class="stat stat-warning" title="Open the receivables aging report">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Total receivable</div><div class="stat-value" :class="k.receivable > 0 ? 'text-rose-600' : ''" x-text="$money(k.receivable, {decimals:0})"></div></div>
+          <span class="chip chip-warning" x-html="ABM.icon('banknotes')"></span>
+        </div>
+        <div class="stat-meta">outstanding khata across all branches</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'customers.html?filter=dues&' + range.query" class="stat stat-danger" title="Show customers who owe money">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">With dues</div><div class="stat-value" x-text="ABM.utils.num(k.debtors)"></div></div>
+          <span class="chip chip-danger" x-html="ABM.icon('clock')"></span>
+        </div>
+        <div class="stat-meta"><span x-show="k.debtors">avg <b x-text="$money(k.avgDue, {decimals:0})"></b> · </span><span x-text="k.overLimit"></span> over credit limit</div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+      <a :href="'customers.html?filter=credit&' + range.query" class="stat stat-money" title="Show customers holding store credit">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0"><div class="stat-label">Store credit</div><div class="stat-value text-emerald-700" x-text="$money(k.storeCredit, {decimals:0})"></div></div>
+          <span class="chip chip-money" x-html="ABM.icon('wallet')"></span>
+        </div>
+        <div class="stat-meta">held by <span x-text="k.creditors"></span> customer<span x-text="k.creditors === 1 ? '' : 's'"></span></div>
+        <span class="stat-arrow" x-html="ABM.icon('arrow-right')"></span>
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mt-4">
+      <div class="card-body !py-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="tabs-pill">
+            <template x-for="t in tabs" :key="t.key">
+              <button type="button" class="tab" :class="filter === t.key && 'active'" @click="filter = t.key">
+                <span x-text="t.label"></span><span class="count" x-text="counts[t.key]"></span>
+              </button>
+            </template>
+          </div>
+          <div class="relative flex-1 min-w-[13rem]">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" x-html="ABM.icon('search','w-4 h-4')"></span>
+            <input type="search" class="input pl-9" placeholder="Search name, phone or CNIC…" x-model.debounce.200ms="q" aria-label="Search customers">
+          </div>
+          <template x-if="isSuperAdmin">
+            <select class="select !w-auto min-w-[10rem]" x-model="f.branch" x-init="$nextTick(() => { $el.value = f.branch })" aria-label="Activity branch">
+              <option value="all">All branches</option>
+              <template x-for="b in branches" :key="b.id"><option :value="String(b.id)" x-text="b.code + ' · ' + b.name"></option></template>
+            </select>
+          </template>
+          <select class="select !w-auto min-w-[9rem]" x-model="sort" aria-label="Sort by">
+            <option value="name">Sort: Name</option>
+            <option value="balance">Sort: Balance</option>
+            <option value="recent">Sort: Last sale</option>
+            <option value="spend">Sort: Spend</option>
+          </select>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+          <span><b class="text-slate-800" x-text="filtered.length"></b> of <span x-text="rows.length"></span> customers</span>
+          <span x-show="filteredTotals.due > 0">owed <b class="text-rose-600" x-text="$money(filteredTotals.due, {decimals:0})"></b></span>
+          <span x-show="filteredTotals.credit > 0">credit <b class="text-emerald-700" x-text="$money(filteredTotals.credit, {decimals:0})"></b></span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" x-show="hasFilters" @click="clearFilters()"><span x-html="ABM.icon('x','w-4 h-4')"></span>Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card mt-4">
+      <div class="card-header">
+        <div><div class="card-title">Customer list</div><div class="card-subtitle">Click a name to open the ledger, statement and job history</div></div>
+        <span class="text-xs text-slate-500 hidden sm:block" x-text="pager.total + ' result' + (pager.total === 1 ? '' : 's')"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th class="hidden sm:table-cell">Phone</th>
+              <th class="hidden 2xl:table-cell">Address</th>
+              <th class="num hidden xl:table-cell">Credit limit</th>
+              <th class="num">Balance</th>
+              <th class="hidden lg:table-cell">Last sale</th>
+              <th class="num hidden md:table-cell" title="Sales in the selected period">Sales</th>
+              <th class="num hidden md:table-cell" title="Repair jobs in the selected period">Repairs</th>
+              <th class="actions">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in pager.items" :key="r.id">
+              <tr :class="!r.is_active && 'opacity-60'">
+                <td>
+                  <div class="min-w-0 max-w-[13rem] sm:max-w-[18rem]">
+                    <a :href="'customer-view.html?id=' + r.id" class="font-semibold text-slate-800 hover:text-navy-700 block truncate" x-text="r.name"></a>
+                    <div class="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-1.5">
+                      <span x-show="r.is_walkin" class="badge badge-slate">Walk-in</span>
+                      <span x-show="!r.is_active" class="badge badge-red">Inactive</span>
+                      <span class="mono" x-show="r.cnic" x-text="r.cnic"></span>
+                      <span class="sm:hidden" x-show="r.phone" x-text="r.phone"></span>
+                    </div>
+                  </div>
+                </td>
+                <td class="hidden sm:table-cell whitespace-nowrap">
+                  <a :href="'tel:' + r.phone" class="text-slate-700 hover:text-navy-700" x-show="r.phone" x-text="r.phone"></a>
+                  <span class="text-slate-400" x-show="!r.phone">—</span>
+                </td>
+                <td class="hidden 2xl:table-cell"><div class="truncate max-w-[14rem] text-slate-600" x-text="r.address || '—'"></div></td>
+                <td class="num hidden xl:table-cell whitespace-nowrap" :class="r.credit_limit ? 'text-slate-700' : 'text-slate-400'" x-text="r.credit_limit ? $money(r.credit_limit, {decimals:0}) : '—'"></td>
+                <td class="num whitespace-nowrap">
+                  <div class="font-semibold" :class="r.balance > 0 ? 'text-rose-600' : r.balance < 0 ? 'text-emerald-700' : 'text-slate-400'" x-text="r.balance ? $money(Math.abs(r.balance), {decimals:0}) : $money(0, {decimals:0})"></div>
+                  <div class="text-[11px]" :class="r.balance > 0 ? 'text-rose-500' : r.balance < 0 ? 'text-emerald-600' : 'text-slate-400'" x-text="r.balance > 0 ? 'Owes' : r.balance < 0 ? 'Credit' : 'Clear'"></div>
+                  <div class="text-[11px] text-amber-700" x-show="r.overLimit">Over limit</div>
+                </td>
+                <td class="hidden lg:table-cell whitespace-nowrap text-slate-600" x-text="r.lastSale ? $date(r.lastSale) : '—'"></td>
+                <td class="num hidden md:table-cell">
+                  <a :href="'sales.html?customer=' + r.id + '&' + range.query" class="hover:underline" :class="r.sales ? 'text-navy-700 font-semibold' : 'text-slate-400'" x-text="r.sales"></a>
+                </td>
+                <td class="num hidden md:table-cell">
+                  <a :href="'repairs.html?customer=' + r.id + '&' + range.query" class="hover:underline" :class="r.jobs ? 'text-navy-700 font-semibold' : 'text-slate-400'" x-text="r.jobs"></a>
+                </td>
+                <td class="actions">
+                  <div class="inline-flex items-center gap-0.5">
+                    <a :href="'customer-view.html?id=' + r.id" class="btn btn-ghost btn-sm btn-icon" title="Open customer" x-html="ABM.icon('eye','w-4 h-4')"></a>
+                    <template x-if="canPos && r.is_active">
+                      <a :href="'pos.html?customer=' + r.id" class="btn btn-ghost btn-sm btn-icon hidden md:inline-flex" title="New sale" x-html="ABM.icon('cart','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canRepair && r.is_active">
+                      <a :href="'repair-create.html?customer=' + r.id" class="btn btn-ghost btn-sm btn-icon hidden lg:inline-flex" title="New repair job" x-html="ABM.icon('wrench','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canPay && r.balance > 0">
+                      <a :href="'customer-view.html?id=' + r.id + '&pay=1'" class="btn btn-ghost btn-sm btn-icon text-emerald-700" title="Receive payment" x-html="ABM.icon('banknotes','w-4 h-4')"></a>
+                    </template>
+                    <template x-if="canManage && !r.is_walkin">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon" title="Edit customer" @click="openEdit(r)" x-html="ABM.icon('edit','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="canDelete && !canManage && !r.is_walkin">
+                      <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Delete customer" @click="removeRow(r)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                    </template>
+                    <template x-if="r.is_walkin">
+                      <span class="btn btn-ghost btn-sm btn-icon text-slate-300 cursor-not-allowed" title="The walk-in customer is built in and cannot be edited or deleted" x-html="ABM.icon('lock','w-4 h-4')"></span>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-if="!pager.items.length">
+              <tr><td colspan="9">
+                <div class="empty">
+                  <span x-html="ABM.icon('users')"></span>
+                  <div class="empty-title">No customers found</div>
+                  <div class="text-sm mt-1" x-text="rows.length ? 'Try a different search, tab or branch.' : 'Add your first customer to start a khata.'"></div>
+                  <div class="mt-4 flex justify-center gap-2 flex-wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" x-show="hasFilters" @click="clearFilters()">Clear filters</button>
+                    <template x-if="canCreate"><button type="button" class="btn btn-primary btn-sm" @click="openCreate()">New customer</button></template>
+                  </div>
+                </div>
+              </td></tr>
+            </template>
+          </tbody>
+          <tfoot x-show="filtered.length">
+            <tr>
+              <td>Totals</td>
+              <td class="hidden sm:table-cell"></td>
+              <td class="hidden 2xl:table-cell"></td>
+              <td class="num hidden xl:table-cell whitespace-nowrap" x-text="$money(filteredTotals.limit, {decimals:0})"></td>
+              <td class="num whitespace-nowrap" :class="filteredTotals.net > 0 ? 'text-rose-600' : 'text-emerald-700'" x-text="$money(Math.abs(filteredTotals.net), {decimals:0})"></td>
+              <td class="hidden lg:table-cell"></td>
+              <td class="num hidden md:table-cell" x-text="filteredTotals.sales"></td>
+              <td class="num hidden md:table-cell" x-text="filteredTotals.jobs"></td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="card-footer flex flex-wrap items-center justify-between gap-2 text-sm text-slate-500">
+        <div>Showing <b class="text-slate-800" x-text="pager.from"></b>–<b class="text-slate-800" x-text="pager.to"></b> of <b class="text-slate-800" x-text="pager.total"></b></div>
+        <div class="flex items-center gap-1">
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page <= 1" @click="page = pager.page - 1" aria-label="Previous page"><span x-html="ABM.icon('chevron-left','w-4 h-4')"></span></button>
+          <template x-for="n in pageNumbers" :key="n">
+            <button type="button" class="btn btn-sm min-w-[2rem]" :class="n === pager.page ? 'btn-primary' : 'btn-ghost'" @click="page = n" x-text="n"></button>
+          </template>
+          <button type="button" class="btn btn-secondary btn-sm btn-icon" :disabled="pager.page >= pager.pages" @click="page = pager.page + 1" aria-label="Next page"><span x-html="ABM.icon('chevron-right','w-4 h-4')"></span></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add / edit customer modal -->
+    <div x-show="form.open" x-cloak class="modal-backdrop" @click.self="closeForm()">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="custFormTitle">
+        <form @submit.prevent="save()" novalidate>
+          <div class="modal-header">
+            <div class="min-w-0">
+              <div class="modal-title" id="custFormTitle" x-text="form.mode === 'create' ? 'New customer' : 'Edit customer'"></div>
+              <div class="text-xs text-slate-500 truncate" x-text="form.mode === 'create' ? 'Creates a khata account usable at POS and in repair jobs' : form.data.name"></div>
+            </div>
+            <button type="button" class="btn btn-ghost btn-icon" @click="closeForm()" aria-label="Close" x-html="ABM.icon('x')"></button>
+          </div>
+          <div class="modal-body space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div class="sm:col-span-2">
+                <label class="label" for="c-name">Full name <span class="req">*</span></label>
+                <input id="c-name" x-ref="nameInput" type="text" class="input" x-model="form.data.name" :class="form.errors.name && 'is-invalid'" placeholder="e.g. Muhammad Ali" maxlength="80" autocomplete="off">
+                <p class="field-error" x-show="form.errors.name" x-text="form.errors.name"></p>
+              </div>
+              <div>
+                <label class="label" for="c-phone">Phone <span class="req">*</span></label>
+                <input id="c-phone" type="tel" class="input" x-model="form.data.phone" @input="checkPhone()" :class="form.errors.phone && 'is-invalid'" placeholder="0300-1234567" maxlength="20" inputmode="tel" autocomplete="off">
+                <p class="field-error" x-show="form.errors.phone" x-text="form.errors.phone"></p>
+                <p class="help text-amber-700" x-show="!form.errors.phone && form.dupPhone" x-text="form.dupPhone"></p>
+              </div>
+              <div>
+                <label class="label" for="c-email">Email</label>
+                <input id="c-email" type="email" class="input" x-model="form.data.email" :class="form.errors.email && 'is-invalid'" placeholder="name@example.com" maxlength="80" autocomplete="off">
+                <p class="field-error" x-show="form.errors.email" x-text="form.errors.email"></p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="c-address">Address</label>
+                <input id="c-address" type="text" class="input" x-model="form.data.address" placeholder="Area, city" maxlength="140">
+              </div>
+              <div>
+                <label class="label" for="c-cnic">CNIC</label>
+                <input id="c-cnic" type="text" class="input mono" x-model="form.data.cnic" @input="maskCnic()" :class="form.errors.cnic && 'is-invalid'" placeholder="35202-1234567-1" maxlength="15" inputmode="numeric">
+                <p class="field-error" x-show="form.errors.cnic" x-text="form.errors.cnic"></p>
+                <p class="help" x-show="!form.errors.cnic">Format 00000-0000000-0 · needed for instalment / credit sales.</p>
+              </div>
+              <div>
+                <label class="label" for="c-limit">Credit limit</label>
+                <div class="input-group"><span class="addon addon-left">Rs.</span><input id="c-limit" type="number" min="0" step="100" class="input input-money" x-model.number="form.data.credit_limit" :class="form.errors.credit_limit && 'is-invalid'"></div>
+                <p class="field-error" x-show="form.errors.credit_limit" x-text="form.errors.credit_limit"></p>
+                <p class="help" x-show="!form.errors.credit_limit">0 = cash only, no khata allowed at POS.</p>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="label" for="c-notes">Notes</label>
+                <textarea id="c-notes" class="textarea" x-model="form.data.notes" rows="2" maxlength="300" placeholder="Wholesale rates, preferred contact time…"></textarea>
+              </div>
+              <div class="sm:col-span-2">
+                <label class="flex items-center gap-3 cursor-pointer select-none">
+                  <button type="button" class="switch" :class="form.data.is_active && 'on'" @click="form.data.is_active = form.data.is_active ? 0 : 1" role="switch" :aria-checked="form.data.is_active ? 'true' : 'false'" aria-label="Active customer"></button>
+                  <span class="min-w-0">
+                    <span class="text-sm font-semibold text-slate-800">Active</span>
+                    <span class="block text-xs text-slate-500">Inactive customers stay in reports but cannot be selected at POS or on a new job card.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+            <div class="alert alert-info" x-show="form.mode === 'edit'">
+              <span x-html="ABM.icon('info')"></span>
+              <div class="min-w-0">Current balance <b x-text="$money(Math.abs(form.balance))"></b> <span x-text="form.balance > 0 ? '(owed to us)' : form.balance < 0 ? '(store credit)' : '(clear)'"></span>. Balances change only through sales, payments, refunds and adjustments — use the customer page to post them.</div>
+            </div>
+            <div class="alert alert-warning" x-show="form.mode === 'edit' && !form.deletable.ok" x-cloak>
+              <span x-html="ABM.icon('warning')"></span>
+              <div class="min-w-0">This customer cannot be deleted: <span x-text="form.deletable.reasons.join(' · ')"></span>. Switch them to inactive instead.</div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <template x-if="form.mode === 'edit' && canDelete">
+              <button type="button" class="btn btn-danger-soft mr-auto" :disabled="form.busy" @click="destroy()"><span x-html="ABM.icon('trash')"></span><span x-text="form.deletable.ok ? 'Delete' : 'Deactivate'"></span></button>
+            </template>
+            <button type="button" class="btn btn-secondary" @click="closeForm()">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="form.busy"><span x-html="ABM.icon('check')"></span><span x-text="form.mode === 'create' ? 'Create customer' : 'Save changes'"></span></button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function customersPage() {
+      const { db, utils, ui, session } = ABM;
+      const PER_PAGE = 15;
+      const blank = () => ({ id: null, name: '', phone: '', email: '', address: '', cnic: '', credit_limit: 0, notes: '', is_active: 1 });
+      const digits = (v) => String(v || '').replace(/\D/g, '');
+      return {
+        isSuperAdmin: session.isSuperAdmin(),
+        canCreate: session.can('customers.add'),
+        canManage: session.can('customers.edit'),
+        canDelete: session.can('customers.delete'),
+        canPay: session.can('customers.payments'),
+        canPos: session.can('pos.view'),
+        canRepair: session.can('repairs.add'),
+        branches: db.all('branches').filter((b) => b.is_active),
+        tabs: [{ key: 'all', label: 'All' }, { key: 'dues', label: 'Has dues' }, { key: 'credit', label: 'Store credit' }, { key: 'inactive', label: 'Inactive' }],
+        range: null, rows: [], page: 1, q: '', filter: 'all', sort: 'name',
+        f: { branch: String(session.branchId() || '') },
+        k: { total: 0, active: 0, inactive: 0, newInPeriod: 0, receivable: 0, debtors: 0, avgDue: 0, overLimit: 0, storeCredit: 0, creditors: 0 },
+        form: { open: false, mode: 'create', data: blank(), errors: {}, busy: false, dupPhone: '', balance: 0, deletable: { ok: true, reasons: [] } },
+
+        get scopeLabel() { return this.f.branch === 'all' ? 'all branches' : db.branchName(this.f.branch); },
+
+        init() {
+          if (!this.isSuperAdmin) this.f.branch = String(session.branchId());
+          else { const b = utils.qs('branch'); if (b === 'all' || this.branches.some((x) => String(x.id) === b)) this.f.branch = b; }
+          const flt = utils.qs('filter', ''); if (this.tabs.some((t) => t.key === flt)) this.filter = flt;
+          this.q = utils.qs('q', '') || '';
+          this.range = ABM.range('all', () => { this.page = 1; this.compute(); }, 'customers');
+          this.compute();
+          ['q', 'filter', 'sort'].forEach((k) => this.$watch(k, () => { this.page = 1; }));
+          this.$watch('f.branch', () => { this.page = 1; this.compute(); });
+          const editId = utils.qs('edit', '');
+          if (editId && this.canManage) { const row = this.rows.find((x) => String(x.id) === String(editId)); if (row) this.$nextTick(() => this.openEdit(row)); }
+          if (utils.qs('new') !== null && this.canCreate) this.$nextTick(() => this.openCreate());
+        },
+
+        /* --------------------------------------------------------- data */
+        inScope(row) { return this.f.branch === 'all' ? true : String(row.branch_id) === String(this.f.branch); },
+        compute() {
+          const r = this.range;
+          const sales = db.all('sales').filter((s) => s.status !== 'void' && this.inScope(s) && r.contains(s.sale_date));
+          const jobs = db.all('repair_jobs').filter((j) => this.inScope(j) && r.contains(j.received_at));
+          const byCust = {}, jobsByCust = {};
+          sales.forEach((s) => { const a = byCust[s.customer_id] = byCust[s.customer_id] || { n: 0, spend: 0, last: '' }; a.n++; a.spend += Number(s.total) || 0; if (String(s.sale_date) > a.last) a.last = s.sale_date; });
+          jobs.forEach((j) => { jobsByCust[j.customer_id] = (jobsByCust[j.customer_id] || 0) + 1; });
+          this.rows = db.all('customers').map((c) => {
+            const a = byCust[c.id] || { n: 0, spend: 0, last: '' };
+            const balance = utils.round2(Number(c.balance) || 0);
+            return {
+              ...c, balance, sales: a.n, spend: utils.round2(a.spend), lastSale: a.last || null, jobs: jobsByCust[c.id] || 0,
+              overLimit: balance > 0 && Number(c.credit_limit) > 0 && balance > Number(c.credit_limit),
+            };
+          });
+          const all = this.rows.filter((c) => !c.is_walkin);
+          const owing = all.filter((c) => c.balance > 0);
+          const holding = this.rows.filter((c) => c.balance < 0);
+          this.k = {
+            total: all.length, active: all.filter((c) => c.is_active).length, inactive: all.filter((c) => !c.is_active).length,
+            newInPeriod: all.filter((c) => r.contains(c.created_at)).length,
+            receivable: utils.sum(owing, 'balance'), debtors: owing.length,
+            avgDue: owing.length ? utils.round2(utils.sum(owing, 'balance') / owing.length) : 0,
+            overLimit: all.filter((c) => c.overLimit).length,
+            storeCredit: utils.round2(Math.abs(utils.sum(holding, 'balance'))), creditors: holding.length,
+          };
+        },
+        matchTab(c, tab) {
+          if (tab === 'dues') return c.balance > 0;
+          if (tab === 'credit') return c.balance < 0;
+          if (tab === 'inactive') return !c.is_active;
+          return true;
+        },
+        get counts() {
+          const out = {};
+          this.tabs.forEach((t) => { out[t.key] = this.rows.filter((c) => this.matchTab(c, t.key)).length; });
+          return out;
+        },
+        get hasFilters() { return !!(this.q || this.filter !== 'all'); },
+        clearFilters() { this.q = ''; this.filter = 'all'; },
+        get filtered() {
+          const q = this.q.trim().toLowerCase();
+          const qd = digits(this.q);
+          const list = this.rows.filter((c) => {
+            if (!this.matchTab(c, this.filter)) return false;
+            if (!q) return true;
+            if ([c.name, c.email, c.address, c.notes].some((v) => String(v || '').toLowerCase().includes(q))) return true;
+            if (qd && (digits(c.phone).includes(qd) || digits(c.cnic).includes(qd))) return true;
+            return false;
+          });
+          if (this.sort === 'balance') return utils.sortBy(list, (c) => -c.balance);
+          if (this.sort === 'recent') return utils.sortBy(list, (c) => c.lastSale || '', 'desc');
+          if (this.sort === 'spend') return utils.sortBy(list, (c) => -c.spend);
+          return utils.sortBy(list, (c) => (c.is_walkin ? '0' : '1') + String(c.name || '').toLowerCase());
+        },
+        get filteredTotals() {
+          const f = this.filtered;
+          return {
+            due: utils.sum(f.filter((c) => c.balance > 0), 'balance'),
+            credit: utils.round2(Math.abs(utils.sum(f.filter((c) => c.balance < 0), 'balance'))),
+            net: utils.sum(f, 'balance'), limit: utils.sum(f, 'credit_limit'),
+            sales: f.reduce((a, c) => a + c.sales, 0), jobs: f.reduce((a, c) => a + c.jobs, 0),
+          };
+        },
+        get pager() { return utils.paginate(this.filtered, this.page, PER_PAGE); },
+        get pageNumbers() { const { page, pages } = this.pager; const out = []; for (let n = Math.max(1, page - 2); n <= Math.min(pages, page + 2); n++) out.push(n); return out; },
+        exportCsv() {
+          const cols = [
+            { label: 'Name', key: 'name' }, { label: 'Phone', key: 'phone' }, { label: 'Email', key: 'email' }, { label: 'CNIC', key: 'cnic' },
+            { label: 'Address', key: 'address' }, { label: 'Credit Limit', key: 'credit_limit' }, { label: 'Balance', key: 'balance' },
+            { label: 'Status', value: (c) => (c.balance > 0 ? 'Owes' : c.balance < 0 ? 'Store credit' : 'Clear') },
+            { label: 'Last Sale', value: (c) => (c.lastSale ? String(c.lastSale).slice(0, 10) : '') },
+            { label: 'Sales', key: 'sales' }, { label: 'Spend', key: 'spend' }, { label: 'Repair Jobs', key: 'jobs' },
+            { label: 'Active', value: (c) => (c.is_active ? 'Yes' : 'No') }, { label: 'Notes', key: 'notes' },
+          ];
+          if (!utils.download('customers-' + utils.today() + '.csv', utils.toCsv(this.filtered, cols))) return;
+          ui.success('Exported ' + this.filtered.length + ' customer' + (this.filtered.length === 1 ? '' : 's') + '.');
+        },
+
+        /* -------------------------------------------------------- modal */
+        usage(id) {
+          const reasons = [];
+          const c = db.find('customers', id);
+          const sales = db.all('sales').filter((s) => String(s.customer_id) === String(id)).length;
+          const jobs = db.all('repair_jobs').filter((j) => String(j.customer_id) === String(id)).length;
+          const tx = db.all('customer_transactions').filter((t) => String(t.customer_id) === String(id)).length;
+          const orders = db.all('online_orders').filter((o) => String(o.customer_id) === String(id)).length;
+          if (sales) reasons.push(sales + ' sale' + (sales === 1 ? '' : 's'));
+          if (jobs) reasons.push(jobs + ' repair job' + (jobs === 1 ? '' : 's'));
+          if (orders) reasons.push(orders + ' online order' + (orders === 1 ? '' : 's'));
+          if (tx) reasons.push(tx + ' ledger entr' + (tx === 1 ? 'y' : 'ies'));
+          if (c && utils.round2(c.balance) !== 0) reasons.push('a balance of ' + utils.money(Math.abs(c.balance)));
+          return { ok: reasons.length === 0, reasons };
+        },
+        openCreate() {
+          if (!this.canCreate) { ui.error('You do not have permission to add customers.'); return; }
+          this.form = { open: true, mode: 'create', data: blank(), errors: {}, busy: false, dupPhone: '', balance: 0, deletable: { ok: true, reasons: [] } };
+          this.$nextTick(() => this.$refs.nameInput && this.$refs.nameInput.focus());
+        },
+        openEdit(row) {
+          if (!this.canManage) { ui.error('You do not have permission to edit customers.'); return; }
+          const c = db.find('customers', row.id);
+          if (!c) { ui.error('Customer not found.'); this.compute(); return; }
+          if (c.is_walkin) { ui.warn('The walk-in customer is built in and cannot be edited.'); return; }
+          this.form = {
+            open: true, mode: 'edit',
+            data: { id: c.id, name: c.name || '', phone: c.phone || '', email: c.email || '', address: c.address || '', cnic: c.cnic || '', credit_limit: Number(c.credit_limit) || 0, notes: c.notes || '', is_active: c.is_active ? 1 : 0 },
+            errors: {}, busy: false, dupPhone: '', balance: utils.round2(Number(c.balance) || 0), deletable: this.usage(c.id),
+          };
+          this.checkPhone();
+          this.$nextTick(() => this.$refs.nameInput && this.$refs.nameInput.focus());
+        },
+        closeForm() { if (this.form.open) this.form.open = false; },
+        maskCnic() {
+          const d = digits(this.form.data.cnic).slice(0, 13);
+          let out = d.slice(0, 5);
+          if (d.length > 5) out += '-' + d.slice(5, 12);
+          if (d.length > 12) out += '-' + d.slice(12, 13);
+          this.form.data.cnic = out;
+        },
+        checkPhone() {
+          const d = digits(this.form.data.phone);
+          this.form.dupPhone = '';
+          if (d.length < 7) return;
+          const hit = db.all('customers').find((c) => !c.is_walkin && String(c.id) !== String(this.form.data.id) && digits(c.phone) === d);
+          if (hit) this.form.dupPhone = 'Heads up: ' + hit.name + ' already uses this number.';
+        },
+        validate() {
+          const d = this.form.data, e = {};
+          const name = String(d.name || '').trim();
+          if (name.length < 2) e.name = 'Enter the customer name (at least 2 characters).';
+          const phone = digits(d.phone);
+          if (!phone) e.phone = 'A phone number is required.';
+          else if (phone.length < 10 || phone.length > 13) e.phone = 'Enter a valid phone number (10–13 digits).';
+          const email = String(d.email || '').trim();
+          if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) e.email = 'Enter a valid email address.';
+          const cnic = String(d.cnic || '').trim();
+          if (cnic && !/^\d{5}-\d{7}-\d$/.test(cnic)) e.cnic = 'CNIC must look like 35202-1234567-1.';
+          const limit = Number(d.credit_limit);
+          if (d.credit_limit === '' || isNaN(limit) || limit < 0) e.credit_limit = 'Credit limit cannot be negative.';
+          this.form.errors = e;
+          return Object.keys(e).length === 0;
+        },
+        save() {
+          if (!this.validate()) { ui.error('Please fix the highlighted fields.'); return; }
+          this.form.busy = true;
+          try {
+            const d = this.form.data;
+            const patch = {
+              name: String(d.name).trim(), phone: String(d.phone).trim(), email: String(d.email || '').trim(),
+              address: String(d.address || '').trim(), cnic: String(d.cnic || '').trim(),
+              credit_limit: utils.round2(Number(d.credit_limit) || 0), notes: String(d.notes || '').trim(), is_active: d.is_active ? 1 : 0,
+            };
+            if (this.form.mode === 'create') {
+              const rec = db.insert('customers', { ...patch, balance: 0, is_walkin: 0 });
+              db.audit('customer.create', 'customer', rec.id, `Customer ${rec.name} created (${rec.phone})`);
+              ui.success(rec.name + ' added.');
+            } else {
+              const cur = db.find('customers', d.id);
+              if (!cur) throw new Error('This customer no longer exists.');
+              if (cur.is_walkin) throw new Error('The walk-in customer cannot be edited.');
+              db.update('customers', d.id, patch);
+              db.audit('customer.update', 'customer', d.id, `Customer ${patch.name} updated`);
+              ui.success('Changes saved.');
+            }
+            this.form.open = false;
+            this.compute();
+          } catch (err) {
+            ui.error(err.message || 'Could not save the customer.');
+          } finally {
+            this.form.busy = false;
+          }
+        },
+        /** Delete straight from the list (a role that may delete customers but not edit them). */
+        removeRow(r) { this.form = { ...this.form, open: false, mode: 'edit', data: { ...blank(), id: r.id }, deletable: this.usage(r.id) }; return this.destroy(); },
+        async destroy() {
+          const id = this.form.data.id;
+          const cur = db.find('customers', id);
+          if (!cur) { ui.error('Customer not found.'); this.form.open = false; this.compute(); return; }
+          if (cur.is_walkin) { ui.warn('The walk-in customer cannot be deleted.'); return; }
+          if (!this.canDelete) { ui.error('Your role is not allowed to delete customers.'); return; }
+          const check = this.usage(id);
+          this.form.deletable = check;
+          if (!check.ok) {
+            if (!cur.is_active) { ui.toast(cur.name + ' is already inactive.', 'info'); return; }
+            const ok = await ui.confirm({ title: 'Deactivate ' + cur.name + '?', message: 'This customer has ' + check.reasons.join(', ') + ', so the record must be kept. Deactivating hides them from POS and new job cards.', confirmText: 'Deactivate' });
+            if (!ok) return;
+            this.form.busy = true;
+            db.update('customers', id, { is_active: 0 });
+            db.audit('customer.deactivate', 'customer', id, `Customer ${cur.name} deactivated (has ${check.reasons.join(', ')})`);
+            ui.success(cur.name + ' is now inactive.');
+            this.form.busy = false; this.form.open = false; this.compute();
+            return;
+          }
+          const ok = await ui.confirm({ title: 'Delete ' + cur.name + '?', message: 'This customer has no sales, jobs, orders or ledger entries and will be permanently removed.', confirmText: 'Delete', danger: true });
+          if (!ok) return;
+          this.form.busy = true;
+          db.remove('customers', id);
+          db.audit('customer.delete', 'customer', id, `Customer ${cur.name} deleted`);
+          ui.success(cur.name + ' deleted.');
+          this.form.busy = false; this.form.open = false; this.compute();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

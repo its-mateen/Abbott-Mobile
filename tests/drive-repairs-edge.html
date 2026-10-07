@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>DRIVE repairs edge cases</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+</head>
+<body data-public>
+<pre id="out">running…</pre>
+<script>
+/* eslint-disable */
+(async function () {
+  const L = [];
+  const log = (s) => { L.push(String(s)); console.log('DRIVE ' + s); };
+  let fails = 0;
+  const ok = (cond, msg, extra) => { if (cond) log('PASS  ' + msg); else { fails++; log('FAIL  ' + msg + (extra !== undefined ? '  [' + extra + ']' : '')); } };
+  const eq = (a, b, msg) => ok(a === b || (typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 0.011), msg, 'got=' + JSON.stringify(a) + ' want=' + JSON.stringify(b));
+
+  const { db, utils, ui, session } = ABM;
+  ui.confirm = async () => true;
+
+  async function loadPage(file) {
+    const html = await (await fetch('../' + file, { cache: 'no-store' })).text();
+    const m = html.match(/<script>([\s\S]*?)<\/script>/);
+    let src = m[1].replace(/location\.href\s*=/g, 'window.__nav =').replace(/location\.reload\(\)/g, 'void 0');
+    (0, eval)(src);
+  }
+  function mount(factory, query) {
+    history.replaceState(null, '', location.pathname + (query || ''));
+    const c = factory();
+    c.$nextTick = (fn) => { try { fn && fn(); } catch (e) { /* ignore */ } };
+    c.$refs = {}; c.$watch = () => {}; c.$el = document.body;
+    if (c.init) c.init();
+    return c;
+  }
+  const mvFor = (jobId, pid) => db.all('stock_movements').filter((m) => m.reference_type === 'repair_job' && String(m.reference_id) === String(jobId) && (pid == null || String(m.product_id) === String(pid)));
+  const itemsOf = (id) => db.all('repair_items').filter((i) => String(i.job_id) === String(id));
+  const paysOf = (id) => db.all('repair_payments').filter((p) => String(p.job_id) === String(id));
+
+  try {
+    db.reset();
+    const manager = db.all('users').find((u) => u.username === 'manager');
+    session.logout(); session.login(manager);
+    await loadPage('repair-create.html');
+    await loadPage('repair-view.html');
+    await loadPage('repairs.html');
+    const BR = Number(session.branchId());
+    const cust = db.all('customers').find((c) => !c.is_walkin && c.is_active);
+    const part = db.all('products').find((p) => db.productType(p) === 'part' && db.isStockTracked(p) && !db.isSerialized(p) && ABM.stock.qty(BR, p.id) >= 3);
+    const svc = db.all('products').find((p) => p.product_type === 'service' && p.is_active);
+
+    function newJob(model, advance) {
+      const c = mount(repairCreatePage, '');
+      c.selectCustomer(cust); c.setDeviceType('mobile');
+      c.form.brand_sel = 'Apple'; c.form.model = model;
+      c.form.problem_description = 'Test job for ' + model;
+      c.form.advance = advance || 0;
+      c.save();
+      return Number((window.__nav.match(/id=(\d+)/) || [])[1]);
+    }
+
+    /* ============== A. TILE BASIS vs report-repairs.html ============== */
+    log('--- A. repairs.html money tiles vs report-repairs.html basis ---');
+    const rp = mount(repairsPage, '');
+    rp.range.set('this_month');
+    const scoped = db.all('repair_jobs').filter((j) => Number(j.branch_id) === BR);
+    const reportDelivered = scoped.filter((j) => j.delivered_at && rp.range.contains(j.delivered_at));
+    const reportRevenue = utils.round2(utils.sum(reportDelivered, 'total'));
+    log('repairs.html tile : delivered=' + rp.tiles.delivered + ' revenue=' + rp.tiles.revenue + ' collected=' + rp.tiles.collected);
+    log('report-repairs    : delivered=' + reportDelivered.length + ' revenue=' + reportRevenue);
+    eq(rp.tiles.revenue, reportRevenue, 'Revenue tile equals report-repairs "Repair revenue" for the same period');
+    eq(rp.tiles.delivered, reportDelivered.length, 'Delivered tile equals report-repairs delivered-in-range count');
+    const payInRange = utils.round2(utils.sum(db.all('repair_payments').filter((p) => scoped.some((j) => j.id == p.job_id) && rp.range.contains(p.created_at)), 'amount'));
+    log('payments actually taken in period = ' + payInRange);
+    eq(rp.tiles.collected, payInRange, 'Collected tile equals payments taken during the period');
+
+    log('--- A2. job received LAST month, delivered THIS month ---');
+    const carry = scoped.filter((j) => j.status === 'delivered')[0];
+    const oldReceived = utils.addDays(new Date(), -45).toISOString();
+    db.update('repair_jobs', carry.id, { received_at: oldReceived, delivered_at: utils.now() });
+    db.all('repair_payments').filter((p) => p.job_id == carry.id).forEach((p) => db.update('repair_payments', p.id, { created_at: utils.now() }));
+    const rpB = mount(repairsPage, '');
+    rpB.range.set('this_month');
+    const scopedB = db.all('repair_jobs').filter((j) => Number(j.branch_id) === BR);
+    const repDeliveredB = scopedB.filter((j) => j.delivered_at && rpB.range.contains(j.delivered_at));
+    const repRevenueB = utils.round2(utils.sum(repDeliveredB, 'total'));
+    const payInRangeB = utils.round2(utils.sum(db.all('repair_payments').filter((p) => scopedB.some((j) => j.id == p.job_id) && rpB.range.contains(p.created_at)), 'amount'));
+    log('carried job ' + carry.job_no + ' total=' + carry.total + ' received 45d ago, delivered today');
+    log('repairs.html tile : delivered=' + rpB.tiles.delivered + ' revenue=' + rpB.tiles.revenue + ' collected=' + rpB.tiles.collected);
+    log('report-repairs    : delivered=' + repDeliveredB.length + ' revenue=' + repRevenueB + ' paymentsInPeriod=' + payInRangeB);
+    eq(rpB.tiles.revenue, repRevenueB, 'A2 Revenue tile equals report-repairs revenue');
+    eq(rpB.tiles.delivered, repDeliveredB.length, 'A2 Delivered tile equals report-repairs delivered count');
+    eq(rpB.tiles.collected, payInRangeB, 'A2 Collected tile equals payments taken in the period');
+    // the Delivered tile links to ?status=delivered&basis=delivered — the destination must show exactly that many rows
+    const rpC = mount(repairsPage, '?status=delivered&basis=delivered&range=this_month');
+    eq(rpC.f.basis, 'delivered', 'basis=delivered read from the URL');
+    eq(rpC.listRows.length, rpB.tiles.delivered, 'Delivered tile link lands on a list with the same row count');
+    ok(rpC.listRows.every((j) => j.status === 'delivered' && rpC.range.contains(j.delivered_at)), 'every row on that list was delivered in the period');
+    const boardC = rpC.boardColumns.reduce((a, c) => a.concat(c.jobs.map((j) => j.id)), []);
+    ok(rpC.listRows.every((j) => boardC.includes(j.id)), 'board still contains every list row under the delivered basis');
+    db.reset(); session.logout(); session.login(db.all('users').find((u) => u.username === 'manager'));
+
+    /* ============== B. INSUFFICIENT STOCK BLOCKS in_progress ============== */
+    log('--- B. INSUFFICIENT STOCK ---');
+    const jb = newJob('iPhone SE stockcheck', 0);
+    const have = ABM.stock.qty(BR, part.id);
+    let v = mount(repairViewPage, '?id=' + jb);
+    v.openPart(); v.pickPart(v.partResults.find((p) => p.id === part.id));
+    v.pt.qty = have + 5; v.pt.price = 1000; v.savePart();
+    eq(itemsOf(jb).length, 1, 'oversized part line added while not in progress');
+    v = mount(repairViewPage, '?id=' + jb);
+    const errText = v.stockCheck();
+    ok(!!errText, 'stockCheck reports a readable error: ' + errText);
+    v.openStatus('in_progress', 'Start work');
+    ok(!!v.st.stockError, 'status modal is blocked with a stock error');
+    let threw = false;
+    try { v.applyStatus('in_progress', 'force'); } catch (e) { threw = true; log('  applyStatus threw: ' + e.message); }
+    ok(threw, 'applyStatus refuses to consume more than stock');
+    eq(ABM.stock.qty(BR, part.id), have, 'stock untouched after the blocked transition');
+    eq(db.find('repair_jobs', jb).status, 'received', 'status unchanged after the blocked transition');
+    eq(mvFor(jb).length, 0, 'no stock movement written');
+    // list page path
+    const rp2 = mount(repairsPage, '');
+    let threw2 = false;
+    try { rp2.applyStatus(db.find('repair_jobs', jb), 'in_progress', 'from list'); } catch (e) { threw2 = true; }
+    ok(threw2, 'repairs.html quick-status also refuses (validates before writing)');
+    eq(db.find('repair_jobs', jb).status, 'received', 'list-page block left the status alone');
+    eq(ABM.stock.qty(BR, part.id), have, 'list-page block left stock alone');
+
+    /* ============== C. REMOVE A CONSUMED LINE ============== */
+    log('--- C. REMOVE CONSUMED LINE ---');
+    const jc = newJob('Galaxy A14 remove-line', 0);
+    v = mount(repairViewPage, '?id=' + jc);
+    v.openPart(); v.pickPart(v.partResults.find((p) => p.id === part.id));
+    v.pt.qty = 1; v.pt.price = 3000; v.savePart();
+    v = mount(repairViewPage, '?id=' + jc);
+    v.applyStatus('in_progress', 'start');
+    eq(ABM.stock.qty(BR, part.id), have - 1, 'consumed 1');
+    v = mount(repairViewPage, '?id=' + jc);
+    await v.removeLine(v.items[0]);
+    eq(ABM.stock.qty(BR, part.id), have, 'removing a consumed line returns the unit exactly once');
+    eq(itemsOf(jc).length, 0, 'line removed');
+    eq(Number(db.find('repair_jobs', jc).total_parts), 0, 'totals recalculated after removal');
+    eq(mvFor(jc, part.id).reduce((s, m) => s + Number(m.quantity), 0), 0, 'net stock movement for the job is zero');
+
+    /* ============== D. LABOR NEVER TOUCHES STOCK ============== */
+    log('--- D. LABOR / SERVICE LINES ---');
+    const jd = newJob('Redmi 12 labour-only', 0);
+    v = mount(repairViewPage, '?id=' + jd);
+    v.openLabor(); v.lm.mode = 'service'; v.lm.product_id = String(svc.id); v.onServiceChange(); v.lm.qty = 2; v.lm.price = 800; v.saveLabor();
+    const svcStock0 = ABM.stock.qty(BR, svc.id);
+    v = mount(repairViewPage, '?id=' + jd);
+    v.applyStatus('in_progress', 'start');
+    eq(mvFor(jd).length, 0, 'no stock movement for a service line');
+    eq(ABM.stock.qty(BR, svc.id), svcStock0, 'service product stock untouched');
+    eq(Number(db.find('repair_jobs', jd).total_labor), 1600, 'labor total 2 x 800');
+    eq(Number(db.find('repair_jobs', jd).total_parts), 0, 'parts total 0');
+    // custom labour line
+    v = mount(repairViewPage, '?id=' + jd);
+    v.openLabor(); v.lm.mode = 'custom'; v.lm.description = 'Thermal paste & cleaning'; v.lm.qty = 1; v.lm.price = 400; v.saveLabor();
+    eq(Number(db.find('repair_jobs', jd).total_labor), 2000, 'custom labour charge added');
+
+    /* ============== E. DELIVER WITH BALANCE STILL DUE ============== */
+    // Money-integrity fix: an unpaid balance no longer "stays on the job" where no khata or receivable ever
+    // saw it — it goes on the registered customer's khata (ledger debit) and is no longer due on the job.
+    log('--- E. DELIVER WITH PARTIAL PAYMENT (balance to khata) ---');
+    v = mount(repairViewPage, '?id=' + jd);
+    v.applyStatus('ready', 'done');
+    v = mount(repairViewPage, '?id=' + jd);
+    v.openDeliver();
+    v.dm.rows = [{ method: 'cash', amount: 1200, reference: '' }];
+    v.dm.allowPartial = false;
+    await v.saveDeliver();
+    eq(db.find('repair_jobs', jd).status, 'ready', 'delivery refused while the balance is short and the box is unticked');
+    ok(!!v.dm.error, 'a readable error is shown: ' + v.dm.error);
+    const khata0 = Number(db.find('customers', cust.id).balance) || 0;
+    v.dm.allowPartial = true; v.dm.error = '';
+    await v.saveDeliver();
+    const jdRow = db.find('repair_jobs', jd);
+    eq(jdRow.status, 'delivered', 'delivered with the balance on khata');
+    eq(Number(jdRow.paid_amount), 1200, 'paid_amount 1200');
+    eq(Number(jdRow.credit_amount), 800, 'the 800 balance moved to the khata');
+    eq(Number(jdRow.due_amount), 0, 'nothing is left due on the job itself (no double count with receivables)');
+    eq(Number(db.find('customers', cust.id).balance), khata0 + 800, 'customer khata up by 800');
+    ok(db.all('customer_transactions').some((t) => t.reference_type === 'repair_job' && String(t.reference_id) === String(jd) && Number(t.debit) === 800), 'ledger debit linked to the job');
+    eq(paysOf(jd)[0].kind, 'payment', 'a delivery that leaves a balance records a part PAYMENT, not final');
+    // over-collection is refused
+    const je = newJob('Vivo Y17 overpay', 0);
+    v = mount(repairViewPage, '?id=' + je);
+    v.openLabor(); v.lm.mode = 'custom'; v.lm.description = 'Diagnostic'; v.lm.qty = 1; v.lm.price = 1000; v.saveLabor();
+    v = mount(repairViewPage, '?id=' + je);
+    v.openPayment(); v.pay.amount = 5000; v.savePayment();
+    ok(!!v.pay.errors.amount, 'payment above the balance due is refused: ' + v.pay.errors.amount);
+    eq(paysOf(je).length, 0, 'no payment row written');
+
+    /* ============== F. APPROVAL WITHDRAWAL ============== */
+    log('--- F. APPROVAL TOGGLE ---');
+    const jf = newJob('Nokia G21 approval', 0);
+    v = mount(repairViewPage, '?id=' + jf);
+    v.openQuote(); v.qm.estimate = 4000; v.saveQuote();
+    v = mount(repairViewPage, '?id=' + jf);
+    v.openApprove(); v.st.next = ''; v.st.target = 'awaiting_approval'; v.saveStatus();
+    eq(Number(db.find('repair_jobs', jf).approved_by_customer), 1, 'approved');
+    v = mount(repairViewPage, '?id=' + jf);
+    v.toggleApproval();
+    eq(Number(db.find('repair_jobs', jf).approved_by_customer), 0, 'approval withdrawn');
+    ok(db.all('repair_status_log').some((l) => l.job_id == jf && /withdrawn/i.test(l.notes || '')), 'withdrawal written to the timeline');
+
+    /* ============== G. AWAITING PARTS ROUND TRIP ============== */
+    log('--- G. AWAITING PARTS ROUND TRIP ---');
+    const jg = newJob('Tecno Spark parts-wait', 0);
+    v = mount(repairViewPage, '?id=' + jg);
+    v.openPart(); v.pickPart(v.partResults.find((p) => p.id === part.id)); v.pt.qty = 1; v.pt.price = 3000; v.savePart();
+    const gStock = ABM.stock.qty(BR, part.id);
+    v = mount(repairViewPage, '?id=' + jg);
+    v.applyStatus('awaiting_parts', 'ordered');
+    eq(ABM.stock.qty(BR, part.id), gStock, 'awaiting_parts does not consume');
+    v = mount(repairViewPage, '?id=' + jg);
+    v.applyStatus('in_progress', 'parts arrived');
+    eq(ABM.stock.qty(BR, part.id), gStock - 1, 'in_progress consumed once');
+    v = mount(repairViewPage, '?id=' + jg);
+    v.applyStatus('awaiting_parts', 'need another part');
+    v = mount(repairViewPage, '?id=' + jg);
+    v.applyStatus('in_progress', 'back to work');
+    eq(ABM.stock.qty(BR, part.id), gStock - 1, 'round trip does not consume twice');
+    eq(mvFor(jg, part.id).length, 1, 'still one movement after the round trip');
+
+    /* ============== H. BRANCH SCOPING ============== */
+    log('--- H. BRANCH SCOPING ---');
+    const faraz = db.all('users').find((u) => u.username === 'faraz');
+    session.logout(); session.login(faraz);
+    const fv = mount(repairViewPage, '?id=' + jg);
+    ok(fv.job === null && fv.scopeBlocked === true, 'a B2 technician cannot open a Main Branch job');
+    const frp = mount(repairsPage, '');
+    ok(frp.jobs.every((j) => Number(j.branch_id) === Number(session.branchId())), 'list is scoped to the user branch');
+    session.logout(); session.login(manager);
+
+    /* ============== I. CASHIER QUICK STATUS ============== */
+    log('--- I. CASHIER QUICK STATUS ---');
+    const cashier = db.all('users').find((u) => u.username === 'cashier');
+    session.logout(); session.login(cashier);
+    const crp = mount(repairsPage, '');
+    const anyReady = crp.jobs.find((j) => j.status === 'ready');
+    const anyInProg = crp.jobs.find((j) => j.status === 'in_progress');
+    ok(!anyReady || crp.canMove(anyReady) === true, 'cashier can act on a ready job');
+    ok(!anyInProg || crp.canMove(anyInProg) === false, 'cashier cannot move an in-progress job');
+    if (anyReady) { crp.openStatus(anyReady); eq(JSON.stringify(crp.smTargets), JSON.stringify(['delivered']), 'cashier is only offered Deliver'); }
+    ok(crp.showMoney === true, 'cashier sees money tiles (has sales/repair money visibility)');
+    session.logout(); session.login(manager);
+
+    /* ============== J. INTAKE VALIDATION ============== */
+    log('--- J. INTAKE VALIDATION ---');
+    const bad = mount(repairCreatePage, '');
+    bad.form.model = ''; bad.form.problem_description = '';
+    bad.form.serial = '12345'; bad.form.brand_sel = '';
+    bad.form.promised_at = '2000-01-01T10:00';
+    bad.form.warranty_days = 999;
+    bad.form.advance = -5;
+    const before = db.all('repair_jobs').length;
+    bad.save();
+    ok(!!bad.errors.customer, 'customer required: ' + bad.errors.customer);
+    ok(!!bad.errors.brand, 'brand required');
+    ok(!!bad.errors.model, 'model required');
+    ok(!!bad.errors.serial, 'short IMEI rejected: ' + bad.errors.serial);
+    ok(!!bad.errors.problem_description, 'problem required');
+    ok(!!bad.errors.promised_at, 'past promised date rejected: ' + bad.errors.promised_at);
+    ok(!!bad.errors.warranty_days, 'warranty out of range rejected');
+    ok(!!bad.errors.advance, 'negative advance rejected');
+    eq(db.all('repair_jobs').length, before, 'nothing written for an invalid form');
+    // laptop switches the serial rule from IMEI to serial number
+    bad.setDeviceType('laptop');
+    eq(bad.serialLabel, 'Serial No.', 'laptop uses the Serial No. label, not IMEI');
+    bad.form.serial = 'AB'; bad.validate();
+    ok(!!bad.errors.serial, 'too-short serial rejected: ' + bad.errors.serial);
+    bad.form.serial = 'DLX-5420-77'; bad.validate();
+    ok(!bad.errors.serial, 'valid laptop serial accepted');
+
+    /* ============== K. EDIT DETAILS + ASSIGNMENT ============== */
+    log('--- K. EDIT DETAILS + ASSIGNMENT ---');
+    const jk = newJob('Pixel 7a edit-me', 0);
+    v = mount(repairViewPage, '?id=' + jk);
+    v.openEdit();
+    v.ed.form.model = 'Pixel 7a (edited)';
+    v.ed.form.serial = '1234';
+    v.saveEdit();
+    ok(!!v.ed.errors.serial, 'edit rejects a malformed IMEI: ' + v.ed.errors.serial);
+    eq(db.find('repair_jobs', jk).model, 'Pixel 7a edit-me', 'nothing saved while invalid');
+    v.ed.form.serial = '351234567890123';
+    v.ed.form.priority = 'urgent';
+    v.ed.form.estimated_cost = 3500;
+    v.saveEdit();
+    let jkRow = db.find('repair_jobs', jk);
+    eq(jkRow.model, 'Pixel 7a (edited)', 'model updated');
+    eq(jkRow.serial, '351234567890123', 'serial updated');
+    eq(jkRow.priority, 'urgent', 'priority updated');
+    eq(Number(jkRow.estimated_cost), 3500, 'estimate updated');
+    ok(db.all('repair_status_log').some((l) => l.job_id == jk && /Details updated/.test(l.notes || '')), 'edit written to the timeline');
+    ok(db.all('audit_logs').some((a) => a.action === 'repair.update' && String(a.entity_id) === String(jk)), 'audit repair.update written');
+    // assignment
+    const tech1 = db.technicians(BR).find((u) => u.role === 'technician');
+    v = mount(repairViewPage, '?id=' + jk);
+    v.openAssign(); v.am.technician_id = String(tech1.id); v.saveAssign();
+    eq(Number(db.find('repair_jobs', jk).technician_id), Number(tech1.id), 'technician assigned');
+    // technician takes an unassigned job
+    const ju = newJob('Moto G take-me', 0);
+    session.logout(); session.login(tech1);
+    let tv2 = mount(repairViewPage, '?id=' + ju);
+    ok(tv2.canEdit === true, 'unassigned job is editable by any branch technician');
+    tv2.assignSelf();
+    eq(Number(db.find('repair_jobs', ju).technician_id), Number(tech1.id), 'technician took the job');
+    session.logout(); session.login(manager);
+
+  } catch (e) {
+    fails++;
+    log('EXCEPTION ' + (e && e.stack ? e.stack : e));
+  }
+  log('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL (' + fails + ' failures)'));
+  console.log('RESULT: ' + (fails === 0 ? 'PASS' : 'FAIL ' + fails));
+  document.getElementById('out').textContent = L.join('\n');
+})();
+</script>
+</body>
+</html>

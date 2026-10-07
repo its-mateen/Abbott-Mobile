@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="assets/img/logo.png">
+  <link rel="alternate icon" href="assets/img/logo.svg">
+  <title>Labels &amp; Barcodes · Abbott Mobiles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="assets/js/tailwind-config.js"></script>
+  <link rel="stylesheet" href="assets/css/app.css">
+  <style>
+    /* the sheet is measured in millimetres so what prints is the size it says */
+    .sheet { background: #fff; }
+    /* Everything is sized in millimetres and the content is laid out top-down: a label must never
+       clip its own product name because the barcode pushed it out of the sticker. */
+    .lbl { border: 1px dashed #cbd5e1; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-start; gap: .3mm; padding: 1.1mm 1.4mm; }
+    .lbl-shop { font-size: 2.1mm; font-weight: 700; letter-spacing: .02em; color: #334155; line-height: 1.05; }
+    .lbl-name { font-size: 2.7mm; font-weight: 800; line-height: 1.08; color: #0f172a; overflow: hidden; }
+    .lbl-sub { font-size: 2mm; color: #475569; line-height: 1.05; overflow: hidden; }
+    .lbl-price { font-size: 4mm; font-weight: 900; line-height: 1.05; color: #0f172a; }
+    .lbl-meta { font-size: 1.9mm; color: #64748b; line-height: 1.05; }
+    .lbl-code { margin-top: auto; }                   /* the barcode sits on the bottom edge */
+    .clip1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+    .clip2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    /* a small sticker gets one line of name and a shorter code */
+    .lbl.is-compact .lbl-name { font-size: 2.4mm; -webkit-line-clamp: 1; }
+    .lbl.is-compact .lbl-price { font-size: 3.4mm; }
+    .lbl.is-compact .lbl-shop { font-size: 1.9mm; }
+    .lbl.is-compact .lbl-sub { font-size: 1.8mm; }
+    /* a thermal roll: one sticker per row on a strip of backing paper */
+    .roll-strip { background: #f1f5f9; border-radius: 2mm; max-height: 150mm; overflow-y: auto; }
+    .roll-strip .lbl { background: #fff; border-style: solid; border-color: #cbd5e1; border-radius: 1.2mm; flex: none; }
+    @media print {
+      /* the @page size is written by the page itself (pageCss): A4 for sheets, the label size for a roll */
+      .no-print { display: none !important; }
+      body { background: #fff !important; }
+      .sheet { box-shadow: none !important; border: 0 !important; padding: 0 !important; margin: 0 !important; }
+      .lbl { border: 0; break-inside: avoid; page-break-inside: avoid; }
+      .lbl.is-blank { visibility: hidden; }
+      /* roll printers feed one label per page: every sticker after the first starts a new page */
+      .sheet.is-roll .lbl + .lbl { break-before: page; page-break-before: always; }
+    }
+  </style>
+  <script defer src="assets/js/data.js"></script>
+  <script defer src="assets/js/app.js"></script>
+  <script defer src="assets/js/barcode.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+</head>
+<body class="h-full bg-slate-100" data-page="labels" data-title="Labels &amp; Barcodes" data-perm="products.view">
+  <main x-data="labelsPage()" @keydown.escape.window="browse.open = false">
+    <!-- the print page size follows the chosen layout: A4 for sheets, the sticker itself for a roll -->
+    <style x-text="pageCss"></style>
+    <!-- Page header -->
+    <div class="page-header no-print">
+      <div class="min-w-0">
+        <h2 class="page-title">Labels &amp; barcodes</h2>
+        <p class="page-subtitle">Shelf labels and barcode stickers for <b x-text="branchName"></b> · <span x-text="totalLabels"></span> label<span x-text="totalLabels === 1 ? '' : 's'"></span> <span x-show="!isRoll">on <span x-text="pages"></span> sheet<span x-text="pages === 1 ? '' : 's'"></span></span><span x-show="isRoll" x-cloak>on a thermal roll</span></p>
+      </div>
+      <div class="page-actions">
+        <a href="products.html" class="btn btn-secondary"><span x-html="ABM.icon('cube')"></span>Products</a>
+        <button type="button" class="btn btn-secondary" @click="clearAll()" :disabled="!items.length"><span x-html="ABM.icon('trash')"></span>Clear</button>
+        <button type="button" class="btn btn-primary" @click="print()" :disabled="!items.length"><span x-html="ABM.icon('printer')"></span><span x-text="'Print ' + totalLabels + ' label' + (totalLabels === 1 ? '' : 's')"></span></button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 no-print">
+      <!-- LEFT: what to print -->
+      <div class="xl:col-span-2 space-y-4 min-w-0">
+        <div class="card">
+          <div class="card-header">
+            <div><div class="card-title">What to label</div><div class="card-subtitle">Scan or search a product, or pull in a whole delivery</div></div>
+            <button type="button" class="btn btn-primary btn-sm" @click="openBrowse()"><span x-html="ABM.icon('cube')"></span>Browse</button>
+          </div>
+          <div class="card-body space-y-3">
+            <div class="relative" @click.outside="search.open = false">
+              <div class="input-icon">
+                <span x-html="ABM.icon('scan')"></span>
+                <input x-ref="find" type="text" class="input" placeholder="Scan a barcode or search name, model, SKU…" x-model="search.q" @focus="search.open = true" @input="onSearchInput()" @keydown.enter.prevent="pickFirst()" autocomplete="off" aria-label="Find a product">
+              </div>
+              <div x-show="search.open && search.q.trim()" x-cloak class="dropdown left-0 right-0 mt-1 max-h-80">
+                <template x-for="p in searchResults" :key="p.id">
+                  <button type="button" class="dropdown-item" @click="addProduct(p.id)">
+                    <span class="w-8 h-8 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-500" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                    <span class="min-w-0 flex-1">
+                      <span class="block truncate font-medium text-slate-800" x-text="p.label"></span>
+                      <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · stock <span x-text="p.qty"></span><span x-show="p.barcode"> · <span class="mono" x-text="p.barcode"></span></span></span>
+                    </span>
+                    <span class="text-xs font-semibold tabular text-slate-600 flex-none" x-text="$money(p.retail_price, {decimals:0})"></span>
+                  </button>
+                </template>
+                <div x-show="!searchResults.length" class="px-2.5 py-3 text-sm text-slate-500">Nothing matches.</div>
+              </div>
+              <p class="help">Press <span class="kbd">Enter</span> for the first match. A scanned barcode is added straight away.</p>
+            </div>
+
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" class="btn btn-secondary btn-sm" @click="addLowStock()"><span x-html="ABM.icon('warning','w-4 h-4')"></span>Everything low on stock</button>
+              <button type="button" class="btn btn-secondary btn-sm" @click="addCategoryPrompt()"><span x-html="ABM.icon('tag','w-4 h-4')"></span>A whole category</button>
+              <a href="purchases.html" class="btn btn-ghost btn-sm"><span x-html="ABM.icon('truck','w-4 h-4')"></span>From a delivery…</a>
+            </div>
+
+            <template x-if="!items.length">
+              <div class="empty border border-dashed border-slate-300 rounded-xl">
+                <span x-html="ABM.icon('barcode')"></span>
+                <div class="empty-title">No labels yet</div>
+                <div class="text-sm mt-1">Add products above. Serialized units can be labelled one by one with their own IMEI or serial.</div>
+              </div>
+            </template>
+
+            <div class="table-wrap" x-show="items.length">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th class="hidden sm:table-cell">Code</th>
+                    <th class="num hidden md:table-cell">In stock</th>
+                    <th class="num">Labels</th>
+                    <th class="actions"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template x-for="(it, idx) in items" :key="it.key">
+                    <tr>
+                      <td>
+                        <div class="min-w-0">
+                          <div class="font-semibold text-slate-800 truncate max-w-[12rem] sm:max-w-[20rem]" x-text="it.label"></div>
+                          <div class="text-xs text-slate-500 truncate"><span class="mono" x-text="it.sku"></span><span x-show="it.unitSerial"> · <span class="mono" x-text="it.unitSerial"></span></span></div>
+                          <div class="text-xs text-amber-700" x-show="unitShort(it)" x-cloak x-text="unitShort(it)"></div>
+                        </div>
+                      </td>
+                      <td class="hidden sm:table-cell">
+                        <span class="mono text-xs" :class="it.codeValue ? 'text-slate-700' : 'text-rose-600'" x-text="it.codeValue || 'no code'"></span>
+                        <div class="text-[11px] text-slate-400" x-text="it.symbology"></div>
+                      </td>
+                      <td class="num hidden md:table-cell text-slate-600" x-text="it.stock"></td>
+                      <td class="num">
+                        <div class="inline-flex items-center gap-1">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" @click="bump(it, -1)" aria-label="One fewer" x-html="ABM.icon('minus','w-4 h-4')"></button>
+                          <input type="number" min="0" step="1" class="input input-sm !w-16 text-center" x-model.number="it.qty" @input="normalise(it)" :aria-label="'Labels for ' + it.label">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" @click="bump(it, 1)" aria-label="One more" x-html="ABM.icon('plus','w-4 h-4')"></button>
+                        </div>
+                      </td>
+                      <td class="actions">
+                        <div class="inline-flex items-center gap-0.5">
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon" title="One label per unit in stock" @click="matchStock(it)" x-show="it.stock > 0" x-html="ABM.icon('archive','w-4 h-4')"></button>
+                          <button type="button" class="btn btn-ghost btn-sm btn-icon text-rose-600" title="Remove" @click="remove(idx)" x-html="ABM.icon('trash','w-4 h-4')"></button>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot x-show="items.length">
+                  <tr>
+                    <td colspan="3"><span x-text="items.length"></span> line<span x-text="items.length === 1 ? '' : 's'"></span><span class="text-xs text-slate-500" x-show="totalLabels !== totalRequested" x-cloak x-text="' · ' + totalLabels + ' of ' + totalRequested + ' print (one per unit)'"></span></td>
+                    <td class="num" x-text="totalLabels"></td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: design -->
+      <div class="space-y-4 min-w-0">
+        <div class="card xl:sticky xl:top-20">
+          <div class="card-header"><div><div class="card-title">Label design</div><div class="card-subtitle" x-text="size.label + ' · ' + (isRoll ? '1 per row' : cols + ' across')"></div></div></div>
+          <div class="card-body space-y-3">
+            <div>
+              <label class="label" for="lb-size">Layout &amp; size</label>
+              <select id="lb-size" class="select" x-model="design.size" x-effect="syncSelect($el, design.size)">
+                <optgroup label="A4 sheets">
+                  <template x-for="s in sizes.filter((x) => x.kind === 'sheet')" :key="s.key"><option :value="s.key" x-text="s.label"></option></template>
+                </optgroup>
+                <optgroup label="Thermal / roll printer (1 per row)">
+                  <template x-for="s in sizes.filter((x) => x.kind === 'roll')" :key="s.key"><option :value="s.key" x-text="s.label"></option></template>
+                </optgroup>
+              </select>
+              <p class="help" x-show="isRoll" x-cloak>Each sticker prints as its own <span x-text="size.w + ' × ' + size.h"></span> mm page — set the same label size and gap sensing in the printer driver.</p>
+            </div>
+            <div>
+              <label class="label" for="lb-code">Barcode shows</label>
+              <select id="lb-code" class="select" x-model="design.codeSource" @change="recode()">
+                <option value="barcode">Product barcode (EAN-13)</option>
+                <option value="sku">SKU (Code 39)</option>
+                <option value="unit">IMEI / serial number (Code 128)</option>
+                <option value="none">No barcode</option>
+              </select>
+              <p class="help" x-show="design.codeSource === 'unit'">One label per registered unit in stock here, each with its own number — press the stock button on a serialized line.</p>
+            </div>
+            <div>
+              <label class="label" for="lb-price">Price</label>
+              <select id="lb-price" class="select" x-model="design.priceMode">
+                <option value="retail">Retail price</option>
+                <option value="wholesale">Wholesale price</option>
+                <option value="none">No price</option>
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="design.showShop"> Shop name</label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="design.showName"> Product name</label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="design.showSku"> SKU</label>
+              <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="design.showDate"> Date</label>
+            </div>
+            <div x-show="!isRoll">
+              <label class="label" for="lb-skip">Skip labels on the first sheet</label>
+              <input id="lb-skip" type="number" min="0" :max="perSheet - 1" step="1" class="input" x-model.number="design.skip">
+              <p class="help">Use up a part-used sheet — leaves the first <span x-text="design.skip || 0"></span> sticker<span x-text="design.skip === 1 ? '' : 's'"></span> blank.</p>
+            </div>
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+              <div class="flex justify-between gap-3"><span class="text-slate-500">Labels</span><b class="tabular" x-text="totalLabels"></b></div>
+              <template x-if="!isRoll">
+                <div class="space-y-1">
+                  <div class="flex justify-between gap-3"><span class="text-slate-500">Per A4 sheet</span><b class="tabular" x-text="perSheet"></b></div>
+                  <div class="flex justify-between gap-3"><span class="text-slate-500">Sheets</span><b class="tabular" x-text="pages"></b></div>
+                </div>
+              </template>
+              <template x-if="isRoll">
+                <div class="space-y-1">
+                  <div class="flex justify-between gap-3"><span class="text-slate-500">Page size</span><b class="tabular" x-text="size.w + ' × ' + size.h + ' mm'"></b></div>
+                  <div class="flex justify-between gap-3"><span class="text-slate-500">Pages</span><b class="tabular" x-text="pages"></b></div>
+                </div>
+              </template>
+            </div>
+            <button type="button" class="btn btn-primary btn-block" @click="print()" :disabled="!items.length"><span x-html="ABM.icon('printer')"></span>Print</button>
+            <p class="text-[11px] text-slate-500 text-center">Print at 100% scale (no "fit to page") so the millimetre sizes come out right. Test-scan one sticker before a big run.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sheet preview / print area -->
+    <div class="card mt-4 no-print" x-show="items.length">
+      <div class="card-header"><div><div class="card-title">Preview</div><div class="card-subtitle" x-text="isRoll ? 'Exactly what prints — one sticker per row on the roll, each its own page' : 'Exactly what prints — dashed lines are the sticker edges and do not print'"></div></div></div>
+      <div class="card-body overflow-x-auto">
+        <div class="mx-auto sheet border border-slate-200" :class="isRoll ? 'roll-strip' : 'p-[8mm]'" :style="previewStyle">
+          <div :class="isRoll ? 'flex flex-col items-center' : 'flex flex-wrap'" :style="'gap:' + (isRoll ? 3 : size.gap) + 'mm'">
+            <template x-for="n in blankCount" :key="'blank' + n">
+              <div class="lbl is-blank" :class="compact && 'is-compact'" :style="labelStyle"></div>
+            </template>
+            <template x-for="lab in labels" :key="lab.key">
+              <div class="lbl" :class="compact && 'is-compact'" :style="labelStyle">
+                <div class="lbl-shop clip1" x-show="design.showShop" x-text="shopName"></div>
+                <div class="lbl-name clip2" x-show="design.showName" x-text="lab.name"></div>
+                <div class="lbl-sub clip1" x-show="design.showSku" x-text="lab.sku"></div>
+                <div class="lbl-price" x-show="design.priceMode !== 'none'" x-text="$money(lab.price, {decimals:0})"></div>
+                <div class="lbl-code" x-show="design.codeSource !== 'none' && lab.code" x-html="barcodeSvg(lab.code, lab.sym)"></div>
+                <div class="lbl-meta clip1" x-show="design.showDate" x-text="today"></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- the real print area: no card chrome, just sheets (or one sticker per page on a roll) -->
+    <div class="hidden print:block sheet" :class="isRoll && 'is-roll'">
+      <div :class="isRoll ? 'block' : 'flex flex-wrap'" :style="isRoll ? '' : 'gap:' + size.gap + 'mm'">
+        <template x-for="n in blankCount" :key="'pblank' + n">
+          <div class="lbl is-blank" :class="compact && 'is-compact'" :style="labelStyle"></div>
+        </template>
+        <template x-for="lab in labels" :key="'p' + lab.key">
+          <div class="lbl" :class="compact && 'is-compact'" :style="labelStyle">
+            <div class="lbl-shop clip1" x-show="design.showShop" x-text="shopName"></div>
+            <div class="lbl-name clip2" x-show="design.showName" x-text="lab.name"></div>
+            <div class="lbl-sub clip1" x-show="design.showSku" x-text="lab.sku"></div>
+            <div class="lbl-price" x-show="design.priceMode !== 'none'" x-text="$money(lab.price, {decimals:0})"></div>
+            <div class="lbl-code" x-show="design.codeSource !== 'none' && lab.code" x-html="barcodeSvg(lab.code, lab.sym)"></div>
+            <div class="lbl-meta clip1" x-show="design.showDate" x-text="today"></div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Browse modal -->
+    <div x-show="browse.open" x-cloak class="modal-backdrop no-print" @click.self="browse.open = false">
+      <div class="modal-panel modal-lg" role="dialog" aria-modal="true" aria-labelledby="browseTitle">
+        <div class="modal-header">
+          <div class="min-w-0"><div class="modal-title" id="browseTitle">Browse products</div><div class="text-xs text-slate-500">Stock shown for <span x-text="branchCode"></span></div></div>
+          <button type="button" class="btn btn-ghost btn-icon" @click="browse.open = false" aria-label="Close" x-html="ABM.icon('x')"></button>
+        </div>
+        <div class="modal-body space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <div class="input-icon sm:col-span-2"><span x-html="ABM.icon('search')"></span><input x-ref="browseSearch" type="search" class="input" placeholder="Search name, model, SKU…" x-model="browse.q" aria-label="Search catalog"></div>
+            <select class="select" x-model="browse.category" aria-label="Category">
+              <option value="">All categories</option>
+              <template x-for="c in categories" :key="c.id"><option :value="String(c.id)" x-text="c.name"></option></template>
+            </select>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <label class="flex items-center gap-2 text-sm cursor-pointer select-none"><input type="checkbox" class="checkbox" x-model="browse.inStockOnly"> Only what is in stock here</label>
+            <button type="button" class="btn btn-secondary btn-sm" @click="addAllBrowsed()" :disabled="!browseResults.length">Add all <span x-text="browseResults.length"></span></button>
+          </div>
+          <div class="border border-slate-200 rounded-xl overflow-y-auto max-h-[50vh] divide-y divide-slate-100">
+            <template x-for="p in browseResults" :key="p.id">
+              <button type="button" class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-slate-50 min-w-0" @click="addProduct(p.id, true)">
+                <span class="w-9 h-9 rounded-lg flex-none flex items-center justify-center bg-slate-100 text-slate-500" x-html="ABM.icon(p.icon,'w-4 h-4')"></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-medium text-slate-800 text-sm" x-text="p.label"></span>
+                  <span class="block text-xs text-slate-500 truncate"><span class="mono" x-text="p.sku"></span> · <span x-text="p.categoryName"></span></span>
+                </span>
+                <span class="flex flex-col items-end gap-0.5 flex-none">
+                  <span class="text-xs font-semibold tabular text-slate-700" x-text="$money(p.retail_price, {decimals:0})"></span>
+                  <span class="badge" :class="p.qty === 0 ? 'badge-red' : 'badge-slate'" x-text="'stock ' + p.qty"></span>
+                </span>
+                <span class="badge badge-green flex-none" x-show="inQueue(p.id)" x-text="'×' + inQueue(p.id)"></span>
+              </button>
+            </template>
+            <div x-show="!browseResults.length" class="empty py-8 text-sm">No products match.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span class="text-xs text-slate-500 mr-auto self-center"><span x-text="totalLabels"></span> label(s) queued</span>
+          <button type="button" class="btn btn-primary" @click="browse.open = false">Done</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function labelsPage() {
+      const { db, utils, ui, session } = ABM;
+      // A4 printable width with 8mm margins = 194mm
+      const SHEET_W = 194, SHEET_H = 281;
+      // kind 'sheet' = many stickers on an A4 page; kind 'roll' = a thermal / roll printer, one sticker per row,
+      // printed as its own page of exactly the sticker's size
+      const SIZES = [
+        { key: '50x25', label: '50 × 25 mm (shelf sticker)', w: 50, h: 25, gap: 2, kind: 'sheet' },
+        { key: '38x25', label: '38 × 25 mm (small sticker)', w: 38, h: 25, gap: 2, kind: 'sheet' },
+        { key: '70x37', label: '70 × 37 mm (3 × 7 sheet)', w: 70, h: 37, gap: 2, kind: 'sheet' },
+        { key: '100x50', label: '100 × 50 mm (large shelf edge)', w: 100, h: 50, gap: 3, kind: 'sheet' },
+        { key: 'roll-38x25', label: '38 × 25 mm roll (single label)', w: 38, h: 25, gap: 0, kind: 'roll' },
+        { key: 'roll-50x25', label: '50 × 25 mm roll (single label)', w: 50, h: 25, gap: 0, kind: 'roll' },
+        { key: 'roll-50x30', label: '50 × 30 mm roll (single label)', w: 50, h: 30, gap: 0, kind: 'roll' },
+      ];
+      let key = 0;
+      const iconFor = (p) => (['laptop', 'desktop'].includes(p.device_type) ? 'laptop' : db.isSerialized(p) ? 'phone' : db.productType(p) === 'part' ? 'cpu' : 'cube');
+      return {
+        branchId: session.branchId(),
+        branchName: db.branchName(session.branchId()),
+        branchCode: db.branchCode(session.branchId()),
+        shopName: db.setting('company_name', 'Abbott Mobiles'),
+        today: utils.date(utils.today()),
+        categories: utils.sortBy(db.all('categories').filter((c) => c.is_active && c.product_type !== 'service'), 'name'),
+        sizes: SIZES,
+        products: [],
+        items: [],
+        search: { q: '', open: false },
+        browse: { open: false, q: '', category: '', inStockOnly: true },
+        design: { size: '50x25', codeSource: 'barcode', priceMode: 'retail', showShop: true, showName: true, showSku: true, showDate: false, skip: 0 },
+
+        get size() { return SIZES.find((s) => s.key === this.design.size) || SIZES[0]; },
+        get isRoll() { return this.size.kind === 'roll'; },
+        get cols() { return this.isRoll ? 1 : Math.max(1, Math.floor((SHEET_W + this.size.gap) / (this.size.w + this.size.gap))); },
+        get rows() { return this.isRoll ? 1 : Math.max(1, Math.floor((SHEET_H + this.size.gap) / (this.size.h + this.size.gap))); },
+        get perSheet() { return this.cols * this.rows; },
+        get labelStyle() { return `width:${this.size.w}mm;height:${this.size.h}mm`; },
+        get compact() { return this.size.h < 30; },
+        /** Print page size: an A4 sheet with 8 mm margins, or exactly one sticker (no margin) on a roll. */
+        get pageCss() { return this.isRoll ? `@media print { @page { size: ${this.size.w}mm ${this.size.h}mm; margin: 0; } }` : '@media print { @page { size: A4; margin: 8mm; } }'; },
+        get previewStyle() { return this.isRoll ? `width:${this.size.w + 10}mm;padding:5mm` : 'width:210mm'; },
+        /** Blank stickers at the start of a part-used A4 sheet (a roll has no partly used sheet). */
+        get blankCount() { return this.isRoll ? 0 : Math.max(0, Math.round(Number(this.design.skip) || 0)); },
+        get unitMode() { return this.design.codeSource === 'unit'; },
+        /** Stickers a line really prints: on IMEI / serial labels a serialized line prints one per registered unit, never a repeat. */
+        labelCount(it) {
+          const qty = Math.max(0, Math.round(Number(it.qty) || 0));
+          return this.unitMode && it.serialized ? Math.min(qty, it.units.length) : qty;
+        },
+        unitShort(it) {
+          if (!this.unitMode || !it.serialized) return '';
+          const qty = Math.max(0, Math.round(Number(it.qty) || 0));
+          if (!it.units.length) return 'No registered unit in stock here — nothing to print.';
+          if (qty > it.units.length) return 'Only ' + it.units.length + ' unit' + (it.units.length === 1 ? '' : 's') + ' in stock — ' + it.units.length + ' label' + (it.units.length === 1 ? '' : 's') + ', one per unit.';
+          return '';
+        },
+        get totalRequested() { return this.items.reduce((a, i) => a + Math.max(0, Math.round(Number(i.qty) || 0)), 0); },
+        get totalLabels() { return this.items.reduce((a, i) => a + this.labelCount(i), 0); },
+        get pages() { return Math.max(1, Math.ceil((this.totalLabels + this.blankCount) / this.perSheet)); },
+        /** Which code a line prints, and in which symbology (IMEIs / serials in Code 128, which fits a small sticker). */
+        codeFor(it, n) {
+          const src = this.design.codeSource;
+          if (src === 'none') return { code: '', sym: '' };
+          if (src === 'unit' && it.serialized) return { code: it.units[n] || '', sym: 'code128' };
+          if (src === 'sku') return { code: it.sku, sym: '' };
+          return { code: it.barcode || it.sku, sym: '' };
+        },
+        /** One entry per printed sticker — serialized lines get one per unit so each carries its own number. */
+        get labels() {
+          const out = [];
+          this.items.forEach((it) => {
+            const count = this.labelCount(it);
+            for (let n = 0; n < count; n++) {
+              const c = this.codeFor(it, n);
+              out.push({ key: it.key + '-' + n, name: it.label, sku: it.sku, price: this.design.priceMode === 'wholesale' ? it.wholesale : it.retail, code: c.code, sym: c.sym });
+            }
+          });
+          return out;
+        },
+        /** Re-apply a select's model value after its x-for options have rendered. */
+        syncSelect(el, value) { this.$nextTick(() => { const v = value == null ? '' : String(value); if (el && el.value !== v) el.value = v; }); },
+        get searchResults() {
+          const q = this.search.q.trim().toLowerCase();
+          if (!q) return [];
+          return this.products.filter((p) => [p.label, p.sku, p.barcode, p.model, p.brandName].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 12);
+        },
+        get browseResults() {
+          const q = this.browse.q.trim().toLowerCase();
+          return this.products.filter((p) => (!this.browse.category || String(p.category_id) === String(this.browse.category))
+            && (!this.browse.inStockOnly || p.qty > 0)
+            && (!q || [p.label, p.sku, p.barcode, p.model, p.brandName].some((v) => String(v || '').toLowerCase().includes(q)))).slice(0, 80);
+        },
+
+        init() {
+          this.loadProducts();
+          const pid = utils.qs('product');
+          if (pid) this.addProduct(pid, true);
+          const ids = utils.qs('ids');                       // a selection handed over from products.html
+          if (ids) String(ids).split(',').filter(Boolean).forEach((id) => this.addProduct(id.trim(), true));
+          const cat = utils.qs('category');
+          if (cat) this.addCategory(cat);
+          const pur = utils.qs('purchase');
+          if (pur) this.addPurchase(pur);
+          if (utils.qs('low') === '1') this.addLowStock();
+          this.$nextTick(() => { if (this.$refs.find && !this.items.length) this.$refs.find.focus(); });
+        },
+        loadProducts() {
+          this.products = utils.sortBy(db.all('products').filter((p) => p.is_active && db.isStockTracked(p)).map((p) => ({
+            id: p.id, label: db.productLabel(p.id), sku: p.sku, barcode: p.barcode || '', model: p.model || '',
+            brandName: db.brandName(p.brand_id), categoryName: db.categoryName(p.category_id), category_id: p.category_id,
+            retail_price: Number(p.retail_price) || 0, wholesale_price: Number(p.wholesale_price) || 0,
+            min_stock: Number(p.min_stock) || 0, serialized: db.isSerialized(p), icon: iconFor(p),
+            qty: ABM.stock.qty(session.branchId(), p.id),
+          })), 'label');
+        },
+        inQueue(productId) { return this.items.filter((i) => String(i.product_id) === String(productId)).reduce((a, i) => a + (Number(i.qty) || 0), 0); },
+
+        /* ------------------------------------------------------------ queue */
+        makeItem(p, qty) {
+          const units = p.serialized
+            ? db.all('product_imeis').filter((u) => String(u.product_id) === String(p.id) && String(u.branch_id) === String(this.branchId) && ABM.stock.SELLABLE.includes(u.status)).map((u) => u.imei)
+            : [];
+          const row = {
+            key: ++key, product_id: p.id, label: p.label, sku: p.sku, barcode: p.barcode,
+            retail: p.retail_price, wholesale: p.wholesale_price, stock: p.qty, serialized: p.serialized,
+            units, unitSerial: units[0] || '', qty: Math.max(1, qty || 1),
+            codeValue: '', symbology: '',
+          };
+          this.describeCode(row);
+          return row;
+        },
+        /** The code shown in the queue table for a line (its first sticker) and its symbology. */
+        describeCode(it) {
+          const c = this.design.codeSource === 'none' ? { code: '', sym: '' } : this.codeFor(it, 0);
+          it.codeValue = c.code;
+          const enc = c.code ? ABM.barcode.encode(c.code, c.sym ? { symbology: c.sym } : {}) : { symbology: '—' };
+          it.symbology = enc.ok ? enc.symbology : (c.code ? 'not encodable' : '—');
+        },
+        addProduct(productId, quiet) {
+          const p = this.products.find((x) => String(x.id) === String(productId));
+          if (!p) { ui.error('Product not found or not stock-tracked.'); return; }
+          const existing = this.items.find((i) => String(i.product_id) === String(p.id));
+          if (existing) { existing.qty = (Number(existing.qty) || 0) + 1; }
+          else this.items.push(this.makeItem(p, 1));
+          this.search.q = ''; this.search.open = false;
+          if (!quiet) this.$nextTick(() => { if (this.$refs.find) this.$refs.find.focus(); });
+        },
+        onSearchInput() {
+          this.search.open = true;
+          const q = this.search.q.trim();
+          if (q.length >= 8) { const exact = this.products.find((p) => ABM.utils.sameBarcode(p.barcode, q)); if (exact) this.addProduct(exact.id); }
+        },
+        pickFirst() { const p = this.searchResults[0]; if (p) this.addProduct(p.id); else if (this.search.q.trim()) ui.warn('Nothing matches "' + this.search.q.trim() + '".'); },
+        addAllBrowsed() {
+          const rows = this.browseResults;
+          rows.forEach((p) => { if (!this.items.some((i) => String(i.product_id) === String(p.id))) this.items.push(this.makeItem(p, 1)); });
+          ui.success(rows.length + ' product(s) queued.');
+        },
+        addCategory(categoryId) {
+          const rows = this.products.filter((p) => String(p.category_id) === String(categoryId));
+          rows.forEach((p) => { if (!this.items.some((i) => String(i.product_id) === String(p.id))) this.items.push(this.makeItem(p, 1)); });
+          if (rows.length) ui.success(rows.length + ' product(s) from ' + db.categoryName(categoryId) + ' queued.');
+          else ui.warn('Nothing stock-tracked in that category.');
+        },
+        addCategoryPrompt() { this.browse.open = true; this.$nextTick(() => { if (this.$refs.browseSearch) this.$refs.browseSearch.focus(); }); },
+        addLowStock() {
+          const rows = this.products.filter((p) => p.min_stock > 0 && p.qty <= p.min_stock);
+          if (!rows.length) { ui.toast('Nothing is at or below its minimum level here.', 'info'); return; }
+          rows.forEach((p) => { if (!this.items.some((i) => String(i.product_id) === String(p.id))) this.items.push(this.makeItem(p, 1)); });
+          ui.success(rows.length + ' low-stock product(s) queued.');
+        },
+        /** Everything that arrived on a delivery, one label per unit received. */
+        addPurchase(purchaseId) {
+          const purchase = db.find('purchases', purchaseId);
+          if (!purchase) { ui.error('That delivery was not found.'); return; }
+          let added = 0;
+          db.where('purchase_items', { purchase_id: purchase.id }).forEach((it) => {
+            const p = this.products.find((x) => String(x.id) === String(it.product_id));
+            if (!p) return;
+            const qty = Math.max(1, Number(it.quantity) || 1);
+            const existing = this.items.find((i) => String(i.product_id) === String(p.id));
+            if (existing) {
+              existing.qty += qty;
+              if ((it.imeis || []).length) { existing.units = [...new Set(existing.units.concat(it.imeis))]; existing.unitSerial = existing.units[0]; this.describeCode(existing); }
+            } else {
+              const row = this.makeItem(p, qty);
+              if ((it.imeis || []).length) { row.units = it.imeis.slice(); row.unitSerial = it.imeis[0]; this.describeCode(row); }
+              this.items.push(row);
+            }
+            added++;
+          });
+          if (added) ui.success('Labels queued for ' + purchase.purchase_no + '.');
+        },
+        /** One label per unit in stock — on IMEI / serial labels, one per registered unit. */
+        matchStock(it) { it.qty = this.unitMode && it.serialized ? it.units.length : Math.max(0, Number(it.stock) || 0); },
+        bump(it, n) { it.qty = Math.max(0, (Number(it.qty) || 0) + n); },
+        normalise(it) { const n = Math.round(Number(it.qty) || 0); it.qty = Math.max(0, Math.min(999, n)); },
+        remove(idx) { this.items.splice(idx, 1); },
+        clearAll() { this.items = []; },
+        /** Re-read the code for every line when the barcode source changes. */
+        recode() { this.items.forEach((it) => this.describeCode(it)); },
+        /** Options for a sticker's barcode: never wider than the sticker's printable width, so the symbol keeps its true height. */
+        barcodeOpts(sym) {
+          const h = this.size.h >= 40 ? 11 : this.size.h >= 30 ? 8 : 6;
+          const o = { height: h, moduleWidth: this.size.w >= 70 ? 0.33 : 0.26, maxWidth: this.size.w - 3.4, showText: true };
+          // Code 128 carries 6 blank modules each side; with the sticker's own 1.4 mm margin that is a 10-module quiet zone
+          if (sym) { o.symbology = sym; if (sym === 'code128') o.quiet = 6; }
+          return o;
+        },
+        barcodeSvg(code, sym) { return ABM.barcode.svg(code, this.barcodeOpts(sym)); },
+        openBrowse() { this.browse.open = true; this.$nextTick(() => { if (this.$refs.browseSearch) this.$refs.browseSearch.focus(); }); },
+        print() {
+          if (!this.items.length) { ui.warn('Add something to label first.'); return; }
+          if (this.totalLabels > 600) { ui.warn('That is ' + this.totalLabels + ' labels — print it in smaller batches.'); return; }
+          ui.print();
+        },
+      };
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,564 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drive: selling chain (POS -> invoice -> return -> ledger)</title>
+  <script src="../assets/js/data.js"></script>
+  <script src="../assets/js/app.js"></script>
+  <script src="../assets/js/pages/pos.js"></script>
+</head>
+<body data-public>
+<pre id="out">runningâ€¦</pre>
+<script>
+(async function () {
+  const L = [];
+  let fails = 0;
+  const log = (m) => { L.push(m); console.log('DRIVE ' + m); };
+  const ok = (cond, m) => { if (!cond) { fails++; console.log('DRIVE FAIL ' + m); L.push('FAIL ' + m); } else { L.push('  ok  ' + m); console.log('DRIVE ok ' + m); } };
+  const eq = (a, b, m) => ok(a === b, m + ' (got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b) + ')');
+  const near = (a, b, m) => ok(Math.abs(Number(a) - Number(b)) < 0.011, m + ' (got ' + a + ', want ' + b + ')');
+
+  try {
+    const { db, utils, session, stock } = ABM;
+    db.reset();
+    // auto-approve confirms, except the "print credit note" prompt which would navigate away
+    ABM.ui.confirm = async (o) => { log('CONFIRM: ' + (o && o.title)); return !/Return recorded/i.test((o && o.title) || ''); };
+    ABM.ui.toast = () => {};
+
+    const cashier = db.all('users').find((u) => u.username === 'cashier');
+    session.logout(); session.login(cashier);
+    const BID = session.branchId();
+    const BCODE = session.branchCode();
+    log('=== session: ' + cashier.name + ' role=' + cashier.role + ' branch=' + BID + ' (' + BCODE + ')');
+
+    const mk = () => { const c = posPage(); c.$watch = () => {}; c.$nextTick = (f) => { if (f) f(); }; c.$refs = {}; c.init(); return c; };
+    const mv = (saleId) => db.all('stock_movements').filter((m) => m.reference_type === 'sale' && String(m.reference_id) === String(saleId));
+    const checkBalance = (sale, tag) => {
+      const pays = db.where('sale_payments', { sale_id: sale.id });
+      const paid = utils.sum(pays, 'amount');
+      near(utils.round2(sale.subtotal - sale.discount_amount + sale.tax_amount), sale.total, tag + ': subtotal - discount + tax = total');
+      near(utils.round2(paid + sale.due_amount), sale.total, tag + ': payments + due = total');
+      near(sale.paid_amount, paid, tag + ': sale.paid_amount = sum(payments)');
+      ok(new RegExp('^INV-' + BCODE + '-\\d{6}$').test(sale.invoice_no), tag + ': invoice_no format ' + sale.invoice_no);
+      const its = db.where('sale_items', { sale_id: sale.id });
+      near(utils.sum(its, 'total'), utils.round2(sale.subtotal - utils.sum(its, 'discount_amount')), tag + ': sum(item totals) = subtotal - line discounts');
+    };
+
+    /* ========================= 1. cash sale, non-serialized accessory ========================= */
+    log('=== TEST 1: cash sale of a non-serialized accessory (qty 2)');
+    let c = mk();
+    const acc = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 3);
+    ok(!!acc, 'found a stocked accessory: ' + (acc && acc.name));
+    const accRow0 = db.first('branch_stock', (s) => s.branch_id == BID && s.product_id == acc.id);
+    const qty0 = accRow0.quantity, avg0 = accRow0.avg_cost;
+    c.pick(acc); c.addLine(acc); // qty 2
+    eq(c.cart.lines.length, 1, 'one cart line');
+    eq(c.cart.lines[0].qty, 2, 'qty 2');
+    c.openCheckout();
+    ok(c.checkout.open, 'checkout opened');
+    eq(c.checkout.payments.length, 1, 'one payment row prefilled');
+    eq(c.checkout.payments[0].method, 'cash', 'prefilled cash');
+    const t1 = c.totals.total;
+    c.setCash(Math.ceil(t1 / 500) * 500); // tender rounded up -> change
+    await c.completeSale();
+    const s1 = db.all('sales').slice(-1)[0];
+    log('  sale ' + s1.invoice_no + ' total=' + s1.total);
+    checkBalance(s1, 'T1');
+    const accRow1 = db.first('branch_stock', (s) => s.branch_id == BID && s.product_id == acc.id);
+    eq(accRow1.quantity, qty0 - 2, 'T1: branch stock dropped by 2');
+    const m1 = mv(s1.id).filter((m) => m.product_id == acc.id);
+    eq(m1.length, 1, 'T1: exactly one stock_movement for the line');
+    eq(m1[0].movement_type, 'sale', 'T1: movement_type = sale');
+    eq(m1[0].quantity, -2, 'T1: movement quantity = -2');
+    near(m1[0].unit_cost, avg0, 'T1: movement unit_cost = avg cost');
+    eq(m1[0].balance_after, qty0 - 2, 'T1: balance_after = new qty');
+    const it1 = db.where('sale_items', { sale_id: s1.id })[0];
+    near(it1.unit_cost, avg0, 'T1: sale_items.unit_cost = avg cost');
+    eq(s1.due_amount, 0, 'T1: nothing due');
+    const pay1 = db.where('sale_payments', { sale_id: s1.id });
+    eq(pay1.length, 1, 'T1: one payment row');
+    near(pay1[0].amount, s1.total, 'T1: cash payment net of change = total');
+    ok(db.all('audit_logs').some((a) => a.action === 'sale.create' && a.entity_id === s1.id), 'T1: audit sale.create written');
+
+    /* ========================= 2. serialized device by IMEI + laptop by serial ========================= */
+    log('=== TEST 2: serialized phone (IMEI scan) + laptop (serial scan)');
+    c = mk();
+    const phoneUnit = db.all('product_imeis').find((u) => u.branch_id == BID && u.status === 'available' && db.serialType(db.product(u.product_id)) === 'imei');
+    const lapUnit = db.all('product_imeis').find((u) => u.branch_id == BID && u.status === 'available' && db.serialType(db.product(u.product_id)) === 'serial');
+    ok(!!phoneUnit, 'found an available IMEI unit: ' + (phoneUnit && phoneUnit.imei));
+    ok(!!lapUnit, 'found an available serial unit: ' + (lapUnit && lapUnit.imei));
+    const pQty0 = stock.qty(BID, phoneUnit.product_id), lQty0 = stock.qty(BID, lapUnit.product_id);
+    c.q = phoneUnit.imei; c.scanEnter();
+    c.q = lapUnit.imei.toLowerCase(); c.scanEnter();   // case-insensitive serial scan
+    eq(c.cart.lines.length, 2, 'T2: two lines after two scans');
+    eq(c.cart.lines[0].imei_id, phoneUnit.id, 'T2: line 1 is the scanned IMEI unit');
+    eq(c.cart.lines[1].imei_id, lapUnit.id, 'T2: line 2 is the scanned serial unit');
+    eq(c.cart.lines[1].serial_label, 'Serial No.', 'T2: laptop line uses the Serial No. label');
+    // duplicate scan must be blocked
+    c.q = phoneUnit.imei; c.scanEnter();
+    eq(c.cart.lines.length, 2, 'T2: scanning the same unit twice is blocked');
+    c.openCheckout();
+    c.setCash(c.totals.total);
+    await c.completeSale();
+    const s2 = db.all('sales').slice(-1)[0];
+    checkBalance(s2, 'T2');
+    const u1 = db.find('product_imeis', phoneUnit.id), u2 = db.find('product_imeis', lapUnit.id);
+    eq(u1.status, 'sold', 'T2: phone unit status sold');
+    eq(u2.status, 'sold', 'T2: laptop unit status sold');
+    const its2 = db.where('sale_items', { sale_id: s2.id });
+    const i2p = its2.find((i) => i.imei_id === phoneUnit.id), i2l = its2.find((i) => i.imei_id === lapUnit.id);
+    eq(u1.sale_item_id, i2p.id, 'T2: phone unit sale_item_id set');
+    eq(u2.sale_item_id, i2l.id, 'T2: laptop unit sale_item_id set');
+    eq(i2p.imei, phoneUnit.imei, 'T2: sale_items.imei populated (phone)');
+    eq(i2l.imei, lapUnit.imei, 'T2: sale_items.imei populated (laptop serial)');
+    near(i2p.unit_cost, phoneUnit.cost_price, 'T2: unit_cost = that unit cost_price (phone)');
+    near(i2l.unit_cost, lapUnit.cost_price, 'T2: unit_cost = that unit cost_price (laptop)');
+    eq(stock.qty(BID, phoneUnit.product_id), pQty0 - 1, 'T2: phone product stock -1');
+    eq(stock.qty(BID, lapUnit.product_id), lQty0 - 1, 'T2: laptop product stock -1');
+    const m2 = mv(s2.id);
+    eq(m2.length, 2, 'T2: two stock movements');
+    ok(m2.every((m) => m.movement_type === 'sale' && m.quantity === -1 && m.imei_id), 'T2: both movements sale/-1 with imei_id');
+
+    /* ========================= 3. service line ========================= */
+    log('=== TEST 3: service line (no stock movement, cost 0)');
+    c = mk();
+    const svc = c.products.find((p) => p.type === 'service');
+    ok(!!svc, 'found a service product: ' + (svc && svc.name));
+    eq(svc.tracked, false, 'T3: service is not stock tracked');
+    c.pick(svc);
+    const acc3 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 1);
+    c.pick(acc3);
+    c.openCheckout(); c.setCash(c.totals.total);
+    await c.completeSale();
+    const s3 = db.all('sales').slice(-1)[0];
+    checkBalance(s3, 'T3');
+    const its3 = db.where('sale_items', { sale_id: s3.id });
+    const svcItem = its3.find((i) => i.product_id == svc.id);
+    ok(!!svcItem, 'T3: service appears on the invoice');
+    eq(svcItem.unit_cost, 0, 'T3: service unit_cost = 0');
+    eq(mv(s3.id).filter((m) => m.product_id == svc.id).length, 0, 'T3: NO stock movement for the service');
+    eq(mv(s3.id).filter((m) => m.product_id == acc3.id).length, 1, 'T3: the accessory on the same sale still moved stock');
+
+    /* ========================= 4a. split payment ========================= */
+    log('=== TEST 4a: split payment cash + card');
+    c = mk();
+    const acc4 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+    c.pick(acc4);
+    c.openCheckout();
+    const t4 = c.totals.total;
+    c.checkout.payments = [
+      { key: 'a', method: 'cash', amount: utils.round2(t4 / 2), reference: '' },
+      { key: 'b', method: 'card', amount: utils.round2(t4 - utils.round2(t4 / 2)), reference: 'TXN-99881' },
+    ];
+    eq(c.paymentErrors.length, 0, 'T4a: split payment validates (' + JSON.stringify(c.paymentErrors) + ')');
+    await c.completeSale();
+    const s4 = db.all('sales').slice(-1)[0];
+    checkBalance(s4, 'T4a');
+    const p4 = db.where('sale_payments', { sale_id: s4.id });
+    eq(p4.length, 2, 'T4a: two payment rows');
+    eq(s4.due_amount, 0, 'T4a: nothing due');
+    ok(p4.some((p) => p.method === 'card' && p.reference === 'TXN-99881'), 'T4a: card reference stored');
+
+    /* ========================= 4b. credit (khata) sale ========================= */
+    log('=== TEST 4b: credit (khata) sale');
+    c = mk();
+    const cust = db.all('customers').find((x) => !x.is_walkin && x.is_active && x.credit_limit >= 100000);
+    ok(!!cust, 'found a credit customer: ' + (cust && cust.name) + ' limit ' + (cust && cust.credit_limit));
+    const bal0 = Number(cust.balance) || 0;
+    c.setCustomer(cust.id);
+    eq(String(c.cart.customer_id), String(cust.id), 'T4b: customer selected');
+    const dev = c.products.find((p) => p.serialized && p.qty > 0);
+    c.quickAddById(dev.id);
+    eq(c.cart.lines.length, 1, 'T4b: device line added');
+    c.openCheckout();
+    const t4b = c.totals.total;
+    const partial = utils.round2(Math.floor(t4b / 2));
+    c.checkout.payments = [{ key: 'a', method: 'cash', amount: partial, reference: '' }];
+    c.checkout.khata = true;
+    near(c.pay.remaining, utils.round2(t4b - partial), 'T4b: remaining computed');
+    eq(c.paymentErrors.length, 0, 'T4b: khata sale validates (' + JSON.stringify(c.paymentErrors) + ')');
+    await c.completeSale();
+    const s5 = db.all('sales').slice(-1)[0];
+    checkBalance(s5, 'T4b');
+    near(s5.due_amount, utils.round2(t4b - partial), 'T4b: due_amount correct');
+    near(s5.paid_amount, partial, 'T4b: paid_amount correct');
+    const tx = db.all('customer_transactions').filter((t) => t.reference_type === 'sale' && String(t.reference_id) === String(s5.id) && t.type === 'sale');
+    eq(tx.length, 1, 'T4b: one customer_transactions sale row');
+    near(tx[0].debit, s5.due_amount, 'T4b: ledger debit = due');
+    eq(tx[0].credit, 0, 'T4b: ledger credit 0');
+    near(tx[0].balance_after, utils.round2(bal0 + s5.due_amount), 'T4b: balance_after correct');
+    near(db.find('customers', cust.id).balance, utils.round2(bal0 + s5.due_amount), 'T4b: customer.balance increased by exactly the due');
+
+    /* ========================= 5. returns (driven through sale-view.html's own component) ========================= */
+    log('=== TEST 5: returns from sale-view.html');
+    const html = await (await fetch('../sale-view.html')).text();
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    const body = scripts.find((s) => /function saleViewPage/.test(s));
+    ok(!!body, 'T5: loaded saleViewPage() from sale-view.html');
+    (0, eval)(body);
+    const mkView = (id) => {
+      history.replaceState(null, '', location.pathname + '?id=' + id);
+      const v = saleViewPage(); v.$watch = () => {}; v.$nextTick = (f) => { if (f) f(); }; v.$refs = {}; v.init(); return v;
+    };
+    // manager can return (cashier lacks sales.return) -> switch role like the app would
+    const mgr = db.all('users').find((u) => u.username === 'manager');
+    session.logout(); session.login(mgr);
+    log('  switched to ' + mgr.name + ' (' + mgr.role + ') branch=' + session.branchId());
+
+    /* 5a. good-condition serialized return (cash refund) */
+    let v = mkView(s2.id);
+    ok(!!v.sale, 'T5a: sale loaded');
+    ok(v.returnable, 'T5a: returnable');
+    v.openReturn();
+    eq(v.ret.lines.length, 2, 'T5a: two returnable lines');
+    const lineP = v.ret.lines.find((l) => l.id === i2p.id);
+    lineP.qty = 1; lineP.condition = 'good';
+    v.ret.method = 'cash'; v.ret.reason = 'Customer changed mind';
+    const pQtyA = stock.qty(BID, phoneUnit.product_id);
+    await v.submitReturn();
+    const r1 = db.all('sale_returns').slice(-1)[0];
+    ok(!!r1 && r1.sale_id === s2.id, 'T5a: sale_returns row written ' + (r1 && r1.return_no));
+    ok(new RegExp('^RET-' + BCODE + '-\\d{6}$').test(r1.return_no), 'T5a: return_no format ' + r1.return_no);
+    eq(db.find('product_imeis', phoneUnit.id).status, 'returned', 'T5a: good unit back as returned');
+    eq(db.find('product_imeis', phoneUnit.id).sale_item_id, null, 'T5a: sale_item_id cleared');
+    eq(stock.qty(BID, phoneUnit.product_id), pQtyA + 1, 'T5a: branch stock +1');
+    eq(db.find('sale_items', i2p.id).returned_quantity, 1, 'T5a: sale_items.returned_quantity = 1');
+    eq(db.find('sales', s2.id).status, 'partially_returned', 'T5a: sale status partially_returned');
+    const svm = db.all('stock_movements').filter((m) => m.reference_type === 'sale_return' && String(m.reference_id) === String(r1.id));
+    eq(svm.length, 1, 'T5a: one sale_return movement');
+    eq(svm[0].movement_type, 'sale_return', 'T5a: movement_type sale_return');
+    eq(svm[0].quantity, 1, 'T5a: movement +1');
+
+    /* 5b. defective serialized return -> no stock increase, status defective */
+    v = mkView(s2.id);
+    v.openReturn();
+    const lineL = v.ret.lines.find((l) => l.id === i2l.id);
+    ok(!!lineL, 'T5b: the laptop line is still returnable');
+    lineL.qty = 1; lineL.condition = 'defective';
+    v.ret.method = 'cash'; v.ret.reason = 'Dead on arrival';
+    const lQtyA = stock.qty(BID, lapUnit.product_id);
+    await v.submitReturn();
+    eq(db.find('product_imeis', lapUnit.id).status, 'defective', 'T5b: defective unit status');
+    eq(stock.qty(BID, lapUnit.product_id), lQtyA, 'T5b: NO stock increase for a defective unit');
+    eq(db.find('sales', s2.id).status, 'returned', 'T5b: sale fully returned -> status returned');
+
+    /* 5c. non-serialized partial return, refund by store credit */
+    log('=== TEST 5c: non-serialized partial return refunded as store credit');
+    session.logout(); session.login(cashier);
+    c = mk();
+    c.setCustomer(cust.id);
+    const acc5 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 3);
+    c.pick(acc5); c.addLine(acc5); c.addLine(acc5); // qty 3
+    c.cart.discount_type = 'percent'; c.cart.discount_value = 10;
+    c.cart.tax_rate = 0;
+    c.openCheckout(); c.setCash(c.totals.total);
+    await c.completeSale();
+    const s6 = db.all('sales').slice(-1)[0];
+    checkBalance(s6, 'T5c');
+    session.logout(); session.login(mgr);
+    const balB = Number(db.find('customers', cust.id).balance) || 0;
+    const accQtyB = stock.qty(BID, acc5.id);
+    v = mkView(s6.id);
+    v.openReturn();
+    eq(v.ret.lines.length, 1, 'T5c: one returnable line');
+    v.ret.lines[0].qty = 1; v.ret.lines[0].condition = 'good';
+    v.ret.method = 'store_credit'; v.ret.reason = 'Wrong item / variant';
+    const refund6 = v.retTotal;
+    near(refund6, utils.round2(s6.total / 3), 'T5c: unit refund keeps the invoice discount (1 of 3 units)');
+    await v.submitReturn();
+    const r3 = db.all('sale_returns').slice(-1)[0];
+    eq(stock.qty(BID, acc5.id), accQtyB + 1, 'T5c: non-serialized good unit restocked +1');
+    eq(db.find('sale_items', db.where('sale_items', { sale_id: s6.id })[0].id).returned_quantity, 1, 'T5c: returned_quantity = 1');
+    eq(db.find('sales', s6.id).status, 'partially_returned', 'T5c: partially_returned');
+    const ctx = db.all('customer_transactions').filter((t) => t.reference_type === 'sale_return' && String(t.reference_id) === String(r3.id));
+    eq(ctx.length, 1, 'T5c: one customer ledger row for the refund');
+    eq(ctx[0].type, 'store_credit', 'T5c: ledger type store_credit');
+    near(ctx[0].credit, refund6, 'T5c: ledger credit = refund');
+    near(db.find('customers', cust.id).balance, utils.round2(balB - refund6), 'T5c: customer balance reduced by the refund');
+
+    /* 5d. defective NON-serialized return must not restock */
+    log('=== TEST 5d: defective non-serialized return');
+    const accQtyC = stock.qty(BID, acc5.id);
+    v = mkView(s6.id);
+    v.openReturn();
+    v.ret.lines[0].qty = 1; v.ret.lines[0].condition = 'defective';
+    v.ret.method = 'cash'; v.ret.reason = 'Defective on arrival';
+    await v.submitReturn();
+    eq(stock.qty(BID, acc5.id), accQtyC, 'T5d: defective non-serialized unit NOT restocked');
+    eq(db.where('sale_items', { sale_id: s6.id })[0].returned_quantity, 2, 'T5d: returned_quantity = 2');
+
+    /* ========================= 6. qty above stock blocked ========================= */
+    log('=== TEST 6: guard rails');
+    session.logout(); session.login(cashier);
+    c = mk();
+    const g = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty > 0 && p.qty < 200);
+    c.pick(g);
+    c.applyQty(c.cart.lines[0], g.qty + 1);
+    eq(c.cart.lines[0].qty, 1, 'T6: qty above stock is rejected');
+    c.applyQty(c.cart.lines[0], g.qty);
+    eq(c.cart.lines[0].qty, g.qty, 'T6: qty equal to stock is allowed');
+    const sold = db.all('product_imeis').find((u) => u.status === 'sold');
+    c.q = sold.imei; c.scanEnter();
+    eq(c.cart.lines.length, 1, 'T6: scanning an already-sold unit adds nothing');
+
+    /* ========================= 7. taxed sale + full return on the ledger ========================= */
+    log('=== TEST 7: taxed credit sale, full return refunded against the ledger');
+    c = mk();
+    c.setCustomer(cust.id);
+    const acc7 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+    c.pick(acc7); c.addLine(acc7);
+    c.cart.tax_rate = 17; c.cart.discount_type = 'fixed'; c.cart.discount_value = 200;
+    c.openCheckout();
+    const t7 = c.totals;
+    near(t7.tax, utils.round2((t7.afterLine - t7.invoiceDisc) * 0.17), 'T7: tax computed on the discounted amount');
+    c.checkout.payments = [{ key: 'a', method: 'cash', amount: 100, reference: '' }];
+    c.checkout.khata = true;
+    await c.completeSale();
+    const s7 = db.all('sales').slice(-1)[0];
+    checkBalance(s7, 'T7');
+    near(s7.tax_amount, t7.tax, 'T7: sale.tax_amount stored');
+    eq(s7.tax_rate, 17, 'T7: sale.tax_rate stored');
+    session.logout(); session.login(mgr);
+    const balC = Number(db.find('customers', cust.id).balance) || 0;
+    v = mkView(s7.id);
+    v.openReturn();
+    v.ret.lines[0].qty = v.ret.lines[0].max;
+    // The refund plan cancels the invoice's due first; the Rs 100 that was paid in cash is refunded the way the
+    // customer chooses. (It used to be method 'ledger' crediting the FULL refund, which silently turned the
+    // cash part into store credit — the fixed bug. Choosing store credit explicitly keeps the same balance.)
+    v.ret.method = 'store_credit'; v.ret.reason = 'Warranty claim';
+    near(v.retTotal, s7.total, 'T7: refunding every unit refunds exactly the invoice total (tax + discount included)');
+    await v.submitReturn();
+    const s7b = db.find('sales', s7.id);
+    eq(s7b.status, 'returned', 'T7: status returned');
+    eq(s7b.due_amount, 0, 'T7: ledger due cleared');
+    near(db.find('customers', cust.id).balance, utils.round2(balC - s7.total), 'T7: customer ledger credited with the full refund');
+
+    /* ========================= 8. paying with store credit ========================= */
+    log('=== TEST 8: POS store-credit payment');
+    session.logout(); session.login(cashier);
+    // give a clean customer real store credit through the ledger service (as a refund would)
+    const cust2 = db.all('customers').find((x) => !x.is_walkin && x.is_active && Number(x.balance) === 0 && x.id !== cust.id);
+    ok(!!cust2, 'T8: found a clean customer: ' + (cust2 && cust2.name));
+    ABM.ledger.customer(cust2.id, BID, 'store_credit', 0, 20000, { notes: 'Goodwill credit (driver fixture)' });
+    const creditNow = ABM.ledger.customerStoreCredit(cust2.id);
+    near(creditNow, 20000, 'T8: store credit visible to the POS');
+    c = mk();
+    c.setCustomer(cust2.id);
+    near(c.storeCredit, 20000, 'T8: POS reads the credit for the selected customer');
+    {
+      const acc8 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 1 && p.retail_price <= creditNow);
+      ok(!!acc8, 'T8: found an item cheaper than the available credit');
+      c.pick(acc8);
+      c.openCheckout();
+      ok(c.methodOptions.some((m) => m.key === 'store_credit'), 'T8: store credit offered as a method');
+      c.checkout.payments = [{ key: 'a', method: 'store_credit', amount: c.totals.total, reference: '' }];
+      eq(c.paymentErrors.length, 0, 'T8: store-credit payment validates (' + JSON.stringify(c.paymentErrors) + ')');
+      const balD = Number(db.find('customers', cust2.id).balance) || 0;
+      await c.completeSale();
+      const s8 = db.all('sales').slice(-1)[0];
+      checkBalance(s8, 'T8');
+      const stx = db.all('customer_transactions').filter((t) => t.reference_type === 'sale' && String(t.reference_id) === String(s8.id) && t.type === 'store_credit');
+      eq(stx.length, 1, 'T8: store_credit ledger row written');
+      near(stx[0].debit, s8.total, 'T8: credit consumed as a debit');
+      near(db.find('customers', cust2.id).balance, utils.round2(balD + s8.total), 'T8: balance moves back toward zero by the amount used');
+      // over-spending the credit must be refused
+      c = mk(); c.setCustomer(cust2.id);
+      const big = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 1);
+      c.pick(big); c.openCheckout();
+      c.checkout.payments = [{ key: 'a', method: 'store_credit', amount: 999999, reference: '' }];
+      ok(c.paymentErrors.some((e) => /Store credit available/.test(e)), 'T8: spending more credit than available is refused');
+    }
+
+    /* ========================= 9. invoice prefix setting ========================= */
+    log('=== TEST 9: invoice_prefix setting is honoured');
+    db.setSetting('invoice_prefix', 'BIL');
+    c = mk();
+    const acc9 = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 1);
+    c.pick(acc9); c.openCheckout(); c.setCash(c.totals.total);
+    await c.completeSale();
+    const s9 = db.all('sales').slice(-1)[0];
+    ok(/^BIL-MB-\d{6}$/.test(s9.invoice_no), 'T9: invoice_no uses the configured prefix (' + s9.invoice_no + ')');
+    db.setSetting('invoice_prefix', 'INV');
+
+    /* ========================= 10. sales.html list: cashier scoping, filters, tiles ========================= */
+    log('=== TEST 10: sales.html component');
+    const shtml = await (await fetch('../sales.html')).text();
+    const sbody = [...shtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => /function salesPage/.test(s));
+    ok(!!sbody, 'T10: loaded salesPage() from sales.html');
+    (0, eval)(sbody);
+    const mkList = (q) => { history.replaceState(null, '', location.pathname + (q || '')); const o = salesPage(); o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {}; o.init(); return o; };
+    session.logout(); session.login(cashier);
+    let lst = mkList('?range=all');
+    const mine = db.all('sales').filter((s) => s.branch_id == BID && String(s.user_id) === String(cashier.id));
+    eq(lst.rows.length, mine.length, 'T10: a cashier only sees their own branch sales');
+    ok(lst.rows.every((r) => String(r.user_id) === String(cashier.id)), 'T10: every listed row belongs to the cashier');
+    near(lst.tiles.revenue, utils.sum(mine.filter((s) => s.status !== 'void'), 'total'), 'T10: revenue tile matches');
+    near(lst.tiles.ledger, utils.sum(mine.filter((s) => s.status !== 'void'), 'due_amount'), 'T10: on-ledger tile matches');
+    const cashRows = lst.rows.filter((r) => r.methods.includes('cash'));
+    lst.f.method = 'cash';
+    eq(lst.filtered.length, cashRows.length, 'T10: cash payment filter works');
+    lst.f.method = 'credit';
+    ok(lst.filtered.every((r) => r.due_amount > 0), 'T10: on-ledger filter keeps only invoices with a due');
+    lst.f.method = 'split';
+    ok(lst.filtered.every((r) => r.split), 'T10: split filter keeps only split payments');
+    lst.f.method = ''; lst.f.status = 'returned';
+    ok(lst.filtered.every((r) => r.status === 'returned'), 'T10: status filter works');
+    lst.clearFilters();
+    lst.q = s1.invoice_no;
+    eq(lst.filtered.length, 1, 'T10: invoice-number search finds exactly one');
+    lst.q = '';
+    // date range
+    lst.range.set('today');
+    ok(lst.rows.every((r) => String(r.sale_date).slice(0, 10) === utils.today() || utils.isoDate(r.sale_date) === utils.today()), 'T10: Today preset only keeps today rows');
+    ok(lst.rows.length >= 1, 'T10: the sales written by this driver show up under Today (' + lst.rows.length + ')');
+    lst.range.set('all');
+    // manager sees the whole branch
+    session.logout(); session.login(mgr);
+    lst = mkList('?range=all');
+    const branchAll = db.all('sales').filter((s) => s.branch_id == BID);
+    eq(lst.rows.length, branchAll.length, 'T10: a manager sees every sale of the branch');
+    ok(lst.selfLink({ method: 'cash' }).indexOf('method=cash') > 0, 'T10: tile link carries the filter');
+
+    /* ========================= 11. invoice.html document totals foot ========================= */
+    log('=== TEST 11: invoice.html document totals');
+    const ihtml = await (await fetch('../invoice.html')).text();
+    const ibody = [...ihtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => /function invoicePage/.test(s));
+    ok(!!ibody, 'T11: loaded invoicePage() from invoice.html');
+    (0, eval)(ibody);
+    const mkDoc = (q) => { history.replaceState(null, '', location.pathname + q); const o = invoicePage(); o.$watch = () => {}; o.$nextTick = (f) => { if (f) f(); }; o.$refs = {}; o.init(); return o; };
+    // Ring up a sale that carries BOTH a line discount and an invoice discount, so the document
+    // fixture never depends on what the random demo seed happens to produce.
+    session.logout(); session.login(cashier);
+    const cd = mk();
+    const accD = cd.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+    ok(!!accD, 'T11: found an accessory to discount');
+    cd.pick(accD); cd.addLine(accD);                                   // qty 2
+    const ld = cd.cart.lines[0];
+    const room = utils.round2((Number(ld.unit_price) - Number(ld.min_sale_price || 0)) * Number(ld.qty));
+    ld.discount = Math.max(1, Math.min(50, room > 2 ? room - 1 : 1));
+    cd.cart.discount_type = 'percent'; cd.cart.discount_value = 5; cd.cart.tax_rate = 0;
+    cd.openCheckout(); cd.setCash(cd.totals.total);
+    await cd.completeSale();
+    session.logout(); session.login(db.all('users').find((u) => u.username === 'admin'));
+    const withDisc = db.all('sales').slice().reverse().find((s) => s.branch_id == BID && s.status !== 'void' && utils.sum(db.where('sale_items', { sale_id: s.id }), 'discount_amount') > 0 && Number(s.discount_amount) > utils.sum(db.where('sale_items', { sale_id: s.id }), 'discount_amount'));
+    ok(!!withDisc, 'T11: found a sale with line AND invoice discounts: ' + (withDisc && withDisc.invoice_no));
+    const dv = mkDoc('?id=' + withDisc.id + '&layout=a4');
+    ok(!!dv.doc, 'T11: document built');
+    near(utils.sum(dv.doc.lines, 'gross'), dv.doc.subtotal, 'T11: sum(line gross) = subtotal');
+    near(utils.round2(dv.doc.subtotal - dv.doc.discount + dv.doc.taxAmount), dv.doc.total, 'T11: subtotal - discount + tax = grand total');
+    near(utils.sum(dv.doc.lines, 'discount'), dv.doc.lineDiscount, 'T11: doc.lineDiscount = sum of line discounts');
+    near(utils.round2(dv.doc.lineDiscount + dv.doc.invoiceDiscount), dv.doc.discount, 'T11: line + invoice discount = total discount');
+    ok(dv.doc.lineDiscount > 0 && dv.doc.invoiceDiscount > 0, 'T11: both discount kinds present on this fixture');
+    // amount column must foot to the subtotal
+    near(utils.sum(dv.doc.lines, 'amountShown'), dv.doc.subtotal, 'T11: the printed Amount column foots to Subtotal');
+    // repair document
+    const job = db.all('repair_jobs').find((j) => j.branch_id == BID && j.status === 'delivered');
+    const dj = mkDoc('?job=' + job.id + '&layout=a4');
+    ok(!!dj.doc && dj.doc.kind === 'repair', 'T11: repair job document built (' + job.job_no + ')');
+    near(utils.round2(dj.doc.subtotal - dj.doc.discount), dj.doc.total, 'T11: repair subtotal - discount = total');
+    // a missing invoice must not throw
+    const dmiss = mkDoc('?id=99999');
+    eq(dmiss.doc, null, 'T11: unknown invoice id yields the not-found state, no throw');
+
+    /* ========================= 12. returns.html list ========================= */
+    log('=== TEST 12: returns.html component');
+    const rhtml = await (await fetch('../returns.html')).text();
+    const rbody = [...rhtml.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).find((s) => /function returnsPage/.test(s));
+    ok(!!rbody, 'T12: loaded returnsPage() from returns.html');
+    (0, eval)(rbody);
+    session.logout(); session.login(mgr);
+    history.replaceState(null, '', location.pathname + '?range=all');
+    const rl = returnsPage(); rl.$watch = () => {}; rl.$nextTick = (f) => { if (f) f(); }; rl.$refs = {}; rl.init();
+    const allRets = db.all('sale_returns').filter((x) => x.branch_id == BID);
+    eq(rl.rows.length, allRets.length, 'T12: every branch return listed');
+    near(rl.tiles.refund, utils.sum(allRets, 'refund_amount'), 'T12: refunded tile matches');
+    ok(rl.tiles.defective >= 2, 'T12: defective units counted (' + rl.tiles.defective + ')');
+    rl.f.condition = 'defective';
+    ok(rl.filtered.length > 0 && rl.filtered.every((r) => r.lines.some((l) => l.condition === 'defective')), 'T12: defective filter works');
+    rl.f.condition = ''; rl.f.method = 'store_credit';
+    ok(rl.filtered.every((r) => r.refund_method === 'store_credit'), 'T12: refund-method filter works');
+    rl.clearFilters();
+    ok(rl.openSales.length > 0 && rl.openSales.every((s) => s.returnable > 0), 'T12: the New-return picker only lists invoices with returnable units');
+
+    /* ========================= 13. POS barcode scan, hold/recall, price floor ========================= */
+    log('=== TEST 13: barcode scan, hold/recall, minimum sale price');
+    session.logout(); session.login(cashier);
+    c = mk();
+    const bc = c.products.find((p) => p.barcode && p.tracked && !p.serialized && p.qty > 0);
+    c.q = String(bc.barcode); c.scanEnter();
+    eq(c.cart.lines.length, 1, 'T13: barcode scan adds the product');
+    eq(c.cart.lines[0].product_id, bc.id, 'T13: the right product was added');
+    eq(c.q, '', 'T13: the scan box is cleared after a hit');
+    // hold, then recall
+    const heldUnit = db.all('product_imeis').find((u) => u.branch_id == BID && u.status === 'available');
+    c.addUnit(heldUnit);
+    eq(c.cart.lines.length, 2, 'T13: unit added before holding');
+    c.holdCart();
+    eq(c.cart.lines.length, 0, 'T13: cart cleared after Hold');
+    eq(c.held.length, 1, 'T13: one held cart stored');
+    await c.recall(c.held[0]);
+    eq(c.cart.lines.length, 2, 'T13: both lines come back on recall');
+    eq(c.held.length, 0, 'T13: the held cart is consumed');
+    // sell the unit on another terminal instance, then recall a stale held cart
+    c.holdCart();
+    const c2 = mk();
+    c2.addUnit(heldUnit); c2.openCheckout(); c2.setCash(c2.totals.total);
+    await c2.completeSale();
+    const c3 = mk();
+    ok(c3.held.length === 1, 'T13: the held cart survives a page reload');
+    await c3.recall(c3.held[0]);
+    ok(!c3.cart.lines.some((l) => l.imei_id === heldUnit.id), 'T13: a unit sold meanwhile is dropped from the recalled cart');
+    eq(c3.cart.lines.length, 1, 'T13: the still-available line is kept');
+    // minimum sale price: a cashier may not go below it
+    c = mk();
+    const floorP = c.products.find((p) => p.min_sale_price > 0 && p.tracked && !p.serialized && p.qty > 0);
+    ok(!!floorP, 'T13: found a product with a minimum sale price (' + (floorP && floorP.min_sale_price) + ')');
+    c.pick(floorP);
+    const lf = c.cart.lines[0];
+    await c.setPrice(lf, { value: String(Math.max(1, floorP.min_sale_price - 100)) });
+    near(lf.unit_price, floorP.retail_price, 'T13: a cashier cannot price below the minimum (price reverted)');
+    ok(c.validateCart().length === 0, 'T13: cart still valid after the rejected price');
+
+    /* ========================= 14. void restores stock and reverses the ledger ========================= */
+    log('=== TEST 14: void a same-day invoice');
+    session.logout(); session.login(mgr);   // a manager may approve credit beyond the limit
+    c = mk();
+    c.setCustomer(cust.id);
+    const vUnit = db.all('product_imeis').find((u) => u.branch_id == BID && u.status === 'available');
+    const vAcc = c.products.find((p) => p.type === 'accessory' && p.tracked && !p.serialized && p.qty >= 2);
+    c.addUnit(vUnit); c.pick(vAcc); c.addLine(vAcc);
+    c.openCheckout();
+    c.checkout.payments = [{ key: 'a', method: 'cash', amount: 500, reference: '' }];
+    c.checkout.khata = true;
+    const salesBefore = db.all('sales').length;
+    await c.completeSale();
+    eq(db.all('sales').length, salesBefore + 1, 'T14: the credit sale was actually written');
+    const sv = db.all('sales').slice(-1)[0];
+    eq(db.find('product_imeis', vUnit.id).status, 'sold', 'T14: the unit is sold before the void');
+    const vQty0 = stock.qty(BID, vAcc.id), vBal0 = Number(db.find('customers', cust.id).balance) || 0;
+    session.logout(); session.login(mgr);
+    v = mkView(sv.id);
+    ok(v.voidable, 'T14: a same-day invoice with no returns is voidable');
+    v.openVoid(); v.vd.reason = 'Entered by mistake';
+    await v.submitVoid();
+    eq(db.find('sales', sv.id).status, 'void', 'T14: status void');
+    eq(db.find('product_imeis', vUnit.id).status, 'returned', 'T14: serialized unit back in stock');
+    eq(stock.qty(BID, vAcc.id), vQty0 + 2, 'T14: accessory quantity restored');
+    near(db.find('customers', cust.id).balance, utils.round2(vBal0 - sv.due_amount), 'T14: credit sale reversed on the ledger');
+    v = mkView(sv.id);
+    ok(!v.returnable, 'T14: a voided invoice can no longer be returned');
+  } catch (e) {
+    fails++;
+    console.log('DRIVE FAIL exception: ' + (e && e.stack || e));
+    L.push('EXCEPTION ' + (e && e.message));
+  }
+  const verdict = 'RESULT: ' + (fails ? 'FAIL (' + fails + ')' : 'PASS');
+  console.log('DRIVE ' + verdict);
+  console.log(verdict);
+  document.getElementById('out').textContent = L.join('\n') + '\n' + verdict;
+})();
+</script>
+</body>
+</html>
+
